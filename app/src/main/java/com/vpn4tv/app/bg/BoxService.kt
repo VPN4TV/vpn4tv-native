@@ -48,6 +48,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         private const val PROFILE_UPDATE_INTERVAL = 15L * 60 * 1000 // 15 minutes in milliseconds
         private const val TAG = "BoxService"
         val globalStatus = MutableLiveData(Status.Stopped)
+        val lastError = MutableLiveData<String?>(null)
 
         fun start() {
             val intent =
@@ -168,6 +169,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 Log.d(TAG, "startOrReloadService completed successfully")
             } catch (e: Exception) {
                 Log.e(TAG, "startOrReloadService FAILED: ${e.message}", e)
+                lastError.postValue("startService: ${e.message}")
                 stopAndAlert(Alert.CreateService, e.message)
                 return
             }
@@ -188,6 +190,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // Restore saved server selection
             restoreSavedServer()
 
+            lastError.postValue(null)
             status.postValue(Status.Started)
 
             // Run URLTest immediately so delays are available in UI
@@ -342,6 +345,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     }
 
     private suspend fun stopAndAlert(type: Alert, message: String? = null) {
+        Log.e(TAG, "stopAndAlert: ${type.name} — $message")
+        lastError.postValue("${type.name}: ${message ?: "unknown"}")
         Settings.startedByUser = false
         val pfd = fileDescriptor
         if (pfd != null) {

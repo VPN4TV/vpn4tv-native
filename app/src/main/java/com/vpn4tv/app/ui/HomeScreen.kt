@@ -45,6 +45,7 @@ fun HomeScreen(
     onNavigateAbout: () -> Unit = {},
 ) {
     val status by BoxService.globalStatus.observeAsState(Status.Stopped)
+    val lastError by BoxService.lastError.observeAsState(null)
     val ready by MainActivity.profileReady.observeAsState(false)
     val connectFocus = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
@@ -231,6 +232,18 @@ fun HomeScreen(
                     else -> Color.Gray
                 }
             )
+
+            // Show last error if VPN failed to start
+            if (status == Status.Stopped && lastError != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    lastError ?: "",
+                    fontSize = 12.sp,
+                    color = Color.Red,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+            }
 
             Spacer(modifier = Modifier.height(32.dp))
 
