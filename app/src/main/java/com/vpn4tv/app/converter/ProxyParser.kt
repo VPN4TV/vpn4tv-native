@@ -426,6 +426,7 @@ object ProxyParser {
             }
             "xhttp", "splithttp" -> {
                 val xhttp = stream.optJSONObject("xhttpSettings")
+                    ?: stream.optJSONObject("xHTTPSettings")
                     ?: stream.optJSONObject("splithttpSettings") ?: return
                 obj.put("transport", JSONObject().apply {
                     put("type", "xhttp")
