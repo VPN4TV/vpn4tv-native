@@ -115,7 +115,10 @@ fun HomeScreen(
     }
 
     LaunchedEffect(ready) {
-        if (ready) connectFocus.requestFocus()
+        if (ready) {
+            kotlinx.coroutines.delay(300) // wait for compose tree
+            try { connectFocus.requestFocus() } catch (_: Exception) {}
+        }
     }
 
     Column(

@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.*
 import androidx.lifecycle.MutableLiveData
+import com.vpn4tv.app.R
 import com.vpn4tv.app.bg.BoxService
 import com.vpn4tv.app.converter.ConfigGenerator
 import com.vpn4tv.app.converter.ProxyParser
@@ -36,7 +37,7 @@ class MainActivity : ComponentActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             BoxService.start()
         } else {
-            Toast.makeText(this, "VPN permission denied", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.error_vpn_denied), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -61,7 +62,7 @@ class MainActivity : ComponentActivity() {
 
     private fun connect() {
         if (profileReady.value != true || Settings.selectedProfile == -1L) {
-            Toast.makeText(this, "No subscription configured", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.error_no_subscription), Toast.LENGTH_SHORT).show()
             return
         }
         val intent = VpnService.prepare(this)

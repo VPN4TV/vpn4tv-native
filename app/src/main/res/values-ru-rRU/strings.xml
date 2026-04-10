@@ -593,4 +593,7 @@
     <string name="about_telegram">Telegram-канал:</string>
     <string name="back">Назад</string>
     <string name="selected">Выбрано</string>
+    <string name="default_profile_name">Подписка</string>
+    <string name="no_proxies_found">Не найдены прокси-серверы</string>
+    <string name="icon_add">Добавить</string>
 </resources>

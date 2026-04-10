@@ -129,7 +129,7 @@ fun ProfilesScreen(onBack: () -> Unit, onAddViaTelegram: () -> Unit = {}) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                Icon(Icons.Default.Add, "Add", modifier = Modifier.size(24.dp))
+                Icon(Icons.Default.Add, stringResource(R.string.icon_add), modifier = Modifier.size(24.dp))
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(stringResource(R.string.action_add_telegram), fontSize = 18.sp)
             }
@@ -188,10 +188,10 @@ private fun ProfileItem(
             }
 
             IconButton(onClick = onUpdate) {
-                Icon(Icons.Default.Refresh, "Update", tint = Color.White)
+                Icon(Icons.Default.Refresh, stringResource(R.string.action_update_subscription), tint = Color.White)
             }
             IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, "Delete", tint = Color.Red.copy(alpha = 0.7f))
+                Icon(Icons.Default.Delete, stringResource(R.string.action_clear), tint = Color.Red.copy(alpha = 0.7f))
             }
         }
     }

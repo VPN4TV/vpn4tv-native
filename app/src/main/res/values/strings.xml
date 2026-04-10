@@ -568,6 +568,9 @@
     <string name="about_telegram">Telegram channel:</string>
     <string name="back">Back</string>
     <string name="selected">Selected</string>
+    <string name="default_profile_name">Subscription</string>
+    <string name="no_proxies_found">No valid proxies found</string>
+    <string name="icon_add">Add</string>
 
     <!-- VPN4TV UI strings -->
     <string name="status_loading">Loading…</string>

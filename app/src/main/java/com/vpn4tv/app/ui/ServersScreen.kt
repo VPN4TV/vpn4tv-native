@@ -123,14 +123,6 @@ fun ServersScreen(onBack: () -> Unit) {
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 groups.forEach { group ->
-                    item {
-                        Text(
-                            "${group.tag} (${group.type})",
-                            fontSize = 20.sp,
-                            color = Color.White,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    }
                     items(group.items, key = { "${group.tag}_${it.tag}" }) { server ->
                         ServerCard(
                             server = server,
