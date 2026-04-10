@@ -9,6 +9,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,7 +26,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun LogsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val logs = remember { mutableStateListOf<String>() }
+    var logs by remember { mutableStateOf(listOf<String>()) }
     val listState = rememberLazyListState()
 
     val commandClient = remember {
@@ -33,9 +35,9 @@ fun LogsScreen(onBack: () -> Unit) {
             listOf(CommandClient.ConnectionType.Log),
             object : CommandClient.Handler {
                 override fun appendLogs(messages: List<String>) {
-                    logs.addAll(messages)
-                    // Keep max 500 lines
-                    while (logs.size > 500) logs.removeAt(0)
+                    // Replace entire list atomically to avoid IndexOutOfBounds
+                    val updated = (logs + messages).takeLast(500)
+                    logs = updated
                 }
             }
         )
@@ -67,7 +69,7 @@ fun LogsScreen(onBack: () -> Unit) {
                 color = Color.White,
                 modifier = Modifier.weight(1f).padding(start = 16.dp)
             )
-            IconButton(onClick = { logs.clear() }) {
+            IconButton(onClick = { logs = emptyList() }) {
                 Icon(Icons.Default.Delete, stringResource(R.string.action_clear), tint = Color.White)
             }
         }
