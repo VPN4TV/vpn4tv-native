@@ -270,43 +270,63 @@ private suspend fun processConfigs(
     onError: ((String) -> Unit)? = null,
 ): Boolean {
     return try {
-        for (configUrl in configs) {
-            val subContent = com.vpn4tv.app.converter.HwidService.downloadSubscription(context, configUrl)
-            val proxies = ProxyParser.parseSubscription(subContent)
-            if (proxies.isEmpty()) continue
+        // Configs can be URLs (https://...) or direct proxy links (vless://...)
+        // Collect all proxy content
+        val allContent = StringBuilder()
+        var remoteUrl = ""
 
-            val profilesDir = File(context.filesDir, "profiles")
-            profilesDir.mkdirs()
-            val nextId = ProfileManager.nextFileID()
-            val configPath = File(profilesDir, "${nextId}.json").absolutePath
-
-            val singboxConfig = ConfigGenerator.generate(proxies)
-            File(configPath).writeText(singboxConfig)
-
-            // Extract name from subscription headers
-            val profileName = subContent.lines()
-                .firstOrNull { it.startsWith("#profile-title:") }
-                ?.substringAfter("#profile-title:")?.trim()
-                ?: userName
-                ?: "Subscription"
-
-            val profile = ProfileManager.create(
-                Profile(name = profileName, userOrder = ProfileManager.nextOrder()).apply {
-                    typed.type = TypedProfile.Type.Remote
-                    typed.remoteURL = configUrl
-                    typed.path = configPath
-                    typed.autoUpdate = true
-                    typed.autoUpdateInterval = 60
-                    typed.lastUpdated = java.util.Date()
-                }
-            )
-
-            if (Settings.selectedProfile == -1L) {
-                Settings.selectedProfile = profile.id
+        for (config in configs) {
+            val trimmed = config.trim()
+            if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                // It's a subscription URL — download it
+                val subContent = com.vpn4tv.app.converter.HwidService.downloadSubscription(context, trimmed)
+                allContent.appendLine(subContent)
+                if (remoteUrl.isEmpty()) remoteUrl = trimmed
+            } else {
+                // Direct proxy link (vless://, ss://, etc.) or config
+                allContent.appendLine(trimmed)
             }
-
-            Log.d("AddProfile", "Added ${profile.name}: ${proxies.size} proxies from $configUrl")
         }
+
+        val content = allContent.toString().trim()
+        if (content.isEmpty()) return false
+
+        val proxies = ProxyParser.parseSubscription(content)
+        if (proxies.isEmpty()) {
+            onError?.invoke("No valid proxies found")
+            return false
+        }
+
+        val profilesDir = File(context.filesDir, "profiles")
+        profilesDir.mkdirs()
+        val nextId = ProfileManager.nextFileID()
+        val configPath = File(profilesDir, "${nextId}.json").absolutePath
+
+        val singboxConfig = ConfigGenerator.generate(proxies)
+        File(configPath).writeText(singboxConfig)
+
+        val profileName = content.lines()
+            .firstOrNull { it.startsWith("#profile-title:") }
+            ?.substringAfter("#profile-title:")?.trim()
+            ?: userName
+            ?: "Subscription"
+
+        val profile = ProfileManager.create(
+            Profile(name = profileName, userOrder = ProfileManager.nextOrder()).apply {
+                typed.type = if (remoteUrl.isNotEmpty()) TypedProfile.Type.Remote else TypedProfile.Type.Local
+                typed.remoteURL = remoteUrl
+                typed.path = configPath
+                typed.autoUpdate = remoteUrl.isNotEmpty()
+                typed.autoUpdateInterval = 60
+                typed.lastUpdated = java.util.Date()
+            }
+        )
+
+        if (Settings.selectedProfile == -1L) {
+            Settings.selectedProfile = profile.id
+        }
+
+        Log.d("AddProfile", "Added ${profile.name}: ${proxies.size} proxies")
         true
     } catch (e: Exception) {
         Log.e("AddProfile", "Failed to process configs", e)
