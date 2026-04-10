@@ -17,6 +17,20 @@ object ConfigGenerator {
             return proxies[0].outbound.toString(2)
         }
 
+        // Deduplicate tags — sing-box requires unique outbound tags
+        val seenTags = mutableSetOf<String>()
+        for (proxy in proxies) {
+            val origTag = proxy.outbound.optString("tag", proxy.tag)
+            var tag = origTag
+            if (tag in seenTags) {
+                var i = 2
+                while ("${origTag}_$i" in seenTags) i++
+                tag = "${origTag}_$i"
+                proxy.outbound.put("tag", tag)
+            }
+            seenTags.add(tag)
+        }
+
         val config = JSONObject()
 
         // Log
@@ -87,7 +101,7 @@ object ConfigGenerator {
                 put("type", "urltest")
                 put("tag", "auto")
                 put("outbounds", JSONArray().apply {
-                    proxies.forEach { put(it.tag) }
+                    proxies.forEach { put(it.outbound.optString("tag", it.tag)) }
                 })
                 put("url", "https://cp.cloudflare.com/")
                 put("interval", "5m")
@@ -100,7 +114,7 @@ object ConfigGenerator {
                 put("tag", "select")
                 put("outbounds", JSONArray().apply {
                     put("auto")
-                    proxies.forEach { put(it.tag) }
+                    proxies.forEach { put(it.outbound.optString("tag", it.tag)) }
                 })
                 put("default", "auto")
             })
