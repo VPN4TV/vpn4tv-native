@@ -65,8 +65,16 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
         "com.google.android.youtube.tv",
         "com.google.android.youtube.tvmusic",
     )
-    val filteredApps = if (showSystem) apps
-        else apps.filter { !it.isSystem || it.packageName in alwaysShowPackages }
+    val filteredApps = remember(apps, showSystem, selectedApps) {
+        val visible = if (showSystem) apps
+            else apps.filter { !it.isSystem || it.packageName in alwaysShowPackages }
+
+        visible.sortedWith(
+            compareBy<AppEntry> { it.packageName !in selectedApps }  // selected first
+                .thenBy { it.packageName !in alwaysShowPackages }     // YouTube first in each group
+                .thenBy { it.label.lowercase() }                      // then alphabetical
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
         // Header
