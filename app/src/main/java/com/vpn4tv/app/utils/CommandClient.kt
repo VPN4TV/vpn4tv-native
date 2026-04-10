@@ -132,7 +132,10 @@ open class CommandClient(
             val logs = mutableListOf<String>()
             while (messageList.hasNext()) {
                 val entry = messageList.next()
-                logs.add(entry.message ?: "")
+                var msg = entry.message ?: ""
+                // Strip ANSI color codes
+                msg = msg.replace(Regex("\u001B\\[[0-9;]*m"), "")
+                logs.add(msg)
             }
             if (logs.isNotEmpty()) {
                 getAllHandlers().forEach { it.appendLogs(logs) }
