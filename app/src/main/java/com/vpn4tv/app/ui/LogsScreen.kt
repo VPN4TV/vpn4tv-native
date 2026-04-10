@@ -102,15 +102,21 @@ fun LogsScreen(onBack: () -> Unit) {
         ) {
             LogLevel.entries.forEach { level ->
                 val selected = filterLevel == level
-                FilterChip(
-                    selected = selected,
-                    onClick = { filterLevel = level },
-                    label = { Text(level.label, fontSize = 13.sp) },
-                    modifier = Modifier.focusable(),
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                val bgColor = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                    else MaterialTheme.colorScheme.surfaceVariant
+                Card(
+                    modifier = Modifier
+                        .clickable { filterLevel = level }
+                        .focusable(),
+                    colors = CardDefaults.cardColors(containerColor = bgColor)
+                ) {
+                    Text(
+                        level.label,
+                        fontSize = 14.sp,
+                        color = if (selected) MaterialTheme.colorScheme.primary else Color.White,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                     )
-                )
+                }
             }
         }
 
