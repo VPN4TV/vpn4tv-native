@@ -591,6 +591,8 @@
     <string name="action_clear">Очистить</string>
     <string name="about_license">GPLv3 • На базе sing-box от SagerNet</string>
     <string name="about_telegram">Telegram-канал:</string>
+    <string name="setting_auto_connect">Автоподключение при загрузке</string>
+    <string name="setting_auto_connect_desc">Восстанавливать VPN при включении устройства</string>
     <string name="update_available">Доступно обновление</string>
     <string name="session_traffic">Сессия</string>
     <string name="back">Назад</string>

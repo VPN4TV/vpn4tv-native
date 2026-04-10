@@ -13,7 +13,7 @@ class BootReceiver : BroadcastReceiver() {
 
         Log.d("BootReceiver", "Boot/update: startedByUser=${Settings.startedByUser}")
 
-        if (Settings.startedByUser) {
+        if (Settings.autoConnectOnBoot && Settings.startedByUser) {
             BoxService.start()
         }
     }
