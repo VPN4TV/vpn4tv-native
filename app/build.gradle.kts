@@ -27,12 +27,12 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.vpn4tv.app"
+        applicationId = "com.vpn4tv.hiddify"
         minSdk = 23
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
-        base.archivesName.set("VPN4TV-${versionName}")
+        versionCode = 50000
+        versionName = "5.0.0"
+        base.archivesName.set("VPN4TV-Native-${versionName}")
     }
 
     signingConfigs {
