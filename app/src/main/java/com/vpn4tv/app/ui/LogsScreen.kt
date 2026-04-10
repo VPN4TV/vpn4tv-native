@@ -1,5 +1,7 @@
 package com.vpn4tv.app.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,11 +25,31 @@ import com.vpn4tv.app.utils.CommandClient
 import io.nekohasekai.libbox.OutboundGroup
 import kotlinx.coroutines.launch
 
+private enum class LogLevel(val label: String, val priority: Int) {
+    ALL("All", 0),
+    INFO("Info+", 1),
+    WARN("Warn+", 2),
+    ERROR("Error", 3);
+}
+
+private fun logLineLevel(line: String): Int = when {
+    line.contains("ERROR") || line.contains("FATAL") -> 3
+    line.contains("WARN") -> 2
+    line.contains("INFO") -> 1
+    else -> 0 // DEBUG, TRACE
+}
+
 @Composable
 fun LogsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var logs by remember { mutableStateOf(listOf<String>()) }
+    var allLogs by remember { mutableStateOf(listOf<String>()) }
+    var filterLevel by remember { mutableStateOf(LogLevel.ALL) }
     val listState = rememberLazyListState()
+
+    val filteredLogs = remember(allLogs, filterLevel) {
+        if (filterLevel == LogLevel.ALL) allLogs
+        else allLogs.filter { logLineLevel(it) >= filterLevel.priority }
+    }
 
     val commandClient = remember {
         CommandClient(
@@ -35,18 +57,16 @@ fun LogsScreen(onBack: () -> Unit) {
             listOf(CommandClient.ConnectionType.Log),
             object : CommandClient.Handler {
                 override fun appendLogs(messages: List<String>) {
-                    // Replace entire list atomically to avoid IndexOutOfBounds
-                    val updated = (logs + messages).takeLast(500)
-                    logs = updated
+                    val updated = (allLogs + messages).takeLast(500)
+                    allLogs = updated
                 }
             }
         )
     }
 
-    // Auto-scroll to bottom when new logs arrive
-    LaunchedEffect(logs.size) {
-        if (logs.isNotEmpty()) {
-            listState.animateScrollToItem(logs.size - 1)
+    LaunchedEffect(filteredLogs.size) {
+        if (filteredLogs.isNotEmpty()) {
+            listState.animateScrollToItem(filteredLogs.size - 1)
         }
     }
 
@@ -56,6 +76,7 @@ fun LogsScreen(onBack: () -> Unit) {
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
+        // Header
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
@@ -69,14 +90,33 @@ fun LogsScreen(onBack: () -> Unit) {
                 color = Color.White,
                 modifier = Modifier.weight(1f).padding(start = 16.dp)
             )
-            IconButton(onClick = { logs = emptyList() }) {
+            IconButton(onClick = { allLogs = emptyList() }) {
                 Icon(Icons.Default.Delete, stringResource(R.string.action_clear), tint = Color.White)
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        // Filter chips
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            LogLevel.entries.forEach { level ->
+                val selected = filterLevel == level
+                FilterChip(
+                    selected = selected,
+                    onClick = { filterLevel = level },
+                    label = { Text(level.label, fontSize = 13.sp) },
+                    modifier = Modifier.focusable(),
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                    )
+                )
+            }
+        }
 
-        if (logs.isEmpty()) {
+        Spacer(modifier = Modifier.height(4.dp))
+
+        if (filteredLogs.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(stringResource(R.string.logs_empty), color = Color.Gray, fontSize = 16.sp)
             }
@@ -85,7 +125,7 @@ fun LogsScreen(onBack: () -> Unit) {
                 state = listState,
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(logs) { line ->
+                items(filteredLogs) { line ->
                     val color = when {
                         line.contains("ERROR") || line.contains("FATAL") -> Color(0xFFEF5350)
                         line.contains("WARN") -> Color(0xFFFFA726)
