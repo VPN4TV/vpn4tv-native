@@ -64,7 +64,8 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
                             isAdding = true
                             status = "adding"
                             scope.launch(Dispatchers.IO) {
-                                val added = processConfigs(context, configs, userName)
+                                var errorMsg = ""
+                                val added = processConfigs(context, configs, userName) { errorMsg = it }
                                 withContext(Dispatchers.Main) {
                                     if (added) {
                                         isDone = true
@@ -73,7 +74,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
                                         onProfileAdded()
                                     } else {
                                         isAdding = false
-                                        status = "failed"
+                                        status = if (errorMsg.isNotEmpty()) "error:$errorMsg" else "failed"
                                     }
                                 }
                             }
@@ -204,11 +205,12 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
             CircularProgressIndicator(modifier = Modifier.size(32.dp))
             Spacer(modifier = Modifier.height(8.dp))
         }
-        val statusText = when (status) {
-            "" -> stringResource(R.string.add_waiting)
-            "adding" -> stringResource(R.string.add_adding)
-            "done" -> stringResource(R.string.add_success)
-            "failed" -> stringResource(R.string.add_failed)
+        val statusText = when {
+            status == "" -> stringResource(R.string.add_waiting)
+            status == "adding" -> stringResource(R.string.add_adding)
+            status == "done" -> stringResource(R.string.add_success)
+            status == "failed" -> stringResource(R.string.add_failed)
+            status.startsWith("error:") -> status.removePrefix("error:")
             else -> status // user name from Telegram
         }
         Text(
@@ -216,6 +218,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
             fontSize = 16.sp,
             color = when {
                 isDone -> Color.Green
+                status.startsWith("error:") || status == "failed" -> Color.Red
                 userName != null -> MaterialTheme.colorScheme.primary
                 else -> Color.Gray
             },
@@ -264,6 +267,7 @@ private suspend fun processConfigs(
     context: android.content.Context,
     configs: List<String>,
     userName: String?,
+    onError: ((String) -> Unit)? = null,
 ): Boolean {
     return try {
         for (configUrl in configs) {
@@ -306,6 +310,7 @@ private suspend fun processConfigs(
         true
     } catch (e: Exception) {
         Log.e("AddProfile", "Failed to process configs", e)
+        onError?.invoke("${e.javaClass.simpleName}: ${e.message}")
         false
     }
 }
