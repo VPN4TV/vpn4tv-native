@@ -17,7 +17,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
+import com.vpn4tv.app.R
 import com.vpn4tv.app.bg.BoxService
 import com.vpn4tv.app.constant.Status
 import com.vpn4tv.app.utils.CommandClient
@@ -176,7 +178,7 @@ fun HomeScreen(
                             } else {
                                 Icon(
                                     Icons.Default.Refresh,
-                                    "Update subscription",
+                                    stringResource(R.string.action_update_subscription),
                                     tint = Color.Gray,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -187,10 +189,10 @@ fun HomeScreen(
             }
             Row {
                 IconButton(onClick = onNavigateServers) {
-                    Icon(Icons.Default.List, "Servers", tint = Color.White)
+                    Icon(Icons.Default.List, stringResource(R.string.nav_servers), tint = Color.White)
                 }
                 IconButton(onClick = onNavigateProfiles) {
-                    Icon(Icons.Default.Settings, "Profiles", tint = Color.White)
+                    Icon(Icons.Default.Settings, stringResource(R.string.nav_profiles), tint = Color.White)
                 }
             }
         }
@@ -204,11 +206,11 @@ fun HomeScreen(
             // Status indicator
             Text(
                 text = when {
-                    !ready -> "Loading..."
-                    status == Status.Started -> "Connected"
-                    status == Status.Starting -> "Connecting..."
-                    status == Status.Stopping -> "Disconnecting..."
-                    else -> "Disconnected"
+                    !ready -> stringResource(R.string.status_loading)
+                    status == Status.Started -> stringResource(R.string.status_connected)
+                    status == Status.Starting -> stringResource(R.string.status_connecting)
+                    status == Status.Stopping -> stringResource(R.string.status_disconnecting)
+                    else -> stringResource(R.string.status_disconnected)
                 },
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
@@ -245,11 +247,11 @@ fun HomeScreen(
             ) {
                 Text(
                     text = when {
-                        !ready -> "Loading..."
-                        status == Status.Stopped -> "Connect"
-                        status == Status.Started -> "Disconnect"
-                        status == Status.Starting -> "Connecting..."
-                        status == Status.Stopping -> "Disconnecting..."
+                        !ready -> stringResource(R.string.status_loading)
+                        status == Status.Stopped -> stringResource(R.string.action_connect)
+                        status == Status.Started -> stringResource(R.string.action_disconnect)
+                        status == Status.Starting -> stringResource(R.string.status_connecting)
+                        status == Status.Stopping -> stringResource(R.string.status_disconnecting)
                         else -> ""
                     },
                     fontSize = 24.sp
@@ -272,7 +274,7 @@ fun HomeScreen(
                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Server: ", fontSize = 16.sp, color = Color.Gray)
+                        Text(stringResource(R.string.label_server), fontSize = 16.sp, color = Color.Gray)
                         Text(
                             activeServer ?: "",
                             fontSize = 16.sp,
@@ -298,13 +300,13 @@ fun HomeScreen(
                 }
             } else if (ready && AppSettings.selectedProfile != -1L && status == Status.Stopped) {
                 TextButton(onClick = onNavigateServers) {
-                    Text("Servers →", color = Color.Gray, fontSize = 16.sp)
+                    Text(stringResource(R.string.link_servers), color = Color.Gray, fontSize = 16.sp)
                 }
             }
 
             if (!ready || AppSettings.selectedProfile == -1L) {
                 TextButton(onClick = onAddProfile) {
-                    Text("Add subscription via Telegram →", color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
+                    Text(stringResource(R.string.link_add_telegram), color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
                 }
             }
         }

@@ -22,7 +22,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
+import com.vpn4tv.app.R
 import com.vpn4tv.app.converter.ConfigGenerator
 import com.vpn4tv.app.converter.ProxyParser
 import com.vpn4tv.app.database.Profile
@@ -62,10 +64,10 @@ fun ProfilesScreen(onBack: () -> Unit, onAddViaTelegram: () -> Unit = {}) {
             modifier = Modifier.fillMaxWidth()
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
             }
             Text(
-                "Subscriptions",
+                stringResource(R.string.title_subscriptions),
                 fontSize = 28.sp,
                 color = Color.White,
                 modifier = Modifier.weight(1f).padding(start = 16.dp)
@@ -129,7 +131,7 @@ fun ProfilesScreen(onBack: () -> Unit, onAddViaTelegram: () -> Unit = {}) {
             ) {
                 Icon(Icons.Default.Add, "Add", modifier = Modifier.size(24.dp))
                 Spacer(modifier = Modifier.width(12.dp))
-                Text("Add subscription via Telegram", fontSize = 18.sp)
+                Text(stringResource(R.string.action_add_telegram), fontSize = 18.sp)
             }
         }
     }
@@ -169,7 +171,7 @@ private fun ProfileItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (isSelected) {
-                Icon(Icons.Default.Check, "Selected", tint = Color.Green, modifier = Modifier.size(24.dp))
+                Icon(Icons.Default.Check, stringResource(R.string.selected), tint = Color.Green, modifier = Modifier.size(24.dp))
                 Spacer(modifier = Modifier.width(12.dp))
             }
 

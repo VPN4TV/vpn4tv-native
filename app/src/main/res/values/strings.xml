@@ -560,4 +560,36 @@
     <string name="privilege_module_restart_notification_title">Reboot required</string>
     <string name="privilege_module_restart_notification_message">LSPosed module updated. Reboot to apply changes.</string>
     <string name="privilege_module_restart_channel">LSPosed Module</string>
+    <string name="back">Back</string>
+    <string name="selected">Selected</string>
+
+    <!-- VPN4TV UI strings -->
+    <string name="status_loading">Loading…</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_disconnecting">Disconnecting…</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="action_connect">Connect</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="label_server">Server: </string>
+    <string name="nav_servers">Servers</string>
+    <string name="nav_profiles">Profiles</string>
+    <string name="action_update_subscription">Update subscription</string>
+    <string name="link_servers">Servers →</string>
+    <string name="link_add_telegram">Add subscription via Telegram →</string>
+    <string name="title_servers">Servers</string>
+    <string name="servers_empty">Connect VPN first to see servers</string>
+    <string name="action_test_all">Test All</string>
+    <string name="title_subscriptions">Subscriptions</string>
+    <string name="action_add_telegram">Add subscription via Telegram</string>
+    <string name="title_add_subscription">Add Subscription</string>
+    <string name="add_send_code">Send this code to</string>
+    <string name="add_scan_qr">or scan QR with phone</string>
+    <string name="add_waiting">Waiting for Telegram bot…</string>
+    <string name="add_adding">Adding subscription…</string>
+    <string name="add_success">Subscription added!</string>
+    <string name="add_failed">Failed to add subscription</string>
+    <string name="add_waiting_sub">Waiting for subscription…</string>
+    <string name="error_no_subscription">No subscription configured</string>
+    <string name="error_vpn_denied">VPN permission denied</string>
 </resources>

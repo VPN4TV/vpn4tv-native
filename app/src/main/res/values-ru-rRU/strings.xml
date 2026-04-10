@@ -555,4 +555,36 @@
     <string name="privilege_module_restart_notification_title">Требуется перезагрузка</string>
     <string name="privilege_module_restart_notification_message">Модуль LSPosed обновлён. Перезагрузите устройство, чтобы применить изменения.</string>
     <string name="privilege_module_restart_channel">Модуль LSPosed</string>
+
+    <!-- VPN4TV UI strings -->
+    <string name="status_loading">Загрузка…</string>
+    <string name="status_connected">Подключено</string>
+    <string name="status_connecting">Подключение…</string>
+    <string name="status_disconnecting">Отключение…</string>
+    <string name="status_disconnected">Отключено</string>
+    <string name="action_connect">Подключить</string>
+    <string name="action_disconnect">Отключить</string>
+    <string name="label_server">Сервер: </string>
+    <string name="nav_servers">Серверы</string>
+    <string name="nav_profiles">Подписки</string>
+    <string name="action_update_subscription">Обновить подписку</string>
+    <string name="link_servers">Серверы →</string>
+    <string name="link_add_telegram">Добавить подписку через Telegram →</string>
+    <string name="title_servers">Серверы</string>
+    <string name="servers_empty">Подключите VPN, чтобы увидеть серверы</string>
+    <string name="action_test_all">Проверить все</string>
+    <string name="title_subscriptions">Подписки</string>
+    <string name="action_add_telegram">Добавить через Telegram</string>
+    <string name="title_add_subscription">Добавить подписку</string>
+    <string name="add_send_code">Отправьте этот код боту</string>
+    <string name="add_scan_qr">или отсканируйте QR телефоном</string>
+    <string name="add_waiting">Ожидание Telegram-бота…</string>
+    <string name="add_adding">Добавление подписки…</string>
+    <string name="add_success">Подписка добавлена!</string>
+    <string name="add_failed">Ошибка добавления подписки</string>
+    <string name="add_waiting_sub">Ожидание подписки…</string>
+    <string name="error_no_subscription">Подписка не настроена</string>
+    <string name="error_vpn_denied">VPN разрешение отклонено</string>
+    <string name="back">Назад</string>
+    <string name="selected">Выбрано</string>
 </resources>

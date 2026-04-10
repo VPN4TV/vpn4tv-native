@@ -19,7 +19,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
+import com.vpn4tv.app.R
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.vpn4tv.app.converter.ConfigGenerator
@@ -45,7 +47,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
         "${code10[0]} ${code10.substring(1, 4)} ${code10.substring(4, 7)} ${code10.substring(7)}"
     }
 
-    var status by remember { mutableStateOf("Waiting for Telegram bot...") }
+    var status by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf<String?>(null) }
     var isAdding by remember { mutableStateOf(false) }
     var isDone by remember { mutableStateOf(false) }
@@ -57,21 +59,21 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
                 // Poll UUID
                 pollServer(uuid)?.let { data ->
                     handlePollResponse(data, context, scope,
-                        onUserInfo = { name -> userName = name; status = "User: $name" },
+                        onUserInfo = { name -> userName = name; status = name },
                         onConfig = { configs ->
                             isAdding = true
-                            status = "Adding subscription..."
+                            status = "adding"
                             scope.launch(Dispatchers.IO) {
                                 val added = processConfigs(context, configs, userName)
                                 withContext(Dispatchers.Main) {
                                     if (added) {
                                         isDone = true
-                                        status = "Subscription added!"
+                                        status = "done"
                                         delay(1000)
                                         onProfileAdded()
                                     } else {
                                         isAdding = false
-                                        status = "Failed to add subscription"
+                                        status = "failed"
                                     }
                                 }
                             }
@@ -83,21 +85,21 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
                 if (!isDone) {
                     pollServer(code10)?.let { data ->
                         handlePollResponse(data, context, scope,
-                            onUserInfo = { name -> userName = name; status = "User: $name" },
+                            onUserInfo = { name -> userName = name; status = name },
                             onConfig = { configs ->
                                 isAdding = true
-                                status = "Adding subscription..."
+                                status = "adding"
                                 scope.launch(Dispatchers.IO) {
                                     val added = processConfigs(context, configs, userName)
                                     withContext(Dispatchers.Main) {
                                         if (added) {
                                             isDone = true
-                                            status = "Subscription added!"
+                                            status = "done"
                                             delay(1000)
                                             onProfileAdded()
                                         } else {
                                             isAdding = false
-                                            status = "Failed to add subscription"
+                                            status = "failed"
                                         }
                                     }
                                 }
@@ -122,10 +124,10 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
             modifier = Modifier.fillMaxWidth()
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
             }
             Text(
-                "Add Subscription",
+                stringResource(R.string.title_add_subscription),
                 fontSize = 28.sp,
                 color = Color.White,
                 modifier = Modifier.padding(start = 16.dp)
@@ -157,7 +159,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
             // Code + instructions
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "Send this code to",
+                    stringResource(R.string.add_send_code),
                     fontSize = 18.sp,
                     color = Color.White
                 )
@@ -188,7 +190,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    "or scan QR with phone",
+                    stringResource(R.string.add_scan_qr),
                     fontSize = 14.sp,
                     color = Color.Gray
                 )
@@ -202,8 +204,15 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
             CircularProgressIndicator(modifier = Modifier.size(32.dp))
             Spacer(modifier = Modifier.height(8.dp))
         }
+        val statusText = when (status) {
+            "" -> stringResource(R.string.add_waiting)
+            "adding" -> stringResource(R.string.add_adding)
+            "done" -> stringResource(R.string.add_success)
+            "failed" -> stringResource(R.string.add_failed)
+            else -> status // user name from Telegram
+        }
         Text(
-            status,
+            statusText,
             fontSize = 16.sp,
             color = when {
                 isDone -> Color.Green

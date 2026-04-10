@@ -19,7 +19,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
+import com.vpn4tv.app.R
 import android.content.Context
 import com.vpn4tv.app.utils.CommandClient
 import io.nekohasekai.libbox.OutboundGroup
@@ -77,10 +79,10 @@ fun ServersScreen(onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth()
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
             }
             Text(
-                "Servers",
+                stringResource(R.string.title_servers),
                 fontSize = 28.sp,
                 color = Color.White,
                 modifier = Modifier.weight(1f).padding(start = 16.dp)
@@ -107,7 +109,7 @@ fun ServersScreen(onBack: () -> Unit) {
                 if (isTestRunning) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                 } else {
-                    Icon(Icons.Default.Refresh, "Test All", tint = Color.White)
+                    Icon(Icons.Default.Refresh, stringResource(R.string.action_test_all), tint = Color.White)
                 }
             }
         }
@@ -116,7 +118,7 @@ fun ServersScreen(onBack: () -> Unit) {
 
         if (groups.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Connect VPN first to see servers", color = Color.Gray, fontSize = 18.sp)
+                Text(stringResource(R.string.servers_empty), color = Color.Gray, fontSize = 18.sp)
             }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
