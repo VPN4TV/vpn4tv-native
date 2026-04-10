@@ -59,7 +59,14 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
         }
     }
 
-    val filteredApps = if (showSystem) apps else apps.filter { !it.isSystem }
+    // Always show important apps even when hiding system
+    val alwaysShowPackages = setOf(
+        "com.google.android.youtube",
+        "com.google.android.youtube.tv",
+        "com.google.android.youtube.tvmusic",
+    )
+    val filteredApps = if (showSystem) apps
+        else apps.filter { !it.isSystem || it.packageName in alwaysShowPackages }
 
     Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
         // Header
