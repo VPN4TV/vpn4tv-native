@@ -1,32 +1,65 @@
-# SFA
+# VPN4TV Native
 
-Experimental Android client for sing-box, the universal proxy platform.
+Native Kotlin VPN client for Android TV, built on [sing-box](https://sing-box.sagernet.org/) core.
 
-## Documentation
+## Features
 
-https://sing-box.sagernet.org/installation/clients/sfa/
+- **JNI in-process** — sing-box core via libbox.aar, no gRPC/TCP localhost issues
+- **Subscription formats** — URI links (vless/hy2/trojan/ss), Xray JSON, sing-box JSON
+- **Telegram bot** — add subscription via @VPN4TV_Bot (QR code + 10-digit code)
+- **Server selection** — URLTest auto-select + manual switching with delay display
+- **D-pad navigation** — designed for TV remote control
+- **Logs viewer** — real-time logs with level filtering (All/Info/Warn/Error)
+- **Multiple subscriptions** — add, update, switch between profiles
+- **HWID headers** — device identification for Remnawave subscriptions
+- **24MB release APK** — lightweight compared to Flutter-based alternatives
+
+## Supported protocols
+
+| Protocol | URI | Xray JSON |
+|----------|-----|-----------|
+| VLESS (+ Reality, XTLS Vision) | `vless://` | `"protocol": "vless"` |
+| Hysteria2 | `hy2://` | — |
+| Trojan | `trojan://` | `"protocol": "trojan"` |
+| Shadowsocks | `ss://` | `"protocol": "shadowsocks"` |
+| VMess | — | `"protocol": "vmess"` |
+
+Transports: TCP, WebSocket, gRPC, HTTP/2, xHTTP, HTTPUpgrade.
+
+## Download
+
+- **Alpha APK**: [bell.a4e.ar/vpn4tv-native-alpha.apk](https://bell.a4e.ar/vpn4tv-native-alpha.apk)
+
+## Building
+
+1. Build `libbox.aar` from [sing-box](https://github.com/SagerNet/sing-box) v1.13.x:
+   ```bash
+   cd sing-box
+   make lib_android
+   ```
+2. Place `libbox.aar` and `libbox-legacy.aar` in `app/libs/`
+3. Create `local.properties` with signing config
+4. Build:
+   ```bash
+   ./gradlew assembleRelease
+   ```
+
+## Architecture
+
+```
+com.vpn4tv.app/
+├── ui/              # Compose screens (Home, Servers, Profiles, Logs, About)
+├── bg/              # VPNService, BoxService, CommandServer, PlatformInterface
+├── converter/       # ProxyParser (URI + Xray JSON), ConfigGenerator, HwidService
+├── database/        # Room DB (profiles, settings)
+└── utils/           # CommandClient, HTTPClient
+```
+
+## Based on
+
+- [sing-box](https://github.com/SagerNet/sing-box) — universal proxy platform (GPLv3)
+- [sing-box-for-android](https://github.com/SagerNet/sing-box-for-android) — reference Android client (GPLv3)
 
 ## License
 
-```
-Copyright (C) 2022 by nekohasekai <contact-sagernet@sekai.icu>
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program. If not, see <http://www.gnu.org/licenses/>.
-
-In addition, no derivative work may use the name or imply association
-with this application without prior consent.
-```
-
-Under the license, that forks of the app are not allowed to be listed on F-Droid or other app stores
-under the original name.
+GPLv3 — see [LICENSE](LICENSE)
