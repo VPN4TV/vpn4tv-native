@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.util.Log
 import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
 import android.os.PowerManager
@@ -43,6 +44,9 @@ class Application : Application() {
         tempDir.mkdirs()
         workingDir?.mkdirs()
 
+        // Migrate subscriptions from Flutter/hiddify fork on first run
+        migrateLegacyProfiles()
+
         @Suppress("OPT_IN_USAGE")
         GlobalScope.launch(Dispatchers.IO) {
             if (workingDir != null) {
@@ -67,6 +71,72 @@ class Application : Application() {
 
     private fun setupLibbox(baseDir: File, workingDir: File, tempDir: File) {
         Libbox.setup(createSetupOptions(baseDir, workingDir, tempDir))
+    }
+
+    /**
+     * Migrate subscription URLs from Flutter/hiddify drift DB to Room DB.
+     * Runs once — checks for legacy db.sqlite in app_flutter/ directory.
+     */
+    private fun migrateLegacyProfiles() {
+        try {
+            val prefs = getSharedPreferences("migration", Context.MODE_PRIVATE)
+            if (prefs.getBoolean("v5_migrated", false)) return
+
+            val legacyDbFile = File(filesDir.parentFile, "app_flutter/db.sqlite")
+            if (!legacyDbFile.exists()) {
+                // No legacy data — mark as migrated
+                prefs.edit().putBoolean("v5_migrated", true).apply()
+                return
+            }
+
+            Log.i("Migration", "Found legacy hiddify DB: ${legacyDbFile.path}")
+
+            val legacyDb = android.database.sqlite.SQLiteDatabase.openDatabase(
+                legacyDbFile.path, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+            )
+
+            val cursor = legacyDb.rawQuery(
+                "SELECT name, url FROM profile_entries WHERE type = 'remote' AND url IS NOT NULL AND url != ''",
+                null
+            )
+
+            val profiles = mutableListOf<Pair<String, String>>() // name, url
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(0) ?: "Subscription"
+                val url = cursor.getString(1) ?: continue
+                profiles.add(name to url)
+            }
+            cursor.close()
+            legacyDb.close()
+
+            if (profiles.isEmpty()) {
+                Log.i("Migration", "No remote profiles to migrate")
+                prefs.edit().putBoolean("v5_migrated", true).apply()
+                return
+            }
+
+            Log.i("Migration", "Migrating ${profiles.size} profiles")
+
+            // Create profiles in Room DB (on background thread in ensureDefaultProfile)
+            val migratedUrls = profiles.map { it.second }
+            prefs.edit()
+                .putBoolean("v5_migrated", true)
+                .putString("v5_migrate_urls", migratedUrls.joinToString("\n"))
+                .putString("v5_migrate_names", profiles.map { it.first }.joinToString("\n"))
+                .apply()
+
+            // Clean up legacy Flutter data
+            File(filesDir.parentFile, "app_flutter").deleteRecursively()
+            cacheDir.deleteRecursively()
+            cacheDir.mkdirs()
+
+            Log.i("Migration", "Legacy data cleaned, ${profiles.size} URLs saved for import")
+        } catch (e: Exception) {
+            Log.w("Migration", "Migration failed: ${e.message}")
+            // Mark as migrated anyway to avoid retry loops
+            getSharedPreferences("migration", Context.MODE_PRIVATE)
+                .edit().putBoolean("v5_migrated", true).apply()
+        }
     }
 
     private fun createSetupOptions(baseDir: File, workingDir: File, tempDir: File): SetupOptions = SetupOptions().also {

@@ -75,12 +75,28 @@ class MainActivity : ComponentActivity() {
 
     private suspend fun ensureDefaultProfile() {
         try {
+            // Check for migrated profiles from hiddify fork
+            val migrationPrefs = applicationContext.getSharedPreferences("migration", android.content.Context.MODE_PRIVATE)
+            val migrateUrls = migrationPrefs.getString("v5_migrate_urls", null)
+            val migrateNames = migrationPrefs.getString("v5_migrate_names", null)
+            if (migrateUrls != null && migrateNames != null) {
+                val urls = migrateUrls.split("\n").filter { it.isNotBlank() }
+                val names = migrateNames.split("\n")
+                Log.d(TAG, "Migrating ${urls.size} profiles from hiddify fork")
+                for (i in urls.indices) {
+                    val name = names.getOrElse(i) { "Subscription" }
+                    val url = urls[i]
+                    createProfile(name, url)
+                }
+                migrationPrefs.edit().remove("v5_migrate_urls").remove("v5_migrate_names").apply()
+                Log.d(TAG, "Migration complete")
+            }
+
             val profiles = ProfileManager.list()
             if (profiles.isNotEmpty()) {
                 if (Settings.selectedProfile == -1L) {
                     Settings.selectedProfile = profiles.first().id
                 }
-                // Update active profile config
                 val active = profiles.find { it.id == Settings.selectedProfile } ?: profiles.first()
                 if (active.typed.remoteURL.isNotEmpty()) {
                     updateProfileConfig(active)
