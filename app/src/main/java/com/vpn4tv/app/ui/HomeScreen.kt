@@ -383,10 +383,6 @@ fun HomeScreen(
                     color = Color.Gray
                 )
             }
-            } else if (ready && AppSettings.selectedProfile != -1L && status == Status.Stopped) {
-                TextButton(onClick = onNavigateServers) {
-                    Text(stringResource(R.string.link_servers), color = Color.Gray, fontSize = 16.sp)
-                }
             }
 
             if (!ready || AppSettings.selectedProfile == -1L) {

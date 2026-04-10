@@ -570,6 +570,14 @@
     <string name="setting_auto_connect_desc">Restore VPN connection when device starts</string>
     <string name="update_available">Update available</string>
     <string name="session_traffic">Session</string>
+    <string name="title_per_app_proxy">Per-app proxy</string>
+    <string name="setting_per_app_enabled">Enable per-app proxy</string>
+    <string name="setting_disabled">Disabled</string>
+    <string name="mode_exclude">Exclude</string>
+    <string name="mode_include">Include</string>
+    <string name="mode_exclude_desc">Selected apps bypass VPN (everything else goes through VPN)</string>
+    <string name="mode_include_desc">Only selected apps use VPN (everything else is direct)</string>
+    <string name="show_system_apps">Show system apps</string>
     <string name="back">Back</string>
     <string name="selected">Selected</string>
     <string name="default_profile_name">Subscription</string>

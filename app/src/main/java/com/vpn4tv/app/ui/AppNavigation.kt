@@ -15,6 +15,7 @@ object Routes {
     const val ADD_PROFILE = "add_profile"
     const val LOGS = "logs"
     const val SETTINGS = "settings"
+    const val PER_APP_PROXY = "per_app_proxy"
     const val ABOUT = "about"
 }
 
@@ -64,7 +65,13 @@ fun AppNavigation(
             LogsScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen(onBack = { navController.popBackStack() })
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onPerAppProxy = { navController.navigate(Routes.PER_APP_PROXY) }
+            )
+        }
+        composable(Routes.PER_APP_PROXY) {
+            PerAppProxyScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.ABOUT) {
             AboutScreen(onBack = { navController.popBackStack() })

@@ -2,6 +2,8 @@ package com.vpn4tv.app.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -17,7 +19,7 @@ import com.vpn4tv.app.R
 import com.vpn4tv.app.database.Settings
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}) {
     var autoConnect by remember { mutableStateOf(Settings.autoConnectOnBoot) }
 
     Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
@@ -37,6 +39,33 @@ fun SettingsScreen(onBack: () -> Unit) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+
+        // Per-app proxy
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .clickable { onPerAppProxy() }
+                .focusable(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.title_per_app_proxy), fontSize = 18.sp, color = Color.White)
+                    Text(
+                        if (Settings.perAppProxyEnabled)
+                            "${if (Settings.perAppProxyMode == Settings.PER_APP_PROXY_EXCLUDE) stringResource(R.string.mode_exclude) else stringResource(R.string.mode_include)}: ${Settings.perAppProxyList.size} apps"
+                        else stringResource(R.string.setting_disabled),
+                        fontSize = 13.sp,
+                        color = Color.Gray
+                    )
+                }
+                Text("›", fontSize = 20.sp, color = Color.Gray)
+            }
+        }
 
         // Auto-connect on boot
         SettingsToggle(

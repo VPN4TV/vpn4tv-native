@@ -595,6 +595,14 @@
     <string name="setting_auto_connect_desc">Восстанавливать VPN при включении устройства</string>
     <string name="update_available">Доступно обновление</string>
     <string name="session_traffic">Сессия</string>
+    <string name="title_per_app_proxy">Прокси по приложениям</string>
+    <string name="setting_per_app_enabled">Включить прокси по приложениям</string>
+    <string name="setting_disabled">Отключено</string>
+    <string name="mode_exclude">Исключить</string>
+    <string name="mode_include">Только выбранные</string>
+    <string name="mode_exclude_desc">Выбранные приложения обходят VPN (остальные через VPN)</string>
+    <string name="mode_include_desc">Только выбранные приложения используют VPN (остальные напрямую)</string>
+    <string name="show_system_apps">Показать системные</string>
     <string name="back">Назад</string>
     <string name="selected">Выбрано</string>
     <string name="default_profile_name">Подписка</string>
