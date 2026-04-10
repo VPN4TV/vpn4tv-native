@@ -12,6 +12,11 @@ object ConfigGenerator {
     fun generate(proxies: List<ProxyConfig>): String {
         if (proxies.isEmpty()) throw IllegalArgumentException("No proxies to configure")
 
+        // sing-box passthrough — return native config as-is
+        if (proxies.size == 1 && proxies[0].type == "singbox") {
+            return proxies[0].outbound.toString(2)
+        }
+
         val config = JSONObject()
 
         // Log

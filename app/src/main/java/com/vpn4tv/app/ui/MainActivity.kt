@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
 
     private fun updateProfileConfig(profile: Profile) {
         try {
-            val subContent = java.net.URL(profile.typed.remoteURL).readText()
+            val subContent = com.vpn4tv.app.converter.HwidService.downloadSubscription(applicationContext, profile.typed.remoteURL)
             val proxies = ProxyParser.parseSubscription(subContent)
             if (proxies.isEmpty()) {
                 Log.w(TAG, "No proxies in subscription")

@@ -199,7 +199,7 @@ private fun ProfileItem(
 
 private fun updateProfile(profile: Profile) {
     try {
-        val subContent = java.net.URL(profile.typed.remoteURL).readText()
+        val subContent = com.vpn4tv.app.converter.HwidService.downloadSubscription(com.vpn4tv.app.Application.application, profile.typed.remoteURL)
         val proxies = ProxyParser.parseSubscription(subContent)
         if (proxies.isEmpty()) return
         val config = ConfigGenerator.generate(proxies)

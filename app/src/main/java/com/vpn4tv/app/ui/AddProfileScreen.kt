@@ -267,7 +267,7 @@ private suspend fun processConfigs(
 ): Boolean {
     return try {
         for (configUrl in configs) {
-            val subContent = URL(configUrl).readText()
+            val subContent = com.vpn4tv.app.converter.HwidService.downloadSubscription(context, configUrl)
             val proxies = ProxyParser.parseSubscription(subContent)
             if (proxies.isEmpty()) continue
 

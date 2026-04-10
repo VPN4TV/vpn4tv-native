@@ -33,6 +33,35 @@ object ProxyParser {
     }
 
     fun parseSubscription(content: String): List<ProxyConfig> {
+        val trimmed = content.trim()
+
+        // Detect JSON config (sing-box or Xray)
+        if (trimmed.startsWith("{")) {
+            try {
+                val json = JSONObject(trimmed)
+                if (json.has("outbounds")) {
+                    // Check if sing-box format (has "inbounds" with "type":"tun")
+                    val inbounds = json.optJSONArray("inbounds")
+                    if (inbounds != null) {
+                        for (i in 0 until inbounds.length()) {
+                            if (inbounds.getJSONObject(i).optString("type") == "tun") {
+                                // Native sing-box config — return special marker
+                                return listOf(ProxyConfig(
+                                    tag = "_singbox_passthrough_",
+                                    type = "singbox",
+                                    server = "",
+                                    serverPort = 0,
+                                    outbound = json // store entire config
+                                ))
+                            }
+                        }
+                    }
+                    // Xray JSON config
+                    return parseXrayConfig(json)
+                }
+            } catch (_: Exception) {}
+        }
+
         // Try base64 decode first (some subs are base64-encoded)
         val decoded = tryBase64Decode(content) ?: content
         return decoded.lines()
@@ -245,6 +274,183 @@ object ProxyParser {
         }
 
         return ProxyConfig(tag = tag, type = "shadowsocks", server = host, serverPort = port, outbound = outbound)
+    }
+
+    // ─── XRAY JSON CONFIG ────────────────────────────────────
+
+    private fun parseXrayConfig(config: JSONObject): List<ProxyConfig> {
+        val outbounds = config.optJSONArray("outbounds") ?: return emptyList()
+        val results = mutableListOf<ProxyConfig>()
+
+        for (i in 0 until outbounds.length()) {
+            val ob = outbounds.getJSONObject(i)
+            val protocol = ob.optString("protocol")
+            val tag = ob.optString("tag", protocol)
+            val settings = ob.optJSONObject("settings") ?: continue
+            val stream = ob.optJSONObject("streamSettings")
+
+            when (protocol) {
+                "vless", "vmess" -> {
+                    val vnext = settings.optJSONArray("vnext")?.optJSONObject(0) ?: continue
+                    val server = vnext.optString("address")
+                    val port = vnext.optInt("port", 443)
+                    val user = vnext.optJSONArray("users")?.optJSONObject(0) ?: continue
+                    val uuid = user.optString("id")
+                    val flow = user.optString("flow", "")
+
+                    val singboxOb = JSONObject().apply {
+                        put("type", protocol)
+                        put("tag", tag)
+                        put("server", server)
+                        put("server_port", port)
+                        if (protocol == "vless") {
+                            put("uuid", uuid)
+                            if (flow.isNotEmpty()) put("flow", flow)
+                            put("packet_encoding", "xudp")
+                        } else {
+                            put("uuid", uuid)
+                            put("security", user.optString("security", "auto"))
+                            put("alter_id", user.optInt("alterId", 0))
+                        }
+
+                        // TLS / Reality
+                        if (stream != null) {
+                            putXrayTls(this, stream)
+                            putXrayTransport(this, stream)
+                        }
+                    }
+                    results.add(ProxyConfig(tag, protocol, server, port, singboxOb))
+                }
+                "trojan" -> {
+                    val servers = settings.optJSONArray("servers")?.optJSONObject(0) ?: continue
+                    val server = servers.optString("address")
+                    val port = servers.optInt("port", 443)
+                    val password = servers.optString("password")
+
+                    val singboxOb = JSONObject().apply {
+                        put("type", "trojan")
+                        put("tag", tag)
+                        put("server", server)
+                        put("server_port", port)
+                        put("password", password)
+                        if (stream != null) {
+                            putXrayTls(this, stream)
+                            putXrayTransport(this, stream)
+                        }
+                    }
+                    results.add(ProxyConfig(tag, "trojan", server, port, singboxOb))
+                }
+                "shadowsocks" -> {
+                    val servers = settings.optJSONArray("servers")?.optJSONObject(0) ?: continue
+                    val server = servers.optString("address")
+                    val port = servers.optInt("port", 443)
+                    val method = servers.optString("method")
+                    val password = servers.optString("password")
+
+                    val singboxOb = JSONObject().apply {
+                        put("type", "shadowsocks")
+                        put("tag", tag)
+                        put("server", server)
+                        put("server_port", port)
+                        put("method", method)
+                        put("password", password)
+                    }
+                    results.add(ProxyConfig(tag, "shadowsocks", server, port, singboxOb))
+                }
+            }
+        }
+        return results
+    }
+
+    private fun putXrayTls(obj: JSONObject, stream: JSONObject) {
+        val security = stream.optString("security", "")
+        when (security) {
+            "tls" -> {
+                val tls = stream.optJSONObject("tlsSettings") ?: JSONObject()
+                obj.put("tls", JSONObject().apply {
+                    put("enabled", true)
+                    put("server_name", tls.optString("serverName", ""))
+                    val insecure = tls.optBoolean("allowInsecure", false)
+                    if (insecure) put("insecure", true)
+                    val fp = tls.optString("fingerprint", "")
+                    if (fp.isNotEmpty()) {
+                        put("utls", JSONObject().apply {
+                            put("enabled", true)
+                            put("fingerprint", fp)
+                        })
+                    }
+                    val alpn = tls.optJSONArray("alpn")
+                    if (alpn != null && alpn.length() > 0) {
+                        put("alpn", alpn)
+                    }
+                })
+            }
+            "reality" -> {
+                val reality = stream.optJSONObject("realitySettings") ?: JSONObject()
+                obj.put("tls", JSONObject().apply {
+                    put("enabled", true)
+                    put("server_name", reality.optString("serverName", ""))
+                    put("reality", JSONObject().apply {
+                        put("enabled", true)
+                        put("public_key", reality.optString("publicKey", ""))
+                        put("short_id", reality.optString("shortId", ""))
+                    })
+                    val fp = reality.optString("fingerprint", "chrome")
+                    put("utls", JSONObject().apply {
+                        put("enabled", true)
+                        put("fingerprint", fp)
+                    })
+                })
+            }
+        }
+    }
+
+    private fun putXrayTransport(obj: JSONObject, stream: JSONObject) {
+        when (stream.optString("network", "tcp")) {
+            "ws" -> {
+                val ws = stream.optJSONObject("wsSettings") ?: return
+                obj.put("transport", JSONObject().apply {
+                    put("type", "ws")
+                    ws.optString("path", "").takeIf { it.isNotEmpty() }?.let { put("path", it) }
+                    ws.optJSONObject("headers")?.optString("Host")?.takeIf { it.isNotEmpty() }?.let {
+                        put("headers", JSONObject().put("Host", it))
+                    }
+                })
+            }
+            "grpc" -> {
+                val grpc = stream.optJSONObject("grpcSettings") ?: return
+                obj.put("transport", JSONObject().apply {
+                    put("type", "grpc")
+                    grpc.optString("serviceName", "").takeIf { it.isNotEmpty() }?.let { put("service_name", it) }
+                })
+            }
+            "xhttp", "splithttp" -> {
+                val xhttp = stream.optJSONObject("xhttpSettings")
+                    ?: stream.optJSONObject("splithttpSettings") ?: return
+                obj.put("transport", JSONObject().apply {
+                    put("type", "xhttp")
+                    xhttp.optString("path", "").takeIf { it.isNotEmpty() }?.let { put("path", it) }
+                    xhttp.optString("host", "").takeIf { it.isNotEmpty() }?.let { put("host", it) }
+                    xhttp.optString("mode", "").takeIf { it.isNotEmpty() }?.let { put("mode", it) }
+                })
+            }
+            "httpupgrade" -> {
+                val hu = stream.optJSONObject("httpupgradeSettings") ?: return
+                obj.put("transport", JSONObject().apply {
+                    put("type", "httpupgrade")
+                    hu.optString("path", "").takeIf { it.isNotEmpty() }?.let { put("path", it) }
+                    hu.optString("host", "").takeIf { it.isNotEmpty() }?.let { put("host", it) }
+                })
+            }
+            "h2" -> {
+                val h2 = stream.optJSONObject("httpSettings") ?: return
+                obj.put("transport", JSONObject().apply {
+                    put("type", "http")
+                    h2.optString("path", "").takeIf { it.isNotEmpty() }?.let { put("path", it) }
+                    h2.optJSONArray("host")?.let { put("host", it) }
+                })
+            }
+        }
     }
 
     // ─── HELPERS ────────────────────────────────────────────

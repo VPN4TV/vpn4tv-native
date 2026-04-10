@@ -156,7 +156,7 @@ fun HomeScreen(
                                         try {
                                             val p = activeProfile!!
                                             if (p.typed.remoteURL.isNotEmpty()) {
-                                                val sub = java.net.URL(p.typed.remoteURL).readText()
+                                                val sub = com.vpn4tv.app.converter.HwidService.downloadSubscription(com.vpn4tv.app.Application.application, p.typed.remoteURL)
                                                 val proxies = com.vpn4tv.app.converter.ProxyParser.parseSubscription(sub)
                                                 if (proxies.isNotEmpty()) {
                                                     val config = com.vpn4tv.app.converter.ConfigGenerator.generate(proxies)
