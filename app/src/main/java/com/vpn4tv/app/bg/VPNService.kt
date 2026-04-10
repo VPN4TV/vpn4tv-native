@@ -138,7 +138,7 @@ class VPNService :
                         val nextPackage = includePackage.next()
                         builder.addAllowedApplication(nextPackage)
                         Log.d("VPNService", "addAllowedApplication: $nextPackage")
-                    } catch (e: NameNotFoundException) {
+                    } catch (e: Exception) {
                         Log.e("VPNService", "addAllowedApplication failed", e)
                     }
                 }
@@ -151,7 +151,7 @@ class VPNService :
                         val nextPackage = excludePackage.next()
                         builder.addDisallowedApplication(nextPackage)
                         Log.d("VPNService", "addDisallowedApplication: $nextPackage")
-                    } catch (e: NameNotFoundException) {
+                    } catch (e: Exception) {
                         Log.e("VPNService", "addDisallowedApplication failed", e)
                     }
                 }

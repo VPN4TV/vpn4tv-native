@@ -41,9 +41,19 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
     var isLoading by remember { mutableStateOf(true) }
 
     fun saveAndBack() {
+        val changed = enabled != Settings.perAppProxyEnabled ||
+            mode != Settings.perAppProxyMode ||
+            selectedApps != Settings.perAppProxyList
         Settings.perAppProxyEnabled = enabled
         Settings.perAppProxyMode = mode
         Settings.perAppProxyList = selectedApps
+        // Auto-reconnect if VPN is running and settings changed
+        if (changed && com.vpn4tv.app.bg.BoxService.globalStatus.value == com.vpn4tv.app.constant.Status.Started) {
+            com.vpn4tv.app.bg.BoxService.stop()
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                com.vpn4tv.app.bg.BoxService.start()
+            }, 1000)
+        }
         onBack()
     }
 
