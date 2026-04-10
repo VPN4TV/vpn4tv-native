@@ -135,6 +135,8 @@ open class CommandClient(
                 var msg = entry.message ?: ""
                 // Strip ANSI color codes
                 msg = msg.replace(Regex("\u001B\\[[0-9;]*m"), "")
+                // Strip internal connection IDs like [1972903095 740ms]
+                msg = msg.replace(Regex("\\[\\d{5,} [\\d.]+[ms]+\\] "), "")
                 // Prepend timestamp
                 val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
                     .format(java.util.Date())
