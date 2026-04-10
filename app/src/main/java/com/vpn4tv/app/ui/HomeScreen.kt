@@ -4,6 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -39,6 +41,8 @@ fun HomeScreen(
     onNavigateProfiles: () -> Unit = {},
     onNavigateServers: () -> Unit = {},
     onAddProfile: () -> Unit = {},
+    onNavigateLogs: () -> Unit = {},
+    onNavigateAbout: () -> Unit = {},
 ) {
     val status by BoxService.globalStatus.observeAsState(Status.Stopped)
     val ready by MainActivity.profileReady.observeAsState(false)
@@ -191,8 +195,14 @@ fun HomeScreen(
                 IconButton(onClick = onNavigateServers) {
                     Icon(Icons.Default.List, stringResource(R.string.nav_servers), tint = Color.White)
                 }
+                IconButton(onClick = onNavigateLogs) {
+                    Icon(Icons.Default.Description, stringResource(R.string.title_logs), tint = Color.White)
+                }
                 IconButton(onClick = onNavigateProfiles) {
                     Icon(Icons.Default.Settings, stringResource(R.string.nav_profiles), tint = Color.White)
+                }
+                IconButton(onClick = onNavigateAbout) {
+                    Icon(Icons.Default.Info, stringResource(R.string.title_about), tint = Color.White)
                 }
             }
         }

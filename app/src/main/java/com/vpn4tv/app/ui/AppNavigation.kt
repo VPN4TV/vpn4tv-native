@@ -13,6 +13,8 @@ object Routes {
     const val PROFILES = "profiles"
     const val SERVERS = "servers"
     const val ADD_PROFILE = "add_profile"
+    const val LOGS = "logs"
+    const val ABOUT = "about"
 }
 
 @Composable
@@ -41,6 +43,8 @@ fun AppNavigation(
                 onNavigateProfiles = { navController.navigate(Routes.PROFILES) },
                 onNavigateServers = { navController.navigate(Routes.SERVERS) },
                 onAddProfile = { navController.navigate(Routes.ADD_PROFILE) },
+                onNavigateLogs = { navController.navigate(Routes.LOGS) },
+                onNavigateAbout = { navController.navigate(Routes.ABOUT) },
             )
         }
         composable(Routes.PROFILES) {
@@ -53,6 +57,12 @@ fun AppNavigation(
             ServersScreen(
                 onBack = { navController.popBackStack() }
             )
+        }
+        composable(Routes.LOGS) {
+            LogsScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.ABOUT) {
+            AboutScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.ADD_PROFILE) {
             AddProfileScreen(

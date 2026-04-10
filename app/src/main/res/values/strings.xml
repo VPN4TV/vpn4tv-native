@@ -560,6 +560,12 @@
     <string name="privilege_module_restart_notification_title">Reboot required</string>
     <string name="privilege_module_restart_notification_message">LSPosed module updated. Reboot to apply changes.</string>
     <string name="privilege_module_restart_channel">LSPosed Module</string>
+    <string name="title_logs">Logs</string>
+    <string name="title_about">About</string>
+    <string name="logs_empty">Connect VPN to see logs</string>
+    <string name="action_clear">Clear</string>
+    <string name="about_license">GPLv3 • Based on sing-box by SagerNet</string>
+    <string name="about_telegram">Telegram channel:</string>
     <string name="back">Back</string>
     <string name="selected">Selected</string>
 

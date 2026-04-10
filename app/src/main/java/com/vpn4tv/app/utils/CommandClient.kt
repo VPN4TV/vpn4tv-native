@@ -71,7 +71,7 @@ open class CommandClient(
 
         fun clearLogs() {}
 
-        fun appendLogs(message: List<LogEntry>) {}
+        fun appendLogs(messages: List<String>) {}
 
         fun updateGroups(newGroups: MutableList<OutboundGroup>) {}
 
@@ -127,7 +127,17 @@ open class CommandClient(
         override fun setDefaultLogLevel(level: Int) {}
         override fun updateClashMode(newMode: String?) {}
         override fun writeConnectionEvents(events: io.nekohasekai.libbox.ConnectionEvents?) {}
-        override fun writeLogs(messageList: io.nekohasekai.libbox.LogIterator?) {}
+        override fun writeLogs(messageList: io.nekohasekai.libbox.LogIterator?) {
+            if (messageList == null) return
+            val logs = mutableListOf<String>()
+            while (messageList.hasNext()) {
+                val entry = messageList.next()
+                logs.add(entry.message ?: "")
+            }
+            if (logs.isNotEmpty()) {
+                getAllHandlers().forEach { it.appendLogs(logs) }
+            }
+        }
         override fun writeStatus(message: io.nekohasekai.libbox.StatusMessage?) {
             if (message != null) getAllHandlers().forEach { it.updateStatus(message) }
         }

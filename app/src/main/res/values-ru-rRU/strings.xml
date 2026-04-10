@@ -585,6 +585,12 @@
     <string name="add_waiting_sub">Ожидание подписки…</string>
     <string name="error_no_subscription">Подписка не настроена</string>
     <string name="error_vpn_denied">VPN разрешение отклонено</string>
+    <string name="title_logs">Логи</string>
+    <string name="title_about">О программе</string>
+    <string name="logs_empty">Подключите VPN, чтобы видеть логи</string>
+    <string name="action_clear">Очистить</string>
+    <string name="about_license">GPLv3 • На базе sing-box от SagerNet</string>
+    <string name="about_telegram">Telegram-канал:</string>
     <string name="back">Назад</string>
     <string name="selected">Выбрано</string>
 </resources>
