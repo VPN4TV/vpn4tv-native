@@ -2,6 +2,7 @@ package com.vpn4tv.app.ui
 
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
@@ -38,6 +39,15 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
     var mode by remember { mutableStateOf(Settings.perAppProxyMode) }
     var showSystem by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(true) }
+
+    fun saveAndBack() {
+        Settings.perAppProxyEnabled = enabled
+        Settings.perAppProxyMode = mode
+        Settings.perAppProxyList = selectedApps
+        onBack()
+    }
+
+    BackHandler { saveAndBack() }
 
     // Load app list
     LaunchedEffect(Unit) {
@@ -82,13 +92,7 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
         ) {
-            IconButton(onClick = {
-                // Save on exit
-                Settings.perAppProxyEnabled = enabled
-                Settings.perAppProxyMode = mode
-                Settings.perAppProxyList = selectedApps
-                onBack()
-            }) {
+            IconButton(onClick = { saveAndBack() }) {
                 Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
             }
             Text(
