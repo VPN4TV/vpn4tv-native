@@ -32,10 +32,14 @@ private enum class LogLevel(val label: String, val priority: Int) {
     ERROR("Error", 3);
 }
 
+private val errorPattern = Regex("\\bERROR\\b|\\bFATAL\\b")
+private val warnPattern = Regex("\\bWARN\\b")
+private val infoPattern = Regex("\\bINFO\\b")
+
 private fun logLineLevel(line: String): Int = when {
-    line.contains("ERROR") || line.contains("FATAL") -> 3
-    line.contains("WARN") -> 2
-    line.contains("INFO") -> 1
+    errorPattern.containsMatchIn(line) -> 3
+    warnPattern.containsMatchIn(line) -> 2
+    infoPattern.containsMatchIn(line) -> 1
     else -> 0 // DEBUG, TRACE
 }
 
@@ -132,10 +136,11 @@ fun LogsScreen(onBack: () -> Unit) {
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(filteredLogs) { line ->
-                    val color = when {
-                        line.contains("ERROR") || line.contains("FATAL") -> Color(0xFFEF5350)
-                        line.contains("WARN") -> Color(0xFFFFA726)
-                        line.contains("DEBUG") || line.contains("TRACE") -> Color(0xFF666666)
+                    val level = logLineLevel(line)
+                    val color = when (level) {
+                        3 -> Color(0xFFEF5350)
+                        2 -> Color(0xFFFFA726)
+                        0 -> Color(0xFF666666)
                         else -> Color(0xFFCCCCCC)
                     }
                     Text(

@@ -135,7 +135,10 @@ open class CommandClient(
                 var msg = entry.message ?: ""
                 // Strip ANSI color codes
                 msg = msg.replace(Regex("\u001B\\[[0-9;]*m"), "")
-                logs.add(msg)
+                // Prepend timestamp
+                val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+                    .format(java.util.Date())
+                logs.add("$time $msg")
             }
             if (logs.isNotEmpty()) {
                 getAllHandlers().forEach { it.appendLogs(logs) }
