@@ -186,7 +186,7 @@
     <string name="no_logs_to_copy">No logs to copy</string>
     <string name="no_logs_to_share">No logs to share</string>
     <string name="intent_share_logs">Share Logs</string>
-    <string name="selected_count">%d selected</string>
+    <string name="selected_count">Selected: %d</string>
     <string name="not_selected">Not selected</string>
     <string name="save_to_clipboard">To Clipboard</string>
     <string name="save_to_file">To File</string>

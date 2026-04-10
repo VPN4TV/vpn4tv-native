@@ -180,7 +180,7 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
             }
 
             Text(
-                "${stringResource(R.string.selected_count)}: ${selectedApps.size}",
+                String.format(stringResource(R.string.selected_count), selectedApps.size),
                 fontSize = 13.sp,
                 color = Color.Gray
             )
