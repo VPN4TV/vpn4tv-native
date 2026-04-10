@@ -25,6 +25,7 @@ object ProxyParser {
 
         return when {
             trimmed.startsWith("vless://") -> parseVless(trimmed)
+            trimmed.startsWith("vmess://") -> parseVmess(trimmed)
             trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") -> parseHysteria2(trimmed)
             trimmed.startsWith("trojan://") -> parseTrojan(trimmed)
             trimmed.startsWith("ss://") -> parseShadowsocks(trimmed)
@@ -274,6 +275,72 @@ object ProxyParser {
         }
 
         return ProxyConfig(tag = tag, type = "shadowsocks", server = host, serverPort = port, outbound = outbound)
+    }
+
+    // ─── VMESS ───────────────────────────────────────────────
+
+    private fun parseVmess(uri: String): ProxyConfig? {
+        // vmess://BASE64_JSON
+        val encoded = uri.removePrefix("vmess://")
+        val json = try {
+            JSONObject(String(Base64.decode(encoded, Base64.DEFAULT or Base64.NO_WRAP)))
+        } catch (_: Exception) {
+            try {
+                JSONObject(String(Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP)))
+            } catch (_: Exception) { return null }
+        }
+
+        val host = json.optString("add", "")
+        val port = json.optString("port", "443").toIntOrNull() ?: 443
+        val uuid = json.optString("id", "")
+        val name = json.optString("ps", host)
+        val aid = json.optString("aid", "0").toIntOrNull() ?: 0
+        val security = json.optString("scy", "auto")
+        val net = json.optString("net", "tcp")
+        val tls = json.optString("tls", "")
+        val sni = json.optString("sni", host)
+        val fp = json.optString("fp", "")
+        val alpn = json.optString("alpn", "")
+        val path = json.optString("path", "")
+        val headerHost = json.optString("host", "")
+
+        if (host.isEmpty() || uuid.isEmpty()) return null
+
+        val outbound = JSONObject().apply {
+            put("type", "vmess")
+            put("tag", name)
+            put("server", host)
+            put("server_port", port)
+            put("uuid", uuid)
+            put("security", security)
+            put("alter_id", aid)
+
+            // TLS
+            if (tls == "tls") {
+                put("tls", JSONObject().apply {
+                    put("enabled", true)
+                    put("server_name", sni)
+                    if (alpn.isNotEmpty()) put("alpn", alpn.split(",").toJsonArray())
+                    if (fp.isNotEmpty()) {
+                        put("utls", JSONObject().apply {
+                            put("enabled", true)
+                            put("fingerprint", fp)
+                        })
+                    }
+                })
+            }
+
+            // Transport
+            val params = mutableMapOf<String, String>()
+            if (path.isNotEmpty()) params["path"] = path
+            if (headerHost.isNotEmpty()) params["host"] = headerHost
+            json.optString("type", "").takeIf { it.isNotEmpty() && it != "none" }?.let {
+                params["headerType"] = it
+            }
+            putTransport(this, net, params)
+        }
+
+        return ProxyConfig(tag = name, type = "vmess", server = host, serverPort = port, outbound = outbound)
     }
 
     // ─── XRAY JSON CONFIG ────────────────────────────────────

@@ -566,6 +566,8 @@
     <string name="action_clear">Clear</string>
     <string name="about_license">GPLv3 • Based on sing-box by SagerNet</string>
     <string name="about_telegram">Telegram channel:</string>
+    <string name="update_available">Update available</string>
+    <string name="session_traffic">Session</string>
     <string name="back">Back</string>
     <string name="selected">Selected</string>
     <string name="default_profile_name">Subscription</string>

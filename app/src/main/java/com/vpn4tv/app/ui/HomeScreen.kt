@@ -49,16 +49,31 @@ fun HomeScreen(
     val ready by MainActivity.profileReady.observeAsState(false)
     val connectFocus = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
-    // Track active server from CommandClient
+    // Update check
+    var updateAvailable by remember { mutableStateOf<com.vpn4tv.app.utils.UpdateInfo?>(null) }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            updateAvailable = com.vpn4tv.app.utils.UpdateChecker.check()
+        }
+    }
+
+    // Track active server and traffic from CommandClient
     var activeServer by remember { mutableStateOf<String?>(null) }
     var activeDelay by remember { mutableStateOf(0) }
+    var sessionUplink by remember { mutableStateOf(0L) }
+    var sessionDownlink by remember { mutableStateOf(0L) }
 
     val commandClient = remember {
         CommandClient(
             scope,
-            listOf(CommandClient.ConnectionType.Groups),
+            listOf(CommandClient.ConnectionType.Groups, CommandClient.ConnectionType.Status),
             object : CommandClient.Handler {
+                override fun updateStatus(status: io.nekohasekai.libbox.StatusMessage) {
+                    sessionUplink = status.uplinkTotal
+                    sessionDownlink = status.downlinkTotal
+                }
                 override fun updateGroups(newGroups: MutableList<OutboundGroup>) {
                     // Find selector group and get its selected item
                     val selector = newGroups.firstOrNull { it.type == "selector" }
@@ -106,6 +121,8 @@ fun HomeScreen(
         } else if (status == Status.Stopped) {
             activeServer = null
             activeDelay = 0
+            sessionUplink = 0
+            sessionDownlink = 0
             commandClient.disconnect()
         }
     }
@@ -207,6 +224,33 @@ fun HomeScreen(
                 }
                 IconButton(onClick = onNavigateAbout) {
                     Icon(Icons.Default.Info, stringResource(R.string.title_about), tint = Color.White)
+                }
+            }
+        }
+
+        // Update banner
+        if (updateAvailable != null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .clickable {
+                        com.vpn4tv.app.utils.UpdateChecker.openDownload(context, updateAvailable!!)
+                    }
+                    .focusable(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "${stringResource(R.string.update_available)}: ${updateAvailable!!.versionName}",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("→", fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
@@ -324,6 +368,16 @@ fun HomeScreen(
                         Text("›", fontSize = 20.sp, color = Color.Gray)
                     }
                 }
+            // Session traffic
+            if (status == Status.Started && (sessionUplink + sessionDownlink) > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                val total = sessionUplink + sessionDownlink
+                Text(
+                    "${stringResource(R.string.session_traffic)}: ${formatBytes(total)}",
+                    fontSize = 14.sp,
+                    color = Color.Gray
+                )
+            }
             } else if (ready && AppSettings.selectedProfile != -1L && status == Status.Stopped) {
                 TextButton(onClick = onNavigateServers) {
                     Text(stringResource(R.string.link_servers), color = Color.Gray, fontSize = 16.sp)
@@ -337,4 +391,11 @@ fun HomeScreen(
             }
         }
     }
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes < 1024 -> "${bytes}B"
+    bytes < 1024 * 1024 -> "${"%.1f".format(bytes / 1024.0)}KB"
+    bytes < 1024 * 1024 * 1024 -> "${"%.1f".format(bytes / (1024.0 * 1024))}MB"
+    else -> "${"%.2f".format(bytes / (1024.0 * 1024 * 1024))}GB"
 }
