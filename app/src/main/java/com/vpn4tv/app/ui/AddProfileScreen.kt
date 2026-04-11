@@ -52,6 +52,35 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
     var isAdding by remember { mutableStateOf(false) }
     var isDone by remember { mutableStateOf(false) }
 
+    // Force poll on app resume (after returning from Telegram)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && !isDone) {
+                scope.launch(Dispatchers.IO) {
+                    pollServer(uuid)?.let { data ->
+                        handlePollResponse(data, context, scope,
+                            onUserInfo = { name -> userName = name; status = name },
+                            onConfig = { configs ->
+                                isAdding = true; status = "adding"
+                                scope.launch(Dispatchers.IO) {
+                                    var errorMsg = ""
+                                    val added = processConfigs(context, configs, userName) { errorMsg = it }
+                                    withContext(Dispatchers.Main) {
+                                        if (added) { isDone = true; status = "done"; delay(1000); onProfileAdded() }
+                                        else { isAdding = false; status = if (errorMsg.isNotEmpty()) "error:$errorMsg" else "failed" }
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // Polling both UUID and code
     DisposableEffect(Unit) {
         val job = scope.launch {
@@ -137,64 +166,80 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // QR + Code side by side
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // QR Code
-            val qrBitmap = remember(uuid) {
-                generateQrBitmap("https://t.me/VPN4TV_Bot?start=$uuid", 200)
-            }
-            if (qrBitmap != null) {
-                Image(
-                    bitmap = qrBitmap.asImageBitmap(),
-                    contentDescription = "QR Code",
-                    modifier = Modifier.size(200.dp)
-                )
-            }
+        // Detect phone vs TV
+        val isTV = remember {
+            context.packageManager.hasSystemFeature("android.software.leanback")
+        }
 
-            Spacer(modifier = Modifier.width(48.dp))
+        val qrBitmap = remember(uuid) {
+            generateQrBitmap("https://t.me/VPN4TV_Bot?start=$uuid", 200)
+        }
 
-            // Code + instructions
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    stringResource(R.string.add_send_code),
-                    fontSize = 18.sp,
-                    color = Color.White
-                )
-                Text(
-                    "@VPN4TV_Bot",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Text(
-                        formattedCode,
-                        fontSize = 40.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color.White,
-                        textAlign = TextAlign.Center,
-                        letterSpacing = 3.sp,
-                        modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp)
+        if (isTV) {
+            // TV: QR + Code side by side
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (qrBitmap != null) {
+                    Image(
+                        bitmap = qrBitmap.asImageBitmap(),
+                        contentDescription = "QR Code",
+                        modifier = Modifier.size(200.dp)
                     )
                 }
+                Spacer(modifier = Modifier.width(48.dp))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(stringResource(R.string.add_send_code), fontSize = 18.sp, color = Color.White)
+                    Text("@VPN4TV_Bot", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Text(formattedCode, fontSize = 40.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
+                            color = Color.White, textAlign = TextAlign.Center, letterSpacing = 3.sp,
+                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp))
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(stringResource(R.string.add_scan_qr), fontSize = 14.sp, color = Color.Gray)
+                }
+            }
+        } else {
+            // Phone: vertical layout, Telegram button
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(stringResource(R.string.add_send_code), fontSize = 18.sp, color = Color.White)
+                Text("@VPN4TV_Bot", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.height(16.dp))
 
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    stringResource(R.string.add_scan_qr),
-                    fontSize = 14.sp,
-                    color = Color.Gray
-                )
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Text(formattedCode, fontSize = 28.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
+                        color = Color.White, textAlign = TextAlign.Center, letterSpacing = 2.sp,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Open Telegram button (phone only)
+                Button(
+                    onClick = {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse("https://t.me/VPN4TV_Bot?start=$uuid"))
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp)
+                ) {
+                    Text(stringResource(R.string.open_telegram_bot), fontSize = 16.sp)
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (qrBitmap != null) {
+                    Text(stringResource(R.string.add_scan_qr), fontSize = 14.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Image(bitmap = qrBitmap.asImageBitmap(), contentDescription = "QR Code", modifier = Modifier.size(150.dp))
+                }
             }
         }
 

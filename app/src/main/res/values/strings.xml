@@ -606,6 +606,7 @@
     <string name="title_add_subscription">Add Subscription</string>
     <string name="add_send_code">Send this code to</string>
     <string name="add_scan_qr">or scan QR with phone</string>
+    <string name="open_telegram_bot">Open @VPN4TV_Bot</string>
     <string name="add_waiting">Waiting for Telegram bot…</string>
     <string name="add_adding">Adding subscription…</string>
     <string name="add_success">Subscription added!</string>
