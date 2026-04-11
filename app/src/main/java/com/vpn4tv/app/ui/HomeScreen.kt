@@ -140,8 +140,19 @@ fun HomeScreen(
         }
     }
 
+    val isTV = remember {
+        context.packageManager.hasSystemFeature("android.software.leanback")
+    }
+    val screenPadding = if (isTV) 32.dp else 16.dp
+    val titleSize = if (isTV) 28.sp else 20.sp
+    val statusSize = if (isTV) 32.sp else 24.sp
+    val buttonWidth = if (isTV) 300.dp else 240.dp
+    val buttonHeight = if (isTV) 80.dp else 56.dp
+    val buttonTextSize = if (isTV) 24.sp else 18.sp
+    val iconSize = if (isTV) 24.dp else 20.dp
+
     Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
+        modifier = Modifier.fillMaxSize().padding(screenPadding),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Top bar with profile info
@@ -162,7 +173,7 @@ fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("VPN4TV", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("VPN4TV", fontSize = titleSize, fontWeight = FontWeight.Bold, color = Color.White)
                 if (activeProfile != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -216,19 +227,19 @@ fun HomeScreen(
             }
             Row {
                 IconButton(onClick = onNavigateServers) {
-                    Icon(Icons.Default.List, stringResource(R.string.nav_servers), tint = Color.White)
+                    Icon(Icons.Default.List, stringResource(R.string.nav_servers), tint = Color.White, modifier = Modifier.size(iconSize))
                 }
                 IconButton(onClick = onNavigateLogs) {
-                    Icon(Icons.Default.Description, stringResource(R.string.title_logs), tint = Color.White)
+                    Icon(Icons.Default.Description, stringResource(R.string.title_logs), tint = Color.White, modifier = Modifier.size(iconSize))
                 }
                 IconButton(onClick = onNavigateProfiles) {
-                    Icon(Icons.Default.FolderOpen, stringResource(R.string.nav_profiles), tint = Color.White)
+                    Icon(Icons.Default.FolderOpen, stringResource(R.string.nav_profiles), tint = Color.White, modifier = Modifier.size(iconSize))
                 }
                 IconButton(onClick = onNavigateSettings) {
-                    Icon(Icons.Default.Settings, stringResource(R.string.title_settings), tint = Color.White)
+                    Icon(Icons.Default.Settings, stringResource(R.string.title_settings), tint = Color.White, modifier = Modifier.size(iconSize))
                 }
                 IconButton(onClick = onNavigateAbout) {
-                    Icon(Icons.Default.Info, stringResource(R.string.title_about), tint = Color.White)
+                    Icon(Icons.Default.Info, stringResource(R.string.title_about), tint = Color.White, modifier = Modifier.size(iconSize))
                 }
             }
         }
@@ -275,7 +286,7 @@ fun HomeScreen(
                     status == Status.Stopping -> stringResource(R.string.status_disconnecting)
                     else -> stringResource(R.string.status_disconnected)
                 },
-                fontSize = 32.sp,
+                fontSize = statusSize,
                 fontWeight = FontWeight.Bold,
                 color = when {
                     !ready -> Color.Gray
@@ -309,8 +320,8 @@ fun HomeScreen(
                     }
                 },
                 modifier = Modifier
-                    .width(300.dp)
-                    .height(80.dp)
+                    .width(buttonWidth)
+                    .height(buttonHeight)
                     .focusRequester(connectFocus),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = when (status) {
@@ -329,7 +340,7 @@ fun HomeScreen(
                         status == Status.Stopping -> stringResource(R.string.status_disconnecting)
                         else -> ""
                     },
-                    fontSize = 24.sp
+                    fontSize = buttonTextSize
                 )
             }
 
