@@ -68,18 +68,19 @@ object ConfigGenerator {
 
     private fun buildDns(proxies: List<ProxyConfig>): JSONObject {
         val proxyTag = if (proxies.size > 1) "select" else proxies.first().tag
+        val dns = ProxyParser.lastDns
 
         return JSONObject().apply {
             put("servers", JSONArray().apply {
                 put(JSONObject().apply {
                     put("tag", "dns-remote")
-                    put("address", "https://1.1.1.1/dns-query")
+                    put("address", dns.remoteDns)
                     put("address_resolver", "dns-direct")
                     put("detour", proxyTag)
                 })
                 put(JSONObject().apply {
                     put("tag", "dns-direct")
-                    put("address", "1.1.1.1")
+                    put("address", dns.directDns)
                     put("detour", "direct")
                 })
             })

@@ -17,7 +17,15 @@ data class ProxyConfig(
     val outbound: JSONObject,   // full sing-box outbound JSON
 )
 
+/** DNS extracted from subscription (if any) */
+data class SubscriptionDns(
+    val remoteDns: String = "https://1.1.1.1/dns-query",
+    val directDns: String = "1.1.1.1",
+)
+
 object ProxyParser {
+    /** Last parsed DNS config from Xray JSON subscription */
+    var lastDns = SubscriptionDns()
 
     fun parse(line: String): ProxyConfig? {
         val trimmed = line.trim()
@@ -348,6 +356,32 @@ object ProxyParser {
     private fun parseXrayConfig(config: JSONObject): List<ProxyConfig> {
         val outbounds = config.optJSONArray("outbounds") ?: return emptyList()
         val results = mutableListOf<ProxyConfig>()
+
+        // Extract DNS from Xray config
+        val dnsConfig = config.optJSONObject("dns")
+        if (dnsConfig != null) {
+            val servers = dnsConfig.optJSONArray("servers")
+            if (servers != null && servers.length() > 0) {
+                var remoteDns = "https://1.1.1.1/dns-query"
+                var directDns = "1.1.1.1"
+                for (i in 0 until servers.length()) {
+                    val server = servers.optString(i, "")
+                    if (server.startsWith("https://") || server.startsWith("https+local://")) {
+                        remoteDns = server.replace("https+local://", "https://")
+                        break
+                    }
+                }
+                // Find a plain IP for direct DNS
+                for (i in 0 until servers.length()) {
+                    val server = servers.optString(i, "")
+                    if (server.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+"))) {
+                        directDns = server
+                        break
+                    }
+                }
+                lastDns = SubscriptionDns(remoteDns, directDns)
+            }
+        }
 
         for (i in 0 until outbounds.length()) {
             val ob = outbounds.getJSONObject(i)
