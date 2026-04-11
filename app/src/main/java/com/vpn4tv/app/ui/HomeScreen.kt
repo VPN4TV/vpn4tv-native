@@ -3,6 +3,8 @@ package com.vpn4tv.app.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
@@ -152,7 +154,10 @@ fun HomeScreen(
     val iconSize = if (isTV) 24.dp else 20.dp
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(screenPadding),
+        modifier = Modifier
+            .fillMaxSize()
+            .then(if (isTV) Modifier.padding(screenPadding)
+                  else Modifier.statusBarsPadding().navigationBarsPadding().padding(screenPadding)),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Top bar with profile info
