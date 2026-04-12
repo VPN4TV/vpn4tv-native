@@ -1,7 +1,9 @@
 package com.vpn4tv.app.converter
 
+import com.vpn4tv.app.xray.XrayConfigGenerator
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 /**
  * Generates a complete sing-box JSON config from parsed proxy configs.
@@ -9,12 +11,47 @@ import org.json.JSONObject
  */
 object ConfigGenerator {
 
-    fun generate(proxies: List<ProxyConfig>): String {
+    /** Result of [generate]. The sing-box JSON is always present; xrayJson is
+     *  non-null only if at least one proxy is routed through the xray bridge. */
+    data class Result(val singboxJson: String, val xrayJson: String?)
+
+    /** Produce just the sing-box JSON string (backwards-compat shortcut). */
+    fun generate(proxies: List<ProxyConfig>): String = generateFull(proxies).singboxJson
+
+    /** Sidecar xray config path for a given sing-box config file. */
+    fun xraySidecarPath(singboxConfigPath: String): String = "$singboxConfigPath.xray.json"
+
+    fun generateFull(proxies: List<ProxyConfig>): Result {
         if (proxies.isEmpty()) throw IllegalArgumentException("No proxies to configure")
 
         // sing-box passthrough — return native config as-is
         if (proxies.size == 1 && proxies[0].type == "singbox") {
-            return proxies[0].outbound.toString(2)
+            return Result(proxies[0].outbound.toString(2), null)
+        }
+
+        // Replace xray-managed proxies (xhttp/splithttp) with sing-box socks outbounds
+        // pointing at the local xray bridge. Each xray outbound gets its own port so
+        // sing-box → xray routing is 1:1.
+        val xrayOutbounds = mutableListOf<JSONObject>()
+        val portBase = com.vpn4tv.app.xray.XrayBridge.SOCKS_PORT_BASE
+        val host = com.vpn4tv.app.xray.XrayBridge.SOCKS_HOST
+        for (proxy in proxies) {
+            val xrayOb = proxy.xrayOutbound ?: continue
+            val port = portBase + xrayOutbounds.size
+            xrayOutbounds.add(xrayOb)
+            // Replace the empty outbound placeholder with a sing-box socks outbound.
+            // bind_interface="lo" forces this connection through loopback instead
+            // of the wlan0 auto-binding that route.auto_detect_interface sets
+            // globally, which would make 127.0.0.127 unreachable.
+            proxy.outbound.apply {
+                put("type", "socks")
+                put("tag", proxy.tag)
+                put("server", host)
+                put("server_port", port)
+                put("version", "5")
+                put("network", "tcp")
+                put("bind_interface", "lo")
+            }
         }
 
         // Deduplicate tags — sing-box requires unique outbound tags
@@ -63,25 +100,48 @@ object ConfigGenerator {
         // Route
         config.put("route", buildRoute(proxies))
 
-        return config.toString(2)
+        val xrayJson = if (xrayOutbounds.isNotEmpty()) {
+            XrayConfigGenerator.build(xrayOutbounds).first
+        } else null
+
+        return Result(config.toString(2), xrayJson)
     }
 
     private fun buildDns(proxies: List<ProxyConfig>): JSONObject {
         val proxyTag = if (proxies.size > 1) "select" else proxies.first().tag
         val dns = ProxyParser.lastDns
 
+        // Parse "https://host/path" → ("https", "host")
+        // sing-box 1.14 requires {type, server} instead of address URL.
+        fun parseDnsUrl(url: String): Pair<String, String> {
+            return when {
+                url.startsWith("https://") -> {
+                    val host = url.removePrefix("https://").substringBefore("/")
+                    "https" to host
+                }
+                url.startsWith("tls://") -> "tls" to url.removePrefix("tls://").substringBefore("/")
+                url.startsWith("quic://") -> "quic" to url.removePrefix("quic://").substringBefore("/")
+                url.startsWith("h3://") -> "h3" to url.removePrefix("h3://").substringBefore("/")
+                else -> "udp" to url.removePrefix("udp://")
+            }
+        }
+
+        val (remoteType, remoteServer) = parseDnsUrl(dns.remoteDns)
+        val (directType, directServer) = parseDnsUrl(dns.directDns)
+
         return JSONObject().apply {
             put("servers", JSONArray().apply {
                 put(JSONObject().apply {
+                    put("type", remoteType)
                     put("tag", "dns-remote")
-                    put("address", dns.remoteDns)
-                    put("address_resolver", "dns-direct")
+                    put("server", remoteServer)
+                    put("domain_resolver", "dns-direct")
                     put("detour", proxyTag)
                 })
                 put(JSONObject().apply {
+                    put("type", directType)
                     put("tag", "dns-direct")
-                    put("address", dns.directDns)
-                    put("detour", "direct")
+                    put("server", directServer)
                 })
             })
             put("rules", JSONArray().apply {

@@ -2,6 +2,7 @@ package com.vpn4tv.app.constant
 
 object SettingsKey {
     const val SELECTED_PROFILE = "selected_profile"
+    const val XRAY_PORT_BASE = "xray_port_base"
     const val SERVICE_MODE = "service_mode"
     const val CHECK_UPDATE_ENABLED = "check_update_enabled"
     const val UPDATE_CHECK_PROMPTED = "update_check_prompted"

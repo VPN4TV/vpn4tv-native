@@ -202,8 +202,11 @@ private fun updateProfile(profile: Profile) {
         val subContent = com.vpn4tv.app.converter.HwidService.downloadSubscription(com.vpn4tv.app.Application.application, profile.typed.remoteURL)
         val proxies = ProxyParser.parseSubscription(subContent)
         if (proxies.isEmpty()) return
-        val config = ConfigGenerator.generate(proxies)
-        File(profile.typed.path).writeText(config)
+        val result = ConfigGenerator.generateFull(proxies)
+        File(profile.typed.path).writeText(result.singboxJson)
+        val xraySidecar = File(ConfigGenerator.xraySidecarPath(profile.typed.path))
+        if (result.xrayJson != null) xraySidecar.writeText(result.xrayJson)
+        else if (xraySidecar.exists()) xraySidecar.delete()
         profile.typed.lastUpdated = java.util.Date()
         kotlinx.coroutines.runBlocking { ProfileManager.update(profile) }
         Log.d("Profiles", "Updated ${profile.name}: ${proxies.size} proxies")

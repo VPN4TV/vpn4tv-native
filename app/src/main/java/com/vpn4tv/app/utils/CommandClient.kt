@@ -127,6 +127,7 @@ open class CommandClient(
         override fun setDefaultLogLevel(level: Int) {}
         override fun updateClashMode(newMode: String?) {}
         override fun writeConnectionEvents(events: io.nekohasekai.libbox.ConnectionEvents?) {}
+        override fun writeOutbounds(message: io.nekohasekai.libbox.OutboundGroupItemIterator?) {}
         override fun writeLogs(messageList: io.nekohasekai.libbox.LogIterator?) {
             if (messageList == null) return
             val logs = mutableListOf<String>()
