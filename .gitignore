@@ -13,3 +13,4 @@ local.properties
 /CLAUDE.md
 /.claude/
 app/libs/*.aar
+.ROADMAP.local.md
