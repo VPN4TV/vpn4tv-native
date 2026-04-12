@@ -383,12 +383,24 @@ object ProxyParser {
             }
         }
 
+        // Transports supported by sing-box (xhttp is Xray-only)
+        val supportedTransports = setOf("tcp", "raw", "ws", "websocket", "grpc", "http", "h2", "httpupgrade", "quic")
+
         for (i in 0 until outbounds.length()) {
             val ob = outbounds.getJSONObject(i)
             val protocol = ob.optString("protocol")
             val tag = ob.optString("tag", protocol)
             val settings = ob.optJSONObject("settings") ?: continue
             val stream = ob.optJSONObject("streamSettings")
+
+            // Skip outbounds with unsupported transports (e.g. xhttp)
+            if (stream != null) {
+                val network = stream.optString("network", "tcp")
+                if (network !in supportedTransports) {
+                    android.util.Log.w("ProxyParser", "Skipping outbound '$tag' with unsupported transport: $network")
+                    continue
+                }
+            }
 
             when (protocol) {
                 "vless", "vmess" -> {
