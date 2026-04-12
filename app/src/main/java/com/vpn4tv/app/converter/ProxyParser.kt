@@ -15,6 +15,14 @@ data class ProxyConfig(
     val server: String,
     val serverPort: Int,
     val outbound: JSONObject,   // full sing-box outbound JSON
+    /**
+     * If non-null, this proxy uses a transport or feature that sing-box cannot
+     * handle natively (xhttp, splithttp, SS Outline prefix). The original Xray
+     * outbound JSON is kept here so the XrayBridge can run it verbatim. The
+     * ConfigGenerator will replace [outbound] with a socks outbound pointing
+     * at the xray bridge on a unique port.
+     */
+    val xrayOutbound: JSONObject? = null,
 )
 
 /** DNS extracted from subscription (if any) */
@@ -106,6 +114,25 @@ object ProxyParser {
         val sid = params["sid"] ?: ""
         val spx = params["spx"] ?: ""
         val transportType = params["type"] ?: "tcp"
+
+        // xhttp/splithttp → route via xray bridge (sing-box doesn't support these)
+        val supportedSingboxTransports = setOf("tcp", "raw", "ws", "websocket", "grpc", "http", "h2", "httpupgrade", "quic")
+        if (transportType !in supportedSingboxTransports) {
+            if (!com.vpn4tv.app.xray.XrayBridge.isSupported) {
+                android.util.Log.w("ProxyParser", "Skipping vless '$name' (transport=$transportType, xray bridge not supported on API ${android.os.Build.VERSION.SDK_INT})")
+                return null
+            }
+            android.util.Log.i("ProxyParser", "Routing vless '$name' via xray bridge (transport=$transportType)")
+            val xrayOb = buildXrayVlessOutbound(name, uuid, host, port, security, sni, flow, fp, pbk, sid, spx, transportType, params)
+            return ProxyConfig(
+                tag = name,
+                type = "vless",
+                server = host,
+                serverPort = port,
+                outbound = JSONObject(),
+                xrayOutbound = xrayOb,
+            )
+        }
 
         val outbound = JSONObject().apply {
             put("type", "vless")
@@ -246,11 +273,27 @@ object ProxyParser {
         val password: String
         val host: String
         val port: Int
+        // SIP002 query params after host:port (e.g. ?prefix=...&outline=1)
+        var ssParams: Map<String, String> = emptyMap()
 
         if (atIdx >= 0) {
             // method:password@host:port or base64@host:port
             val userInfo = mainPart.substring(0, atIdx)
-            val serverPart = mainPart.substring(atIdx + 1)
+            var serverPart = mainPart.substring(atIdx + 1)
+
+            // Extract SIP002 query string (?key=val&...). Strip optional leading '/'.
+            val qIdx = serverPart.indexOf('?')
+            if (qIdx >= 0) {
+                val query = serverPart.substring(qIdx + 1)
+                serverPart = serverPart.substring(0, qIdx).trimEnd('/')
+                ssParams = query.split('&').mapNotNull {
+                    val eq = it.indexOf('=')
+                    if (eq < 0) null
+                    else URLDecoder.decode(it.substring(0, eq), "UTF-8") to
+                         URLDecoder.decode(it.substring(eq + 1), "UTF-8")
+                }.toMap()
+            }
+
             val decoded = tryBase64DecodeString(userInfo) ?: userInfo
             val colonIdx = decoded.indexOf(':')
             if (colonIdx < 0) return null
@@ -272,6 +315,13 @@ object ProxyParser {
         }
 
         val tag = name.ifEmpty { host }
+
+        // Outline TLS prefix (SIP002 ?prefix=) is not supported by sing-box or
+        // xray-core. We fall back to plain SS without the prefix; many Outline
+        // servers still accept connections this way, just with less stealth.
+        if (!ssParams["prefix"].isNullOrEmpty()) {
+            android.util.Log.w("ProxyParser", "SS '$tag' has Outline prefix — falling back to plain SS (prefix ignored)")
+        }
 
         val outbound = JSONObject().apply {
             put("type", "shadowsocks")
@@ -393,11 +443,27 @@ object ProxyParser {
             val settings = ob.optJSONObject("settings") ?: continue
             val stream = ob.optJSONObject("streamSettings")
 
-            // Skip outbounds with unsupported transports (e.g. xhttp)
+            // Outbounds with unsupported transports (xhttp, splithttp) go through
+            // the xray bridge instead of being skipped — but only on Android 7.0+
+            // since libv2ray.aar requires API 24. On API 23 we skip them.
             if (stream != null) {
                 val network = stream.optString("network", "tcp")
                 if (network !in supportedTransports) {
-                    android.util.Log.w("ProxyParser", "Skipping outbound '$tag' with unsupported transport: $network")
+                    if (!com.vpn4tv.app.xray.XrayBridge.isSupported) {
+                        android.util.Log.w("ProxyParser", "Skipping outbound '$tag' (transport=$network, xray bridge not supported on API ${android.os.Build.VERSION.SDK_INT})")
+                        continue
+                    }
+                    android.util.Log.i("ProxyParser", "Routing outbound '$tag' via xray bridge (transport=$network)")
+                    val server = extractXrayServer(ob) ?: continue
+                    val port = extractXrayPort(ob)
+                    results.add(ProxyConfig(
+                        tag = tag,
+                        type = protocol,
+                        server = server,
+                        serverPort = port,
+                        outbound = JSONObject(), // placeholder, replaced in ConfigGenerator
+                        xrayOutbound = JSONObject(ob.toString()),
+                    ))
                     continue
                 }
             }
@@ -473,6 +539,90 @@ object ProxyParser {
             }
         }
         return results
+    }
+
+    /**
+     * Build an Xray-format vless outbound for use by the xray bridge.
+     * Used when a vless URI declares an unsupported sing-box transport
+     * (e.g. xhttp/splithttp). Mirrors the JSON structure xray-core expects.
+     */
+    private fun buildXrayVlessOutbound(
+        tag: String, uuid: String, host: String, port: Int,
+        security: String, sni: String, flow: String, fp: String,
+        pbk: String, sid: String, spx: String, transportType: String,
+        params: Map<String, String>,
+    ): JSONObject = JSONObject().apply {
+        put("tag", tag)
+        put("protocol", "vless")
+        put("settings", JSONObject().apply {
+            put("vnext", org.json.JSONArray().apply {
+                put(JSONObject().apply {
+                    put("address", host)
+                    put("port", port)
+                    put("users", org.json.JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("id", uuid)
+                            put("encryption", "none")
+                            if (flow.isNotEmpty()) put("flow", flow)
+                        })
+                    })
+                })
+            })
+        })
+        put("streamSettings", JSONObject().apply {
+            put("network", transportType)
+            if (security == "tls") {
+                put("security", "tls")
+                put("tlsSettings", JSONObject().apply {
+                    put("serverName", sni)
+                    put("fingerprint", fp)
+                })
+            } else if (security == "reality") {
+                put("security", "reality")
+                put("realitySettings", JSONObject().apply {
+                    put("serverName", sni)
+                    put("fingerprint", fp)
+                    put("publicKey", pbk)
+                    put("shortId", sid)
+                    if (spx.isNotEmpty()) put("spiderX", spx)
+                })
+            }
+            // xhttp / splithttp settings (params: path, host, mode)
+            when (transportType) {
+                "xhttp", "splithttp" -> {
+                    put("xhttpSettings", JSONObject().apply {
+                        params["path"]?.let { put("path", it) }
+                        params["host"]?.let { put("host", it) }
+                        params["mode"]?.let { put("mode", it) }
+                    })
+                }
+            }
+        })
+    }
+
+    /**
+     * Extract remote server host from an Xray outbound, for display and
+     * for the sing-box socks-to-xray shim. Returns null if the structure
+     * is unexpected.
+     */
+    private fun extractXrayServer(ob: JSONObject): String? {
+        val settings = ob.optJSONObject("settings") ?: return null
+        // vless/vmess → settings.vnext[0].address
+        settings.optJSONArray("vnext")?.optJSONObject(0)?.let {
+            return it.optString("address").ifEmpty { null }
+        }
+        // trojan/shadowsocks → settings.servers[0].address
+        settings.optJSONArray("servers")?.optJSONObject(0)?.let {
+            return it.optString("address").ifEmpty { null }
+        }
+        return null
+    }
+
+    private fun extractXrayPort(ob: JSONObject): Int {
+        val settings = ob.optJSONObject("settings") ?: return 443
+        settings.optJSONArray("vnext")?.optJSONObject(0)?.let { return it.optInt("port", 443) }
+        settings.optJSONArray("servers")?.optJSONObject(0)?.let { return it.optInt("port", 443) }
+        return 443
     }
 
     private fun putXrayTls(obj: JSONObject, stream: JSONObject) {

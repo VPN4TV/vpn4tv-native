@@ -38,6 +38,25 @@ object Settings {
     }
     val dataStore = RoomPreferenceDataStore(instance.keyValuePairDao())
     var selectedProfile by dataStore.long(SettingsKey.SELECTED_PROFILE) { -1L }
+
+    /**
+     * Base port for the local xray SOCKS5 bridge. Randomized once on first
+     * launch and persisted so scanners cannot rely on a fixed well-known port.
+     * Range: 20000–59000 (high unprivileged, avoids common services).
+     *
+     * WARNING: the underlying PreferenceProxy re-evaluates the default lambda
+     * on every read when the key is missing from the DB, which would produce
+     * a *different* port each time. Use [ensureXrayPortBase] early in app
+     * startup to persist a stable value before anyone reads it.
+     */
+    var xrayPortBase by dataStore.int(SettingsKey.XRAY_PORT_BASE) { 0 }
+
+    /** Persist a stable xrayPortBase on first launch. Safe to call repeatedly. */
+    fun ensureXrayPortBase() {
+        if (xrayPortBase == 0) {
+            xrayPortBase = (20000..59000).random()
+        }
+    }
     var serviceMode by dataStore.string(SettingsKey.SERVICE_MODE) { ServiceMode.NORMAL }
     var startedByUser by dataStore.boolean(SettingsKey.STARTED_BY_USER)
     var autoConnectOnBoot by dataStore.boolean(SettingsKey.AUTO_CONNECT_ON_BOOT) { true }

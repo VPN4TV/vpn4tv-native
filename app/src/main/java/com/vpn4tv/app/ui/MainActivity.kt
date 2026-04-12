@@ -137,9 +137,12 @@ class MainActivity : ComponentActivity() {
                 Log.w(TAG, "No proxies in subscription")
                 return
             }
-            val config = ConfigGenerator.generate(proxies)
-            File(profile.typed.path).writeText(config)
-            Log.d(TAG, "Config updated: ${proxies.size} proxies")
+            val result = ConfigGenerator.generateFull(proxies)
+            File(profile.typed.path).writeText(result.singboxJson)
+            val xraySidecar = File(ConfigGenerator.xraySidecarPath(profile.typed.path))
+            if (result.xrayJson != null) xraySidecar.writeText(result.xrayJson)
+            else if (xraySidecar.exists()) xraySidecar.delete()
+            Log.d(TAG, "Config updated: ${proxies.size} proxies, xray=${result.xrayJson != null}")
         } catch (e: Exception) {
             Log.e(TAG, "Config update failed: ${e.message}")
         }

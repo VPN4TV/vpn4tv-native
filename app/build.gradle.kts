@@ -30,7 +30,7 @@ android {
         applicationId = "com.vpn4tv.hiddify"
         minSdk = 23
         targetSdk = 36
-        versionCode = 50005
+        versionCode = 50010
         versionName = "5.0.0"
         base.archivesName.set("VPN4TV-Native-${versionName}")
     }
@@ -84,6 +84,13 @@ android {
         buildConfig = true
     }
 
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -98,7 +105,7 @@ android {
 }
 
 dependencies {
-    // libbox (sing-box JNI core)
+    // libbox (sing-box JNI core with embedded xray-core for xhttp/splithttp)
     implementation(files("libs/libbox.aar"))
 
     // AndroidX Core

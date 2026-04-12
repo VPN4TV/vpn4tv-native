@@ -35,7 +35,16 @@ class Application : Application() {
         super.onCreate()
         AppLifecycleObserver.register(this)
 
-        Libbox.setLocale(Locale.getDefault().toLanguageTag().replace("-", "_"))
+        // Persist xray bridge port on first run so it stays stable across reads.
+        Settings.ensureXrayPortBase()
+
+        // libbox 1.14+ expects BCP-47 tags ("ru-RU"), not POSIX ("ru_RU").
+        try {
+            Libbox.setLocale(Locale.getDefault().toLanguageTag())
+        } catch (e: Exception) {
+            Log.w("Application", "unsupported locale, falling back to en: ${e.message}")
+            try { Libbox.setLocale("en") } catch (_: Exception) {}
+        }
 
         val baseDir = filesDir
         baseDir.mkdirs()
@@ -149,6 +158,19 @@ class Application : Application() {
     }
 
     companion object {
+        init {
+            // SIGSYS seccomp workaround must be installed BEFORE libbox.so
+            // loads. On Android < 12 seccomp blocks certain syscalls (arm32
+            // syscall 422 = clock_gettime64, 434 = pidfd_open, etc.) that
+            // Go 1.23+ runtime uses; the handler writes -ENOSYS into the
+            // return register so Go's wrapper falls back. See golang/go#70508.
+            try {
+                System.loadLibrary("sigsys_handler")
+            } catch (e: UnsatisfiedLinkError) {
+                Log.e("Application", "failed to load sigsys_handler", e)
+            }
+        }
+
         lateinit var application: BoxApplication
         val notification by lazy { application.getSystemService<NotificationManager>()!! }
         val connectivity by lazy { application.getSystemService<ConnectivityManager>()!! }

@@ -147,6 +147,19 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
             DefaultNetworkMonitor.start()
 
+            // Start xray bridge if the profile needs it (xhttp/splithttp outbounds)
+            val xraySidecar = File(com.vpn4tv.app.converter.ConfigGenerator.xraySidecarPath(profile.typed.path))
+            if (xraySidecar.exists()) {
+                try {
+                    Log.d(TAG, "Starting xray bridge from ${xraySidecar.name}")
+                    com.vpn4tv.app.xray.XrayBridge.start(service.applicationContext, xraySidecar.readText())
+                } catch (e: Exception) {
+                    Log.e(TAG, "xray bridge failed to start: ${e.message}", e)
+                    stopAndAlert(Alert.CreateService, "xray: ${e.message}")
+                    return
+                }
+            }
+
             Log.d(TAG, "Starting sing-box with config ${content.length} bytes...")
             try {
                 Log.d(TAG, "Calling commandServer.startOrReloadService()")
@@ -328,6 +341,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 close()
 //                Seq.destroyRef(refnum)
             }
+            com.vpn4tv.app.xray.XrayBridge.stop()
             Settings.startedByUser = false
             withContext(Dispatchers.Main) {
                 status.value = Status.Stopped
@@ -358,6 +372,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             closeService()
             commandServer.close()
         }
+        com.vpn4tv.app.xray.XrayBridge.stop()
         withContext(Dispatchers.Main) {
             if (receiverRegistered) {
                 service.unregisterReceiver(receiver)
@@ -460,6 +475,10 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
     override fun writeDebugMessage(message: String?) {
         Log.d("sing-box", message!!)
+    }
+
+    override fun triggerNativeCrash() {
+        // Only used by diagnostic tooling. Intentionally a no-op.
     }
 
     private fun restoreSavedServer() {

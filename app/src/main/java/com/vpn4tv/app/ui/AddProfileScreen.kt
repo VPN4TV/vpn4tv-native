@@ -347,8 +347,11 @@ private suspend fun processConfigs(
         val nextId = ProfileManager.nextFileID()
         val configPath = File(profilesDir, "${nextId}.json").absolutePath
 
-        val singboxConfig = ConfigGenerator.generate(proxies)
-        File(configPath).writeText(singboxConfig)
+        val result = ConfigGenerator.generateFull(proxies)
+        File(configPath).writeText(result.singboxJson)
+        if (result.xrayJson != null) {
+            File(ConfigGenerator.xraySidecarPath(configPath)).writeText(result.xrayJson)
+        }
 
         val profileName = content.lines()
             .firstOrNull { it.startsWith("#profile-title:") }

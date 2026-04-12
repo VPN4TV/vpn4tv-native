@@ -198,8 +198,11 @@ fun HomeScreen(
                                                 val sub = com.vpn4tv.app.converter.HwidService.downloadSubscription(com.vpn4tv.app.Application.application, p.typed.remoteURL)
                                                 val proxies = com.vpn4tv.app.converter.ProxyParser.parseSubscription(sub)
                                                 if (proxies.isNotEmpty()) {
-                                                    val config = com.vpn4tv.app.converter.ConfigGenerator.generate(proxies)
-                                                    java.io.File(p.typed.path).writeText(config)
+                                                    val result = com.vpn4tv.app.converter.ConfigGenerator.generateFull(proxies)
+                                                    java.io.File(p.typed.path).writeText(result.singboxJson)
+                                                    val xraySidecar = java.io.File(com.vpn4tv.app.converter.ConfigGenerator.xraySidecarPath(p.typed.path))
+                                                    if (result.xrayJson != null) xraySidecar.writeText(result.xrayJson)
+                                                    else if (xraySidecar.exists()) xraySidecar.delete()
                                                     p.typed.lastUpdated = java.util.Date()
                                                     com.vpn4tv.app.database.ProfileManager.update(p)
                                                 }
