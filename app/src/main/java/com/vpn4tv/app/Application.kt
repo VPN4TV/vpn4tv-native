@@ -37,6 +37,8 @@ class Application : Application() {
 
         // Persist xray bridge port on first run so it stays stable across reads.
         Settings.ensureXrayPortBase()
+        // Drop the global selectedServer key from older versions; per-profile keys take over.
+        com.vpn4tv.app.ui.migrateLegacySelectedServer(this)
 
         // libbox 1.14+ expects BCP-47 tags ("ru-RU"), not POSIX ("ru_RU").
         try {

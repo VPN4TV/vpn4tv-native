@@ -348,10 +348,7 @@ private suspend fun processConfigs(
         val configPath = File(profilesDir, "${nextId}.json").absolutePath
 
         val result = ConfigGenerator.generateFull(proxies)
-        File(configPath).writeText(result.singboxJson)
-        if (result.xrayJson != null) {
-            File(ConfigGenerator.xraySidecarPath(configPath)).writeText(result.xrayJson)
-        }
+        ConfigGenerator.writeAll(configPath, result)
 
         val profileName = content.lines()
             .firstOrNull { it.startsWith("#profile-title:") }
