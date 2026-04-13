@@ -16,13 +16,20 @@ data class ProxyConfig(
     val serverPort: Int,
     val outbound: JSONObject,   // full sing-box outbound JSON
     /**
-     * If non-null, this proxy uses a transport or feature that sing-box cannot
-     * handle natively (xhttp, splithttp, SS Outline prefix). The original Xray
-     * outbound JSON is kept here so the XrayBridge can run it verbatim. The
-     * ConfigGenerator will replace [outbound] with a socks outbound pointing
-     * at the xray bridge on a unique port.
+     * If non-null, this proxy uses an Xray-only transport (xhttp/splithttp).
+     * The original Xray outbound JSON is kept here so the XrayBridge can run
+     * it verbatim. ConfigGenerator replaces [outbound] with a sing-box socks
+     * outbound pointing at the xray bridge on a unique port.
      */
     val xrayOutbound: JSONObject? = null,
+    /**
+     * If non-null, this proxy is a Shadowsocks endpoint that uses Outline-style
+     * features (SIP002 prefix obfuscation) which neither sing-box nor xray
+     * support natively. The full original ss:// URL is kept here so outline-sdk
+     * can dial it; ConfigGenerator replaces [outbound] with a sing-box socks
+     * outbound pointing at the outline bridge on a unique port.
+     */
+    val outlineUrl: String? = null,
 )
 
 /** DNS extracted from subscription (if any) */
@@ -316,11 +323,20 @@ object ProxyParser {
 
         val tag = name.ifEmpty { host }
 
-        // Outline TLS prefix (SIP002 ?prefix=) is not supported by sing-box or
-        // xray-core. We fall back to plain SS without the prefix; many Outline
-        // servers still accept connections this way, just with less stealth.
-        if (!ssParams["prefix"].isNullOrEmpty()) {
-            android.util.Log.w("ProxyParser", "SS '$tag' has Outline prefix — falling back to plain SS (prefix ignored)")
+        // Outline-style Shadowsocks (SIP002 ?prefix= or Outline marker ?outline=1)
+        // is not supported by sing-box or xray-core. Route through the embedded
+        // outline-sdk bridge in libbox, which applies prefix obfuscation.
+        val isOutline = !ssParams["prefix"].isNullOrEmpty() || ssParams["outline"] == "1"
+        if (isOutline) {
+            android.util.Log.i("ProxyParser", "Routing SS '$tag' via outline bridge (prefix=${ssParams["prefix"] != null}, outline=${ssParams["outline"]})")
+            return ProxyConfig(
+                tag = tag,
+                type = "shadowsocks",
+                server = host,
+                serverPort = port,
+                outbound = JSONObject(), // placeholder, replaced in ConfigGenerator
+                outlineUrl = uri,
+            )
         }
 
         val outbound = JSONObject().apply {

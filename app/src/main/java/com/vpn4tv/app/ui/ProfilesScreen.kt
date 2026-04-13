@@ -203,10 +203,7 @@ private fun updateProfile(profile: Profile) {
         val proxies = ProxyParser.parseSubscription(subContent)
         if (proxies.isEmpty()) return
         val result = ConfigGenerator.generateFull(proxies)
-        File(profile.typed.path).writeText(result.singboxJson)
-        val xraySidecar = File(ConfigGenerator.xraySidecarPath(profile.typed.path))
-        if (result.xrayJson != null) xraySidecar.writeText(result.xrayJson)
-        else if (xraySidecar.exists()) xraySidecar.delete()
+        ConfigGenerator.writeAll(profile.typed.path, result)
         profile.typed.lastUpdated = java.util.Date()
         kotlinx.coroutines.runBlocking { ProfileManager.update(profile) }
         Log.d("Profiles", "Updated ${profile.name}: ${proxies.size} proxies")

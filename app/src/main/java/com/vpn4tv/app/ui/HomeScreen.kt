@@ -79,6 +79,8 @@ fun HomeScreen(
                     sessionDownlink = status.downlinkTotal
                 }
                 override fun updateGroups(newGroups: MutableList<OutboundGroup>) {
+                    android.util.Log.d("HomeScreen", "updateGroups: ${newGroups.size} groups")
+                    newGroups.forEach { android.util.Log.d("HomeScreen", "  group tag='${it.tag}' type='${it.type}' selected='${it.selected}'") }
                     // Find selector group and get its selected item
                     val selector = newGroups.firstOrNull { it.type == "selector" }
                     if (selector != null) {
@@ -199,10 +201,7 @@ fun HomeScreen(
                                                 val proxies = com.vpn4tv.app.converter.ProxyParser.parseSubscription(sub)
                                                 if (proxies.isNotEmpty()) {
                                                     val result = com.vpn4tv.app.converter.ConfigGenerator.generateFull(proxies)
-                                                    java.io.File(p.typed.path).writeText(result.singboxJson)
-                                                    val xraySidecar = java.io.File(com.vpn4tv.app.converter.ConfigGenerator.xraySidecarPath(p.typed.path))
-                                                    if (result.xrayJson != null) xraySidecar.writeText(result.xrayJson)
-                                                    else if (xraySidecar.exists()) xraySidecar.delete()
+                                                    com.vpn4tv.app.converter.ConfigGenerator.writeAll(p.typed.path, result)
                                                     p.typed.lastUpdated = java.util.Date()
                                                     com.vpn4tv.app.database.ProfileManager.update(p)
                                                 }

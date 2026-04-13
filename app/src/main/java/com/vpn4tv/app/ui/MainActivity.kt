@@ -138,11 +138,8 @@ class MainActivity : ComponentActivity() {
                 return
             }
             val result = ConfigGenerator.generateFull(proxies)
-            File(profile.typed.path).writeText(result.singboxJson)
-            val xraySidecar = File(ConfigGenerator.xraySidecarPath(profile.typed.path))
-            if (result.xrayJson != null) xraySidecar.writeText(result.xrayJson)
-            else if (xraySidecar.exists()) xraySidecar.delete()
-            Log.d(TAG, "Config updated: ${proxies.size} proxies, xray=${result.xrayJson != null}")
+            ConfigGenerator.writeAll(profile.typed.path, result)
+            Log.d(TAG, "Config updated: ${proxies.size} proxies, xray=${result.xrayJson != null}, outline=${result.outlineJson != null}")
         } catch (e: Exception) {
             Log.e(TAG, "Config update failed: ${e.message}")
         }

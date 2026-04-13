@@ -160,7 +160,25 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 }
             }
 
+            // Start outline bridge if the profile has Outline-prefix Shadowsocks endpoints
+            val outlineSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.outlineSidecarPath(profile.typed.path))
+            if (outlineSidecar.exists()) {
+                try {
+                    Log.d(TAG, "Starting outline bridge from ${outlineSidecar.name}")
+                    com.vpn4tv.app.outline.OutlineBridge.start(outlineSidecar.readText())
+                } catch (e: Exception) {
+                    Log.e(TAG, "outline bridge failed to start: ${e.message}", e)
+                    com.vpn4tv.app.xray.XrayBridge.stop()
+            com.vpn4tv.app.outline.OutlineBridge.stop()
+                    stopAndAlert(Alert.CreateService, "outline: ${e.message}")
+                    return
+                }
+            }
+
             Log.d(TAG, "Starting sing-box with config ${content.length} bytes...")
+            content.chunked(3000).forEachIndexed { idx, chunk ->
+                Log.d(TAG, "singbox config[$idx]: $chunk")
+            }
             try {
                 Log.d(TAG, "Calling commandServer.startOrReloadService()")
                 commandServer.startOrReloadService(
@@ -342,6 +360,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 //                Seq.destroyRef(refnum)
             }
             com.vpn4tv.app.xray.XrayBridge.stop()
+            com.vpn4tv.app.outline.OutlineBridge.stop()
             Settings.startedByUser = false
             withContext(Dispatchers.Main) {
                 status.value = Status.Stopped

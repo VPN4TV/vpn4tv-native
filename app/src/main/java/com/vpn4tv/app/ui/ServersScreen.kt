@@ -225,19 +225,32 @@ data class ServerItem(
 )
 
 private const val PREFS_NAME = "server_selection"
-private const val KEY_SELECTED_SERVER = "selected_server"
+private const val LEGACY_KEY = "selected_server"
+
+private fun selectedServerKey(): String {
+    val pid = com.vpn4tv.app.database.Settings.selectedProfile
+    return "selected_server_$pid"
+}
+
+/** One-shot migration: drop the pre-multi-profile key. Idempotent. */
+fun migrateLegacySelectedServer(context: Context) {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    if (prefs.contains(LEGACY_KEY)) {
+        prefs.edit().remove(LEGACY_KEY).apply()
+    }
+}
 
 fun saveSelectedServer(context: Context, serverTag: String) {
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        .edit().putString(KEY_SELECTED_SERVER, serverTag).apply()
+        .edit().putString(selectedServerKey(), serverTag).apply()
 }
 
 fun getSavedServer(context: Context): String? {
     return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        .getString(KEY_SELECTED_SERVER, null)
+        .getString(selectedServerKey(), null)
 }
 
 fun clearSavedServer(context: Context) {
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        .edit().remove(KEY_SELECTED_SERVER).apply()
+        .edit().remove(selectedServerKey()).apply()
 }
