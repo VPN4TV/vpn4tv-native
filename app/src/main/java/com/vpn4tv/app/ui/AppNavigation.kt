@@ -7,6 +7,7 @@ import androidx.compose.runtime.livedata.observeAsState
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.withContext
 
 object Routes {
     const val HOME = "home"
@@ -26,14 +27,25 @@ fun AppNavigation(
 ) {
     val navController = rememberNavController()
     val ready by MainActivity.profileReady.observeAsState(false)
-    val hasProfile = ready && com.vpn4tv.app.database.Settings.selectedProfile != -1L
 
-    // Auto-navigate to add profile on first launch
+    // Auto-navigate to add profile on first launch, but only if there are
+    // genuinely no profiles on disk — not just because selectedProfile is
+    // -1L (which can race with ensureDefaultProfile on cold start and with
+    // post-reinstall state where profiles already exist on disk but the
+    // Settings DB has been wiped).
     LaunchedEffect(ready) {
-        if (ready && !hasProfile) {
+        if (!ready) return@LaunchedEffect
+        val profiles = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.vpn4tv.app.database.ProfileManager.list()
+        }
+        if (profiles.isEmpty()) {
             navController.navigate(Routes.ADD_PROFILE) {
                 popUpTo(Routes.HOME)
             }
+            return@LaunchedEffect
+        }
+        if (com.vpn4tv.app.database.Settings.selectedProfile == -1L) {
+            com.vpn4tv.app.database.Settings.selectedProfile = profiles.first().id
         }
     }
 

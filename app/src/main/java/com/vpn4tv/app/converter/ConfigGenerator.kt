@@ -11,9 +11,14 @@ import java.io.File
  */
 object ConfigGenerator {
 
-    /** Result of [generate]. The sing-box JSON is always present; xrayJson and
-     *  outlineJson are non-null only when corresponding bridges are needed. */
-    data class Result(val singboxJson: String, val xrayJson: String?, val outlineJson: String?)
+    /** Result of [generate]. The sing-box JSON is always present; bridge
+     *  sidecar JSONs are non-null only when that bridge is needed. */
+    data class Result(
+        val singboxJson: String,
+        val xrayJson: String?,
+        val outlineJson: String?,
+        val wgJson: String?,
+    )
 
     /** Produce just the sing-box JSON string (backwards-compat shortcut). */
     fun generate(proxies: List<ProxyConfig>): String = generateFull(proxies).singboxJson
@@ -24,19 +29,25 @@ object ConfigGenerator {
     /** Sidecar outline config path for a given sing-box config file. */
     fun outlineSidecarPath(singboxConfigPath: String): String = "$singboxConfigPath.outline.json"
 
+    /** Sidecar wireproxy-awg config path for a given sing-box config file. */
+    fun wgSidecarPath(singboxConfigPath: String): String = "$singboxConfigPath.wg.json"
+
     /**
-     * Convenience helper: writes [singboxJson] to [configPath], plus xray and
-     * outline sidecars next to it, deleting any stale sidecars when the new
-     * result no longer needs them. Returns nothing — call after [generateFull].
+     * Convenience helper: writes [singboxJson] to [configPath], plus every
+     * sidecar next to it, deleting any stale sidecars when the new result
+     * no longer needs them. Call after [generateFull].
      */
     fun writeAll(configPath: String, result: Result) {
         File(configPath).writeText(result.singboxJson)
-        val xraySidecar = File(xraySidecarPath(configPath))
-        if (result.xrayJson != null) xraySidecar.writeText(result.xrayJson)
-        else if (xraySidecar.exists()) xraySidecar.delete()
-        val outlineSidecar = File(outlineSidecarPath(configPath))
-        if (result.outlineJson != null) outlineSidecar.writeText(result.outlineJson)
-        else if (outlineSidecar.exists()) outlineSidecar.delete()
+        writeOrDelete(xraySidecarPath(configPath), result.xrayJson)
+        writeOrDelete(outlineSidecarPath(configPath), result.outlineJson)
+        writeOrDelete(wgSidecarPath(configPath), result.wgJson)
+    }
+
+    private fun writeOrDelete(path: String, content: String?) {
+        val f = File(path)
+        if (content != null) f.writeText(content)
+        else if (f.exists()) f.delete()
     }
 
     fun generateFull(proxies: List<ProxyConfig>): Result {
@@ -44,7 +55,7 @@ object ConfigGenerator {
 
         // sing-box passthrough — return native config as-is
         if (proxies.size == 1 && proxies[0].type == "singbox") {
-            return Result(proxies[0].outbound.toString(2), null, null)
+            return Result(proxies[0].outbound.toString(2), null, null, null)
         }
 
         // Replace xray-managed proxies (xhttp/splithttp) with sing-box socks outbounds
@@ -90,6 +101,32 @@ object ConfigGenerator {
                 put("version", "5")
                 put("network", "tcp")
                 put("bind_interface", "lo")
+            }
+        }
+
+        // And for AmneziaWG (awg 2.0) proxies: userspace WG via wireproxy-awg.
+        val wgInis = mutableListOf<String>()
+        val wgPortBase = portBase +
+            com.vpn4tv.app.wireproxy.WgConfigGenerator.WG_PORT_OFFSET
+        for (proxy in proxies) {
+            val ini = proxy.awgIni ?: continue
+            val port = wgPortBase + wgInis.size
+            wgInis.add(ini)
+            proxy.outbound.apply {
+                put("type", "socks")
+                put("tag", proxy.tag)
+                put("server", host)
+                put("server_port", port)
+                put("version", "5")
+                put("network", "tcp")
+                put("bind_interface", "lo")
+                // Force sing-box to resolve domains locally before sending
+                // SOCKS CONNECT to the wireproxy bridge — netstack inside
+                // wireproxy has no stable resolver for the bot's wg:// URI
+                // format (which doesn't carry DNS fields). With ipv4_only,
+                // sing-box hijacks DNS, looks up the IP via dns-direct, and
+                // hands us an IP:port in the CONNECT request.
+                put("domain_strategy", "ipv4_only")
             }
         }
 
@@ -147,17 +184,21 @@ object ConfigGenerator {
             com.vpn4tv.app.outline.OutlineConfigGenerator.build(outlineUrls, outlinePortBase)
         } else null
 
-        return Result(config.toString(2), xrayJson, outlineJson)
+        val wgJson = if (wgInis.isNotEmpty()) {
+            com.vpn4tv.app.wireproxy.WgConfigGenerator.build(wgInis, wgPortBase)
+        } else null
+
+        return Result(config.toString(2), xrayJson, outlineJson, wgJson)
     }
 
     private fun buildDns(proxies: List<ProxyConfig>): JSONObject {
         // ConfigGenerator always builds a "select" group, so DNS detour can
-        // unconditionally point at it. Exception: if every proxy is a TCP-only
-        // outline bridge (which doesn't speak SOCKS UDP), drop the detour
-        // entirely so DNS just resolves locally — otherwise sing-box errors
-        // with "UDP is not supported by outbound: select".
-        val allOutlineOnly = proxies.all { it.outlineUrl != null }
-        val proxyTag: String? = if (allOutlineOnly) null else "select"
+        // unconditionally point at it. Exception: if every proxy is routed
+        // through a TCP-only socks bridge (outline or wireproxy), drop the
+        // detour entirely so DNS just resolves locally — otherwise sing-box
+        // errors with "UDP is not supported by outbound: select".
+        val allTcpBridged = proxies.all { it.outlineUrl != null || it.awgIni != null }
+        val proxyTag: String? = if (allTcpBridged) null else "select"
         val dns = ProxyParser.lastDns
 
         // Parse "https://host/path" → ("https", "host")
@@ -199,7 +240,7 @@ object ConfigGenerator {
                     put("server", "dns-direct")
                 })
             })
-            if (allOutlineOnly) {
+            if (allTcpBridged) {
                 // Top-level default strategy as a belt-and-suspenders fallback
                 // in case an in-app DNS resolver bypasses the rules above.
                 put("strategy", "ipv4_only")
@@ -251,12 +292,13 @@ object ConfigGenerator {
     }
 
     private fun buildRoute(proxies: List<ProxyConfig>): JSONObject {
-        // For outline-only profiles, the proxy outbound (socks → outline bridge)
-        // does not speak SOCKS UDP, so any UDP traffic that ends up routed via
-        // "select" causes "UDP is not supported by outbound: select" errors.
-        // Bypass that by routing UDP through "direct" instead — privacy is
-        // weaker but the alternative is a broken connection.
-        val allOutlineOnly = proxies.all { it.outlineUrl != null }
+        // For TCP-bridged profiles (outline, wireproxy), the proxy outbound
+        // (socks → bridge) does not speak SOCKS UDP, so any UDP traffic that
+        // ends up routed via "select" causes "UDP is not supported by
+        // outbound: select" errors. Bypass that by routing UDP through
+        // "direct" instead — privacy is weaker but the alternative is a
+        // broken connection.
+        val allTcpBridged = proxies.all { it.outlineUrl != null || it.awgIni != null }
         return JSONObject().apply {
             put("rules", JSONArray().apply {
                 // sing-box 1.13+: sniff via rule action
@@ -268,7 +310,7 @@ object ConfigGenerator {
                     put("protocol", "dns")
                     put("action", "hijack-dns")
                 })
-                if (allOutlineOnly) {
+                if (allTcpBridged) {
                     put(JSONObject().apply {
                         put("network", "udp")
                         put("outbound", "direct")

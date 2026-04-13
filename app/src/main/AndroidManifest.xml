@@ -42,6 +42,22 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <!-- Import subscription links: vpn://, wg://, vless://, vmess://,
+                 trojan://, hy2://, hysteria2://, ss://. Used by adb to push
+                 test subscriptions and by any share-sheet integration. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="vpn" />
+                <data android:scheme="wg" />
+                <data android:scheme="vless" />
+                <data android:scheme="vmess" />
+                <data android:scheme="trojan" />
+                <data android:scheme="hy2" />
+                <data android:scheme="hysteria2" />
+                <data android:scheme="ss" />
+            </intent-filter>
         </activity>
 
         <service

@@ -30,6 +30,14 @@ data class ProxyConfig(
      * outbound pointing at the outline bridge on a unique port.
      */
     val outlineUrl: String? = null,
+    /**
+     * If non-null, this proxy is an AmneziaWG (awg 2.0) endpoint that sing-box
+     * cannot handle natively. The value is a wg-quick INI string that the
+     * wireproxy-awg bridge parses and runs as a userspace amneziawg-go device.
+     * ConfigGenerator replaces [outbound] with a sing-box socks outbound
+     * pointing at the wireproxy bridge on a unique port.
+     */
+    val awgIni: String? = null,
 )
 
 /** DNS extracted from subscription (if any) */
@@ -52,12 +60,31 @@ object ProxyParser {
             trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") -> parseHysteria2(trimmed)
             trimmed.startsWith("trojan://") -> parseTrojan(trimmed)
             trimmed.startsWith("ss://") -> parseShadowsocks(trimmed)
+            trimmed.startsWith("wg://") -> parseWgUri(trimmed)
             else -> null
         }
     }
 
     fun parseSubscription(content: String): List<ProxyConfig> {
         val trimmed = content.trim()
+
+        // AmneziaVPN "vpn://..." format: base64url(4-byte header + zlib(JSON))
+        // with nested containers[].awg.last_config carrying the real INI.
+        val amneziaBody = when {
+            trimmed.startsWith("vpn://") -> trimmed.removePrefix("vpn://")
+            looksLikeAmneziaVpn(trimmed) -> trimmed
+            else -> null
+        }
+        if (amneziaBody != null) {
+            parseAmneziaVpn(amneziaBody)?.let { return listOf(it) }
+        }
+
+        // Detect wg-quick / AmneziaWG INI. Typical subs start with [Interface]
+        // or include both [Interface] and [Peer] sections. We route the whole
+        // file to the wireproxy bridge instead of parsing it line by line.
+        if (looksLikeWgIni(trimmed)) {
+            return parseWgIni(trimmed)?.let { listOf(it) } ?: emptyList()
+        }
 
         // Detect JSON config (sing-box or Xray)
         if (trimmed.startsWith("{")) {
@@ -418,6 +445,187 @@ object ProxyParser {
     }
 
     // ─── XRAY JSON CONFIG ────────────────────────────────────
+
+    // ─── AMNEZIAVPN vpn:// ───────────────────────────────────
+
+    /** AmneziaVPN payload: base64url-decodable, first 4 bytes a length header,
+     *  remainder zlib-compressed JSON. Cheap pre-check. */
+    private fun looksLikeAmneziaVpn(text: String): Boolean {
+        if (text.contains("://")) return false
+        if (text.length < 50) return false
+        // base64url alphabet only
+        if (!text.all { it.isLetterOrDigit() || it == '-' || it == '_' || it == '=' }) return false
+        return text.startsWith("AAA") // 4-byte length header ~always starts with 00 00
+    }
+
+    /** Decodes an AmneziaVPN payload and returns a ProxyConfig whose awgIni
+     *  field is the wg-quick INI embedded in containers[0].awg.last_config.config.
+     *  Substitutes placeholder DNS tokens with the top-level dns1/dns2. */
+    private fun parseAmneziaVpn(body: String): ProxyConfig? {
+        return try {
+            val bytes = Base64.decode(body, Base64.URL_SAFE or Base64.NO_WRAP)
+            if (bytes.size < 5) return null
+            // Skip 4-byte big-endian length header, decompress the rest.
+            val payload = java.util.zip.InflaterInputStream(
+                bytes.inputStream().apply { skip(4) }
+            ).readBytes()
+            val root = JSONObject(String(payload, Charsets.UTF_8))
+            val dns1 = root.optString("dns1", "1.1.1.1")
+            val dns2 = root.optString("dns2", "1.0.0.1")
+            val description = root.optString("description", root.optString("hostName", "AmneziaVPN"))
+            val containers = root.optJSONArray("containers") ?: return null
+            if (containers.length() == 0) return null
+            val awg = containers.getJSONObject(0).optJSONObject("awg") ?: return null
+            val lastConfigRaw = awg.optString("last_config") ?: return null
+            // last_config is itself JSON-encoded; parse again to get the .config INI string.
+            val lastConfig = JSONObject(lastConfigRaw)
+            var ini = lastConfig.optString("config") ?: return null
+            ini = ini.replace("\$PRIMARY_DNS", dns1).replace("\$SECONDARY_DNS", dns2)
+
+            // Tag the INI with a comment so the display name bubbles up in parseWgIni.
+            val inscribed = "# $description\n$ini"
+            parseWgIni(inscribed)
+        } catch (e: Exception) {
+            android.util.Log.w("ProxyParser", "AmneziaVPN decode failed: ${e.message}")
+            null
+        }
+    }
+
+    // ─── AMNEZIAWG ──────────────────────────────────────────
+
+    /**
+     * Detects a wg-quick / AmneziaWG INI. We require `[Interface]` and a
+     * PrivateKey line so random files with a bracketed section header don't
+     * get misrouted here.
+     */
+    private fun looksLikeWgIni(text: String): Boolean {
+        if (!text.contains("[Interface]", ignoreCase = true)) return false
+        if (!text.contains("PrivateKey", ignoreCase = true)) return false
+        // Either a [Peer] section or at least one PublicKey line is required
+        // for the wireproxy parser to accept the config.
+        return text.contains("[Peer]", ignoreCase = true) ||
+            text.contains("PublicKey", ignoreCase = true)
+    }
+
+    /**
+     * Parses a wg-quick INI into a single ProxyConfig whose [awgIni] field
+     * holds the original text. ConfigGenerator wires it up to the wireproxy
+     * bridge. We extract just the server/port and a display tag; everything
+     * else (keys, AWG obfuscation params) is parsed on the Go side.
+     */
+    private fun parseWgIni(ini: String): ProxyConfig? {
+        val endpointRegex = Regex("(?im)^\\s*Endpoint\\s*=\\s*(\\S+?):(\\d+)\\s*$")
+        val endpointMatch = endpointRegex.find(ini) ?: run {
+            android.util.Log.w("ProxyParser", "WG INI has no Endpoint line")
+            return null
+        }
+        val server = endpointMatch.groupValues[1]
+        val port = endpointMatch.groupValues[2].toIntOrNull() ?: return null
+
+        // Display name: # comment above [Interface], or the server host
+        val nameRegex = Regex("(?im)^\\s*#\\s*(.+?)\\s*$")
+        val name = nameRegex.find(ini)?.groupValues?.get(1)?.take(64) ?: server
+
+        android.util.Log.i("ProxyParser", "Routing WG '$name' via wireproxy bridge ($server:$port)")
+        return ProxyConfig(
+            tag = name,
+            type = "wireguard",
+            server = server,
+            serverPort = port,
+            outbound = JSONObject(), // placeholder, replaced in ConfigGenerator
+            awgIni = ini,
+        )
+    }
+
+    /**
+     * Parses the `wg://host:port?...` URI format that the current vpn4tv bot
+     * produces when it receives a WireGuard or AmneziaWG config. The bot flattens
+     * AmneziaVPN's JSON and re-encodes it as query params: `private_key`,
+     * `peer_public_key`, `server`, `server_port`, `mtu`, `fake_packets`,
+     * `fake_packets_size`, `awg_jc`, `awg_h1..h4`, `pre_shared_key`, etc.
+     *
+     * We synthesise a wg-quick INI from those params and feed it to the same
+     * wireproxy bridge that handles raw INI / vpn:// payloads. The bot's
+     * behaviour will change post-rollout to forward vpn:// verbatim, but
+     * until then this parser is how AWG profiles arrive on the client.
+     */
+    private fun parseWgUri(uri: String): ProxyConfig? {
+        return try {
+            val parsed = Uri.parse(uri)
+            val host = parsed.host ?: return null
+            val port = parsed.port.takeIf { it > 0 } ?: 443
+            val name = URLDecoder.decode(parsed.fragment ?: host, "UTF-8")
+            val p = parseQueryParams(parsed)
+
+            val privateKey = p["private_key"] ?: return null
+            val peerPub = p["peer_public_key"] ?: return null
+            val localAddr = p["local_address"] ?: "10.0.0.2/32"
+            val mtu = p["mtu"] ?: "1420"
+            val psk = p["pre_shared_key"]
+            val serverHost = p["server"] ?: host
+            val serverPort = p["server_port"]?.toIntOrNull() ?: port
+
+            // AWG obfuscation fields — all optional. Bot generates them for
+            // AmneziaWG configs and omits them for plain WireGuard.
+            val jc = p["awg_jc"]
+            val h1 = p["awg_h1"]
+            val h2 = p["awg_h2"]
+            val h3 = p["awg_h3"]
+            val h4 = p["awg_h4"]
+            // fake_packets comes as "min-max", the amnezia INI wants Jmin/Jmax.
+            val (jmin, jmax) = p["fake_packets"]?.split("-")?.let {
+                if (it.size == 2) it[0] to it[1] else null to null
+            } ?: (null to null)
+            // fake_packets_size as "s1-s2" → S1/S2.
+            val (s1, s2) = p["fake_packets_size"]?.split("-")?.let {
+                if (it.size == 2) it[0] to it[1] else null to null
+            } ?: (null to null)
+
+            val sb = StringBuilder()
+            sb.append("# ").append(name).append('\n')
+            sb.append("[Interface]\n")
+            sb.append("PrivateKey = ").append(privateKey).append('\n')
+            sb.append("Address = ").append(localAddr).append('\n')
+            // netstack uses the DNS list as its internal resolver — without
+            // it any domain passed to DialContext fails with
+            // "cannot marshal DNS message". The bot's wg:// URI format
+            // doesn't carry DNS fields, so default to Cloudflare (queries
+            // will actually travel through the tunnel).
+            sb.append("DNS = 1.1.1.1, 1.0.0.1\n")
+            sb.append("MTU = ").append(mtu).append('\n')
+            if (jc != null) sb.append("Jc = ").append(jc).append('\n')
+            if (jmin != null) sb.append("Jmin = ").append(jmin).append('\n')
+            if (jmax != null) sb.append("Jmax = ").append(jmax).append('\n')
+            if (s1 != null) sb.append("S1 = ").append(s1).append('\n')
+            if (s2 != null) sb.append("S2 = ").append(s2).append('\n')
+            if (h1 != null) sb.append("H1 = ").append(h1).append('\n')
+            if (h2 != null) sb.append("H2 = ").append(h2).append('\n')
+            if (h3 != null) sb.append("H3 = ").append(h3).append('\n')
+            if (h4 != null) sb.append("H4 = ").append(h4).append('\n')
+            sb.append("\n[Peer]\n")
+            sb.append("PublicKey = ").append(peerPub).append('\n')
+            if (!psk.isNullOrEmpty()) sb.append("PresharedKey = ").append(psk).append('\n')
+            sb.append("AllowedIPs = 0.0.0.0/0, ::/0\n")
+            sb.append("Endpoint = ").append(serverHost).append(':').append(serverPort).append('\n')
+            sb.append("PersistentKeepalive = 25\n")
+
+            android.util.Log.i(
+                "ProxyParser",
+                "Routing WG URI '$name' via wireproxy bridge ($serverHost:$serverPort, awg=${jc != null})",
+            )
+            ProxyConfig(
+                tag = name,
+                type = "wireguard",
+                server = serverHost,
+                serverPort = serverPort,
+                outbound = JSONObject(),
+                awgIni = sb.toString(),
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("ProxyParser", "wg:// URI parse failed: ${e.message}")
+            null
+        }
+    }
 
     private fun parseXrayConfig(config: JSONObject): List<ProxyConfig> {
         val outbounds = config.optJSONArray("outbounds") ?: return emptyList()

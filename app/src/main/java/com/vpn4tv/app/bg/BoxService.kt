@@ -169,8 +169,24 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 } catch (e: Exception) {
                     Log.e(TAG, "outline bridge failed to start: ${e.message}", e)
                     com.vpn4tv.app.xray.XrayBridge.stop()
-            com.vpn4tv.app.outline.OutlineBridge.stop()
+                    com.vpn4tv.app.outline.OutlineBridge.stop()
                     stopAndAlert(Alert.CreateService, "outline: ${e.message}")
+                    return
+                }
+            }
+
+            // Start wireproxy bridge if the profile has AmneziaWG endpoints
+            val wgSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.wgSidecarPath(profile.typed.path))
+            if (wgSidecar.exists()) {
+                try {
+                    Log.d(TAG, "Starting wireproxy bridge from ${wgSidecar.name}")
+                    com.vpn4tv.app.wireproxy.WgBridge.start(wgSidecar.readText())
+                } catch (e: Exception) {
+                    Log.e(TAG, "wireproxy bridge failed to start: ${e.message}", e)
+                    com.vpn4tv.app.xray.XrayBridge.stop()
+                    com.vpn4tv.app.outline.OutlineBridge.stop()
+                    com.vpn4tv.app.wireproxy.WgBridge.stop()
+                    stopAndAlert(Alert.CreateService, "wireproxy: ${e.message}")
                     return
                 }
             }
@@ -361,6 +377,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
             com.vpn4tv.app.xray.XrayBridge.stop()
             com.vpn4tv.app.outline.OutlineBridge.stop()
+            com.vpn4tv.app.wireproxy.WgBridge.stop()
             Settings.startedByUser = false
             withContext(Dispatchers.Main) {
                 status.value = Status.Stopped
@@ -392,6 +409,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             commandServer.close()
         }
         com.vpn4tv.app.xray.XrayBridge.stop()
+        com.vpn4tv.app.outline.OutlineBridge.stop()
+        com.vpn4tv.app.wireproxy.WgBridge.stop()
         withContext(Dispatchers.Main) {
             if (receiverRegistered) {
                 service.unregisterReceiver(receiver)

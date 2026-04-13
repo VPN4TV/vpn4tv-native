@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
         GlobalScope.launch(Dispatchers.IO) {
             ensureDefaultProfile()
             profileReady.postValue(true)
+            handleImportIntent(intent)
         }
 
         setContent {
@@ -58,6 +59,48 @@ class MainActivity : ComponentActivity() {
                     onDisconnect = { BoxService.stop() },
                 )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        GlobalScope.launch(Dispatchers.IO) { handleImportIntent(intent) }
+    }
+
+    /**
+     * Handles a VIEW intent carrying a subscription URL (vpn://, wg://, vless://,
+     * etc.) by running it through ProxyParser and creating a new local profile.
+     * Used for `adb shell am start -a android.intent.action.VIEW -d <URL>` in
+     * development and for share-sheet imports from other apps.
+     */
+    private suspend fun handleImportIntent(intent: Intent?) {
+        if (intent == null) return
+        if (intent.action != Intent.ACTION_VIEW) return
+        val data = intent.data?.toString() ?: return
+        try {
+            val proxies = ProxyParser.parseSubscription(data)
+            if (proxies.isEmpty()) {
+                Log.w(TAG, "Intent URL parsed to zero proxies: ${data.take(40)}...")
+                return
+            }
+            val profilesDir = File(filesDir, "profiles")
+            profilesDir.mkdirs()
+            val nextId = ProfileManager.nextFileID()
+            val configPath = File(profilesDir, "$nextId.json").absolutePath
+            val result = ConfigGenerator.generateFull(proxies)
+            ConfigGenerator.writeAll(configPath, result)
+            val name = proxies.firstOrNull()?.tag?.ifBlank { null } ?: "Imported"
+            val profile = ProfileManager.create(
+                Profile(name = name, userOrder = ProfileManager.nextOrder()).apply {
+                    typed.type = TypedProfile.Type.Local
+                    typed.path = configPath
+                }
+            )
+            Settings.selectedProfile = profile.id
+            Log.d(TAG, "Imported profile via intent: $name (${proxies.size} proxies)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Import intent failed", e)
         }
     }
 
