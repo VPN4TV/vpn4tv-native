@@ -58,6 +58,20 @@
                 <data android:scheme="hysteria2" />
                 <data android:scheme="ss" />
             </intent-filter>
+            <!-- Import wg-quick / AmneziaWG .conf files from the filesystem.
+                 Used by adb (`am start -a VIEW -d file:///data/local/tmp/x.conf`)
+                 and by file-picker flows. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.conf" />
+                <data android:pathPattern=".*\\.wg" />
+                <data android:pathPattern=".*\\.vpn" />
+            </intent-filter>
         </activity>
 
         <service

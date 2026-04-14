@@ -93,4 +93,17 @@ object ProfileManager {
     }
 
     suspend fun list(): List<Profile> = instance.profileDao().list()
+
+    /**
+     * Returns a profile display name guaranteed not to collide with any
+     * existing profile. If [base] already exists, appends " 2", " 3", …
+     * until a free slot is found.
+     */
+    suspend fun uniqueName(base: String): String {
+        val existing = list().map { it.name }.toHashSet()
+        if (base !in existing) return base
+        var i = 2
+        while ("$base $i" in existing) i++
+        return "$base $i"
+    }
 }

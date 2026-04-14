@@ -76,7 +76,8 @@ object ProxyParser {
             else -> null
         }
         if (amneziaBody != null) {
-            parseAmneziaVpn(amneziaBody)?.let { return listOf(it) }
+            val results = parseAmneziaVpn(amneziaBody)
+            if (results.isNotEmpty()) return results
         }
 
         // Detect wg-quick / AmneziaWG INI. Typical subs start with [Interface]
@@ -461,33 +462,75 @@ object ProxyParser {
     /** Decodes an AmneziaVPN payload and returns a ProxyConfig whose awgIni
      *  field is the wg-quick INI embedded in containers[0].awg.last_config.config.
      *  Substitutes placeholder DNS tokens with the top-level dns1/dns2. */
-    private fun parseAmneziaVpn(body: String): ProxyConfig? {
+    private fun parseAmneziaVpn(body: String): List<ProxyConfig> {
         return try {
-            val bytes = Base64.decode(body, Base64.URL_SAFE or Base64.NO_WRAP)
-            if (bytes.size < 5) return null
-            // Skip 4-byte big-endian length header, decompress the rest.
-            val payload = java.util.zip.InflaterInputStream(
-                bytes.inputStream().apply { skip(4) }
-            ).readBytes()
+            // Normalize URL-safe alphabet to standard so Android Base64.DEFAULT
+            // (which is more forgiving about padding) can decode it cleanly.
+            val normalized = body.replace('-', '+').replace('_', '/')
+            val bytes = Base64.decode(normalized, Base64.DEFAULT or Base64.NO_WRAP)
+            if (bytes.size < 5) return emptyList()
+            // 4-byte big-endian length header, then zlib-compressed JSON.
+            val expectedLen = ((bytes[0].toInt() and 0xff) shl 24) or
+                ((bytes[1].toInt() and 0xff) shl 16) or
+                ((bytes[2].toInt() and 0xff) shl 8) or
+                (bytes[3].toInt() and 0xff)
+            val inflater = java.util.zip.Inflater()
+            inflater.setInput(bytes, 4, bytes.size - 4)
+            val out = ByteArray(maxOf(expectedLen, 8192))
+            val produced = inflater.inflate(out)
+            inflater.end()
+            val payload = out.copyOf(produced)
             val root = JSONObject(String(payload, Charsets.UTF_8))
             val dns1 = root.optString("dns1", "1.1.1.1")
             val dns2 = root.optString("dns2", "1.0.0.1")
             val description = root.optString("description", root.optString("hostName", "AmneziaVPN"))
-            val containers = root.optJSONArray("containers") ?: return null
-            if (containers.length() == 0) return null
-            val awg = containers.getJSONObject(0).optJSONObject("awg") ?: return null
-            val lastConfigRaw = awg.optString("last_config") ?: return null
-            // last_config is itself JSON-encoded; parse again to get the .config INI string.
-            val lastConfig = JSONObject(lastConfigRaw)
-            var ini = lastConfig.optString("config") ?: return null
-            ini = ini.replace("\$PRIMARY_DNS", dns1).replace("\$SECONDARY_DNS", dns2)
-
-            // Tag the INI with a comment so the display name bubbles up in parseWgIni.
-            val inscribed = "# $description\n$ini"
-            parseWgIni(inscribed)
+            val containers = root.optJSONArray("containers") ?: return emptyList()
+            if (containers.length() == 0) return emptyList()
+            // Iterate containers and pick the first one we can handle.
+            // Prefer wg-family (awg/wg) with embedded last_config INI, then
+            // amnezia-xray with an embedded Xray JSON config. Many files
+            // list openvpn-cloak first (unsupported) and awg/xray second,
+            // so we can't assume index 0 is the right one.
+            for (i in 0 until containers.length()) {
+                val container = containers.getJSONObject(i)
+                val wgPayload = container.optJSONObject("awg")
+                    ?: container.optJSONObject("wg")
+                    ?: continue
+                val lastConfigRaw = wgPayload.optString("last_config")
+                if (lastConfigRaw.isNullOrBlank()) continue
+                val lastConfig = try { JSONObject(lastConfigRaw) } catch (_: Exception) { continue }
+                var ini = lastConfig.optString("config")
+                if (ini.isNullOrBlank()) continue
+                ini = ini.replace("\$PRIMARY_DNS", dns1).replace("\$SECONDARY_DNS", dns2)
+                val inscribed = "# $description\n$ini"
+                return parseWgIni(inscribed)?.let { listOf(it) } ?: emptyList()
+            }
+            // Fallback: amnezia-xray container carries a full Xray JSON
+            // config in last_config. Hand it to parseXrayConfig which knows
+            // how to extract vless-reality / vmess / etc. outbounds.
+            for (i in 0 until containers.length()) {
+                val container = containers.getJSONObject(i)
+                val xrayPayload = container.optJSONObject("xray") ?: continue
+                val lastConfigRaw = xrayPayload.optString("last_config")
+                if (lastConfigRaw.isNullOrBlank()) continue
+                val xrayJson = try { JSONObject(lastConfigRaw) } catch (_: Exception) { continue }
+                val results = parseXrayConfig(xrayJson)
+                if (results.isNotEmpty()) {
+                    android.util.Log.i("ProxyParser", "AmneziaVPN: routed via amnezia-xray container ($description)")
+                    // Use the file's description as the proxy tag so the
+                    // imported profile name is human-readable instead of "vless".
+                    return if (description.isNotBlank()) {
+                        results.mapIndexed { idx, p ->
+                            p.copy(tag = if (idx == 0) description else "$description ${idx + 1}")
+                        }
+                    } else results
+                }
+            }
+            android.util.Log.w("ProxyParser", "AmneziaVPN: no supported container (wg/awg/xray with last_config)")
+            return emptyList()
         } catch (e: Exception) {
             android.util.Log.w("ProxyParser", "AmneziaVPN decode failed: ${e.message}")
-            null
+            emptyList()
         }
     }
 

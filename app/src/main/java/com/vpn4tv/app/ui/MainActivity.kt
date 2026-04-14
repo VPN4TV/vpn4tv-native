@@ -70,14 +70,24 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Handles a VIEW intent carrying a subscription URL (vpn://, wg://, vless://,
-     * etc.) by running it through ProxyParser and creating a new local profile.
-     * Used for `adb shell am start -a android.intent.action.VIEW -d <URL>` in
-     * development and for share-sheet imports from other apps.
+     * etc.) or a wg-quick / AmneziaWG .conf / .wg / .vpn file by running it
+     * through ProxyParser and creating a new local profile. Used for
+     * `adb shell am start -a android.intent.action.VIEW -d <URL>` in development
+     * and for share-sheet imports from other apps.
      */
     private suspend fun handleImportIntent(intent: Intent?) {
         if (intent == null) return
         if (intent.action != Intent.ACTION_VIEW) return
-        val data = intent.data?.toString() ?: return
+        val uri = intent.data ?: return
+        val data: String = when (uri.scheme) {
+            "file", "content" -> try {
+                contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: return
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to read intent file", e)
+                return
+            }
+            else -> uri.toString()
+        }
         try {
             val proxies = ProxyParser.parseSubscription(data)
             if (proxies.isEmpty()) {
@@ -90,7 +100,21 @@ class MainActivity : ComponentActivity() {
             val configPath = File(profilesDir, "$nextId.json").absolutePath
             val result = ConfigGenerator.generateFull(proxies)
             ConfigGenerator.writeAll(configPath, result)
-            val name = proxies.firstOrNull()?.tag?.ifBlank { null } ?: "Imported"
+            // Name a profile after its first proxy's tag — but fall back to
+            // the server hostname when the tag is generic ("Server 1",
+            // "vless", etc.) so multiple imports from different AmneziaVPN
+            // templates stay distinguishable. Then dedupe via uniqueName
+            // so a second import with the same base gets a " 2" suffix.
+            val first = proxies.firstOrNull()
+            val tag = first?.tag?.trim().orEmpty()
+            val host = first?.server?.trim().orEmpty()
+            val base = when {
+                tag.isNotEmpty() && !isGenericProxyTag(tag) -> tag
+                host.isNotEmpty() -> if (tag.isNotEmpty()) "$tag ($host)" else host
+                tag.isNotEmpty() -> tag
+                else -> "Imported"
+            }
+            val name = ProfileManager.uniqueName(base)
             val profile = ProfileManager.create(
                 Profile(name = name, userOrder = ProfileManager.nextOrder()).apply {
                     typed.type = TypedProfile.Type.Local
@@ -187,4 +211,22 @@ class MainActivity : ComponentActivity() {
             Log.e(TAG, "Config update failed: ${e.message}")
         }
     }
+}
+
+/**
+ * A proxy tag is "generic" when it doesn't carry location/identity info —
+ * e.g. AmneziaVPN's default "Server 1" labels, or bare protocol names.
+ * Profile-naming falls back to the server hostname for these so multiple
+ * imports don't all land on identical names.
+ */
+internal fun isGenericProxyTag(tag: String): Boolean {
+    val normalized = tag.trim().lowercase()
+    if (normalized.isEmpty()) return true
+    if (normalized.matches(Regex("^server\\s*\\d*$"))) return true
+    return normalized in setOf(
+        "vless", "vmess", "trojan", "ss", "shadowsocks",
+        "hysteria", "hysteria2", "hy2", "tuic",
+        "wireguard", "wg", "awg",
+        "proxy", "default", "imported", "subscription",
+    )
 }

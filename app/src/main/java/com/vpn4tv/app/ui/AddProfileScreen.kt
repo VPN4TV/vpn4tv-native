@@ -350,11 +350,26 @@ private suspend fun processConfigs(
         val result = ConfigGenerator.generateFull(proxies)
         ConfigGenerator.writeAll(configPath, result)
 
-        val profileName = content.lines()
+        val explicitTitle = content.lines()
             .firstOrNull { it.startsWith("#profile-title:") }
             ?.substringAfter("#profile-title:")?.trim()
-            ?: userName
-            ?: "Subscription"
+        // Prefer explicit #profile-title, then Telegram user display name,
+        // then the first proxy's tag (unless it's a generic "Server N" /
+        // protocol name — in which case fall back to host). Deduped via
+        // uniqueName so repeat adds get " 2", " 3", … suffixes.
+        val firstProxy = proxies.firstOrNull()
+        val firstHost = firstProxy?.server?.trim().orEmpty()
+        val firstTag = firstProxy?.tag?.trim().orEmpty()
+        val baseName = when {
+            !explicitTitle.isNullOrBlank() -> explicitTitle
+            !userName.isNullOrBlank() -> userName
+            firstTag.isNotEmpty() && !isGenericProxyTag(firstTag) -> firstTag
+            firstHost.isNotEmpty() && firstTag.isNotEmpty() -> "$firstTag ($firstHost)"
+            firstHost.isNotEmpty() -> firstHost
+            firstTag.isNotEmpty() -> firstTag
+            else -> "Subscription"
+        }
+        val profileName = ProfileManager.uniqueName(baseName)
 
         val profile = ProfileManager.create(
             Profile(name = profileName, userOrder = ProfileManager.nextOrder()).apply {

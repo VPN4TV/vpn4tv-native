@@ -152,14 +152,16 @@ private fun ProfileItem(
         else -> Color.Transparent
     }
 
+    // Card is a passive container. Each interactive element inside the row
+    // owns its own focusable: the text area (select), Refresh, Delete.
+    // D-pad LEFT/RIGHT navigates between them, UP/DOWN jumps rows. We can't
+    // use Card(onClick=…) plus inner IconButtons — Compose ends up with
+    // nested focusables that swallow the first OK press.
     Card(
-        onClick = onSelect,
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            .border(BorderStroke(2.dp, borderColor), shape = MaterialTheme.shapes.medium)
-            .onFocusChanged { isFocused = it.isFocused }
-            .focusable(),
+            .border(BorderStroke(2.dp, borderColor), shape = MaterialTheme.shapes.medium),
         colors = CardDefaults.cardColors(
             containerColor = if (isSelected)
                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
@@ -167,30 +169,41 @@ private fun ProfileItem(
         )
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (isSelected) {
-                Icon(Icons.Default.Check, stringResource(R.string.selected), tint = Color.Green, modifier = Modifier.size(24.dp))
-                Spacer(modifier = Modifier.width(12.dp))
-            }
+            // Text / select target — this is the row-selection focusable.
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .onFocusChanged { isFocused = it.isFocused }
+                    .clickable { onSelect() }
+                    .focusable()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isSelected) {
+                    Icon(Icons.Default.Check, stringResource(R.string.selected), tint = Color.Green, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(profile.name, fontSize = 18.sp, color = Color.White)
-                if (profile.typed.type == TypedProfile.Type.Remote) {
-                    val host = try {
-                        java.net.URL(profile.typed.remoteURL).host
-                    } catch (_: Exception) { "" }
-                    if (host.isNotEmpty()) {
-                        Text(host, fontSize = 12.sp, color = Color.Gray)
+                Column {
+                    Text(profile.name, fontSize = 18.sp, color = Color.White)
+                    if (profile.typed.type == TypedProfile.Type.Remote) {
+                        val host = try {
+                            java.net.URL(profile.typed.remoteURL).host
+                        } catch (_: Exception) { "" }
+                        if (host.isNotEmpty()) {
+                            Text(host, fontSize = 12.sp, color = Color.Gray)
+                        }
                     }
                 }
             }
 
-            IconButton(onClick = onUpdate) {
+            IconButton(onClick = onUpdate, modifier = Modifier.padding(end = 4.dp)) {
                 Icon(Icons.Default.Refresh, stringResource(R.string.action_update_subscription), tint = Color.White)
             }
-            IconButton(onClick = onDelete) {
+            IconButton(onClick = onDelete, modifier = Modifier.padding(end = 8.dp)) {
                 Icon(Icons.Default.Delete, stringResource(R.string.action_clear), tint = Color.Red.copy(alpha = 0.7f))
             }
         }
