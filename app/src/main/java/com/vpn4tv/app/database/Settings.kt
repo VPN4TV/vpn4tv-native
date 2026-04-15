@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.vpn4tv.app.Application
 import com.vpn4tv.app.BuildConfig
 
+import com.vpn4tv.app.bg.ProxyService
 import com.vpn4tv.app.bg.VPNService
 import com.vpn4tv.app.constant.Path
 import com.vpn4tv.app.constant.ServiceMode
@@ -19,8 +20,6 @@ import com.vpn4tv.app.ktx.stringSet
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
-import org.json.JSONObject
-import java.io.File
 
 object Settings {
     @OptIn(DelicateCoroutinesApi::class)
@@ -57,7 +56,17 @@ object Settings {
             xrayPortBase = (20000..59000).random()
         }
     }
-    var serviceMode by dataStore.string(SettingsKey.SERVICE_MODE) { ServiceMode.NORMAL }
+    /**
+     * Active runtime mode. Persisted directly from the Settings UI — the user
+     * toggles "VPN" (default, full TUN) vs "Proxy" (sing-box as a local
+     * SOCKS5 listener on 127.0.0.1:12334, no VPN permission needed). Legacy
+     * sing-box-for-android auto-derived this from the profile content; we
+     * let the user decide because the Proxy mode is specifically for devices
+     * where the VPN consent dialog was stripped by the vendor.
+     */
+    var serviceMode by dataStore.string(SettingsKey.SERVICE_MODE) { ServiceMode.VPN }
+
+    val isProxyMode: Boolean get() = serviceMode == ServiceMode.PROXY
     var startedByUser by dataStore.boolean(SettingsKey.STARTED_BY_USER)
     var autoConnectOnBoot by dataStore.boolean(SettingsKey.AUTO_CONNECT_ON_BOOT) { true }
 
@@ -138,37 +147,7 @@ object Settings {
     var lastShownUpdateVersion by dataStore.int(SettingsKey.LAST_SHOWN_UPDATE_VERSION) { 0 }
 
     fun serviceClass(): Class<*> = when (serviceMode) {
-        ServiceMode.VPN -> VPNService::class.java
+        ServiceMode.PROXY -> ProxyService::class.java
         else -> VPNService::class.java
-    }
-
-    suspend fun rebuildServiceMode(): Boolean {
-        var newMode = ServiceMode.NORMAL
-        try {
-            if (needVPNService()) {
-                newMode = ServiceMode.VPN
-            }
-        } catch (_: Exception) {
-        }
-        if (serviceMode == newMode) {
-            return false
-        }
-        serviceMode = newMode
-        return true
-    }
-
-    private suspend fun needVPNService(): Boolean {
-        val selectedProfileId = selectedProfile
-        if (selectedProfileId == -1L) return false
-        val profile = ProfileManager.get(selectedProfile) ?: return false
-        val content = JSONObject(File(profile.typed.path).readText())
-        val inbounds = content.getJSONArray("inbounds")
-        for (index in 0 until inbounds.length()) {
-            val inbound = inbounds.getJSONObject(index)
-            if (inbound.getString("type") == "tun") {
-                return true
-            }
-        }
-        return false
     }
 }

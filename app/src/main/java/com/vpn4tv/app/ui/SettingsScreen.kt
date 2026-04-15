@@ -16,11 +16,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
+import com.vpn4tv.app.constant.ServiceMode
 import com.vpn4tv.app.database.Settings
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}) {
     var autoConnect by remember { mutableStateOf(Settings.autoConnectOnBoot) }
+    var proxyMode by remember { mutableStateOf(Settings.isProxyMode) }
 
     Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
         Row(
@@ -66,6 +68,19 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}) {
                 Text("›", fontSize = 20.sp, color = Color.Gray)
             }
         }
+
+        // Proxy mode — exposes sing-box as a local SOCKS5 listener on
+        // 127.0.0.1:12334 instead of creating a VPN tunnel. For devices
+        // where the system VPN permission dialog is missing.
+        SettingsToggle(
+            title = stringResource(R.string.setting_proxy_mode),
+            subtitle = stringResource(R.string.setting_proxy_mode_desc),
+            checked = proxyMode,
+            onCheckedChange = {
+                proxyMode = it
+                Settings.serviceMode = if (it) ServiceMode.PROXY else ServiceMode.VPN
+            }
+        )
 
         // Auto-connect on boot
         SettingsToggle(

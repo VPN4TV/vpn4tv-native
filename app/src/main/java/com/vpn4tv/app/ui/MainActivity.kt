@@ -133,6 +133,14 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, getString(R.string.error_no_subscription), Toast.LENGTH_SHORT).show()
             return
         }
+        // Proxy mode runs sing-box as a local SOCKS5 listener inside a plain
+        // foreground service — no VpnService binding, so no system permission
+        // dialog. Skip VpnService.prepare entirely; asking for it on a
+        // SberBox-class device would raise the dialog the vendor removed.
+        if (Settings.isProxyMode) {
+            BoxService.start()
+            return
+        }
         val intent = VpnService.prepare(this)
         if (intent != null) {
             vpnPermissionLauncher.launch(intent)

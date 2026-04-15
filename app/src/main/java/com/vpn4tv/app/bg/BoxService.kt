@@ -31,6 +31,7 @@ import com.vpn4tv.app.R
 import com.vpn4tv.app.ui.MainActivity
 import com.vpn4tv.app.constant.Action
 import com.vpn4tv.app.constant.Alert
+import com.vpn4tv.app.constant.ServiceMode
 import com.vpn4tv.app.constant.Status
 import com.vpn4tv.app.database.ProfileManager
 import com.vpn4tv.app.database.Settings
@@ -134,10 +135,26 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 return
             }
 
-            val content = configFile.readText()
+            var content = configFile.readText()
             if (content.isBlank()) {
                 stopAndAlert(Alert.EmptyConfiguration)
                 return
+            }
+
+            // In proxy mode we swap the TUN inbound for a plain SOCKS5 listener
+            // on 127.0.0.1:12334 and drop every route rule that only exists to
+            // route TUN traffic. The generated profile always carries a TUN
+            // inbound because most devices use it, so the mutation is done at
+            // start time rather than at profile-save time — toggling modes
+            // then only requires a reconnect, no subscription refetch.
+            if (Settings.isProxyMode) {
+                try {
+                    content = rewriteConfigForProxyMode(content)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to rewrite config for proxy mode: ${e.message}", e)
+                    stopAndAlert(Alert.CreateService, "proxy-mode rewrite: ${e.message}")
+                    return
+                }
             }
 
             lastProfileName = profile.name
@@ -549,5 +566,46 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         } catch (e: Exception) {
             Log.w(TAG, "Failed to restore server: ${e.message}")
         }
+    }
+
+    /**
+     * Replace the TUN inbound in the generated sing-box config with a plain
+     * SOCKS5 listener on 127.0.0.1:12334 for proxy mode. Also strips the
+     * auto-route/sniff bits and any route rule referencing `tun-in`, because
+     * without a TUN those rules either no-op or fail validation.
+     */
+    private fun rewriteConfigForProxyMode(jsonText: String): String {
+        val root = org.json.JSONObject(jsonText)
+
+        // Swap inbounds[] for a single SOCKS5 listener on loopback. Sniffing
+        // is NOT set on the inbound — sing-box 1.13+ removed legacy inbound
+        // fields; the generated route already has an `{action: "sniff"}`
+        // rule at the top that applies to every inbound.
+        val newInbounds = org.json.JSONArray().apply {
+            put(org.json.JSONObject().apply {
+                put("type", "socks")
+                put("tag", "socks-in")
+                put("listen", "127.0.0.1")
+                put("listen_port", ServiceMode.PROXY_PORT)
+            })
+        }
+        root.put("inbounds", newInbounds)
+
+        // Drop route rules that only make sense with a TUN inbound.
+        root.optJSONObject("route")?.let { route ->
+            val oldRules = route.optJSONArray("rules") ?: return@let
+            val keptRules = org.json.JSONArray()
+            for (i in 0 until oldRules.length()) {
+                val rule = oldRules.getJSONObject(i)
+                // Rules that target or reference the tun inbound by tag
+                // become dangling in proxy mode; drop them.
+                val inbound = rule.optString("inbound", "")
+                if (inbound == "tun-in") continue
+                keptRules.put(rule)
+            }
+            route.put("rules", keptRules)
+        }
+
+        return root.toString()
     }
 }

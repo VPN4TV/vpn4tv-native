@@ -594,6 +594,10 @@
     <string name="about_telegram">Telegram-канал:</string>
     <string name="setting_auto_connect">Автоподключение при загрузке</string>
     <string name="setting_auto_connect_desc">Восстанавливать VPN при включении устройства</string>
+    <string name="setting_proxy_mode">Режим прокси (SOCKS5)</string>
+    <string name="setting_proxy_mode_desc">Запускать как локальный SOCKS5 на 127.0.0.1:12334. Для устройств без диалога разрешений VPN (SberBox и т.п.); в SmartTube и других приложениях нужно указать прокси вручную.</string>
+    <string name="proxy_mode_card_title">Прокси запущен</string>
+    <string name="proxy_mode_card_hint">В SmartTube или другом приложении укажите SOCKS5-прокси: 127.0.0.1 порт 12334</string>
     <string name="update_available">Доступно обновление</string>
     <string name="session_traffic">Сессия</string>
     <string name="title_per_app_proxy">Прокси по приложениям</string>
