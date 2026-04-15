@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import com.vpn4tv.app.bg.BoxService
+import com.vpn4tv.app.constant.Status
 import com.vpn4tv.app.converter.ConfigGenerator
 import com.vpn4tv.app.converter.ProxyParser
 import com.vpn4tv.app.database.Profile
@@ -51,6 +53,18 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
     var userName by remember { mutableStateOf<String?>(null) }
     var isAdding by remember { mutableStateOf(false) }
     var isDone by remember { mutableStateOf(false) }
+
+    // Disconnect any active session before we start polling. A user adding
+    // a SECOND subscription was seeing "бесконечное ожидание" because the
+    // VPN tunnel was routing api.vpn4tv.com through the old server — which
+    // may block / rate-limit the bot API or just fail DNS for the control
+    // plane. Tearing the tunnel down first makes /poll hit the underlying
+    // network directly. No-op if nothing is running.
+    LaunchedEffect(Unit) {
+        if (BoxService.globalStatus.value == Status.Started) {
+            BoxService.stop()
+        }
+    }
 
     // Force poll on app resume (after returning from Telegram)
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -316,17 +330,24 @@ private suspend fun processConfigs(
 ): Boolean {
     return try {
         // Configs can be URLs (https://...) or direct proxy links (vless://...)
-        // Collect all proxy content
+        // Collect all proxy content. Also capture metadata from the first
+        // subscription response: profile-title, update interval, support URL.
+        // Hiddify-style subscription servers advertise these as HTTP headers.
         val allContent = StringBuilder()
         var remoteUrl = ""
+        var headerTitle: String? = null
+        var headerUpdateHours: Int? = null
 
         for (config in configs) {
             val trimmed = config.trim()
             if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-                // It's a subscription URL — download it
-                val subContent = com.vpn4tv.app.converter.HwidService.downloadSubscription(context, trimmed)
-                allContent.appendLine(subContent)
-                if (remoteUrl.isEmpty()) remoteUrl = trimmed
+                val sub = com.vpn4tv.app.converter.HwidService.fetchSubscription(context, trimmed)
+                allContent.appendLine(sub.body)
+                if (remoteUrl.isEmpty()) {
+                    remoteUrl = trimmed
+                    headerTitle = sub.title
+                    headerUpdateHours = sub.updateIntervalHours
+                }
             } else {
                 // Direct proxy link (vless://, ss://, etc.) or config
                 allContent.appendLine(trimmed)
@@ -350,19 +371,27 @@ private suspend fun processConfigs(
         val result = ConfigGenerator.generateFull(proxies)
         ConfigGenerator.writeAll(configPath, result)
 
-        val explicitTitle = content.lines()
+        // Naming priority: HTTP `profile-title` header (the canonical Hiddify
+        // convention — decoded from base64 if needed), then the legacy inline
+        // `#profile-title:` marker, then the Telegram display name, then the
+        // subscription URL host (xo.e0f.cx is a better fallback than a
+        // random proxy tag), then the first proxy's tag, then its server host,
+        // finally "Subscription". Deduped via uniqueName so repeat adds get
+        // " 2", " 3", … suffixes.
+        val inlineTitle = content.lines()
             .firstOrNull { it.startsWith("#profile-title:") }
             ?.substringAfter("#profile-title:")?.trim()
-        // Prefer explicit #profile-title, then Telegram user display name,
-        // then the first proxy's tag (unless it's a generic "Server N" /
-        // protocol name — in which case fall back to host). Deduped via
-        // uniqueName so repeat adds get " 2", " 3", … suffixes.
+        val urlHost = if (remoteUrl.isNotEmpty()) {
+            try { java.net.URL(remoteUrl).host } catch (_: Exception) { "" }
+        } else ""
         val firstProxy = proxies.firstOrNull()
         val firstHost = firstProxy?.server?.trim().orEmpty()
         val firstTag = firstProxy?.tag?.trim().orEmpty()
         val baseName = when {
-            !explicitTitle.isNullOrBlank() -> explicitTitle
+            !headerTitle.isNullOrBlank() -> headerTitle
+            !inlineTitle.isNullOrBlank() -> inlineTitle
             !userName.isNullOrBlank() -> userName
+            urlHost.isNotEmpty() -> urlHost
             firstTag.isNotEmpty() && !isGenericProxyTag(firstTag) -> firstTag
             firstHost.isNotEmpty() && firstTag.isNotEmpty() -> "$firstTag ($firstHost)"
             firstHost.isNotEmpty() -> firstHost
@@ -377,16 +406,23 @@ private suspend fun processConfigs(
                 typed.remoteURL = remoteUrl
                 typed.path = configPath
                 typed.autoUpdate = remoteUrl.isNotEmpty()
-                typed.autoUpdateInterval = 60
+                // profile-update-interval header is in hours; TypedProfile
+                // stores it in minutes. Clamp to at least 10 minutes so a
+                // misconfigured "0" header doesn't spin the updater.
+                typed.autoUpdateInterval = headerUpdateHours
+                    ?.let { (it.coerceAtLeast(1) * 60) }
+                    ?: 60
                 typed.lastUpdated = java.util.Date()
             }
         )
 
-        if (Settings.selectedProfile == -1L) {
-            Settings.selectedProfile = profile.id
-        }
+        // Always switch the active profile to the freshly-added one. Users
+        // who add a second subscription expect the TV to start using it
+        // immediately — leaving the old profile selected made the "add
+        // another key" flow look broken ("it says done but nothing changed").
+        Settings.selectedProfile = profile.id
 
-        Log.d("AddProfile", "Added ${profile.name}: ${proxies.size} proxies")
+        Log.d("AddProfile", "Added ${profile.name}: ${proxies.size} proxies (selected)")
         true
     } catch (e: Exception) {
         Log.e("AddProfile", "Failed to process configs", e)

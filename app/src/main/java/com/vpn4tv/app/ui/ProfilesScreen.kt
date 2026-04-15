@@ -98,9 +98,15 @@ fun ProfilesScreen(onBack: () -> Unit, onAddViaTelegram: () -> Unit = {}) {
                     onUpdate = {
                         scope.launch {
                             isLoading = true
-                            withContext(Dispatchers.IO) { updateProfile(profile) }
+                            val err = withContext(Dispatchers.IO) { updateProfile(profile) }
                             isLoading = false
                             reload()
+                            // Route through the shared lastError LiveData so
+                            // HomeScreen shows it as a red line the next time
+                            // the user lands there.
+                            com.vpn4tv.app.bg.BoxService.lastError.postValue(
+                                err?.let { "Обновление подписки: $it" }
+                            )
                         }
                     },
                     onDelete = {
@@ -210,17 +216,32 @@ private fun ProfileItem(
     }
 }
 
-private fun updateProfile(profile: Profile) {
-    try {
-        val subContent = com.vpn4tv.app.converter.HwidService.downloadSubscription(com.vpn4tv.app.Application.application, profile.typed.remoteURL)
-        val proxies = ProxyParser.parseSubscription(subContent)
-        if (proxies.isEmpty()) return
+/** Returns null on success, error message on failure. */
+private fun updateProfile(profile: Profile): String? {
+    return try {
+        val sub = com.vpn4tv.app.converter.HwidService.fetchSubscription(
+            com.vpn4tv.app.Application.application, profile.typed.remoteURL,
+        )
+        val proxies = ProxyParser.parseSubscription(sub.body)
+        if (proxies.isEmpty()) return "подписка пуста"
         val result = ConfigGenerator.generateFull(proxies)
         ConfigGenerator.writeAll(profile.typed.path, result)
         profile.typed.lastUpdated = java.util.Date()
+        // Keep the displayed name in sync with whatever the provider advertises
+        // via profile-title. The user can still rename locally later; if we
+        // ever add that, switch this to only update when the user hasn't set
+        // a custom name.
+        if (!sub.title.isNullOrBlank() && sub.title != profile.name) {
+            profile.name = sub.title
+        }
+        sub.updateIntervalHours?.let { hours ->
+            profile.typed.autoUpdateInterval = (hours.coerceAtLeast(1) * 60)
+        }
         kotlinx.coroutines.runBlocking { ProfileManager.update(profile) }
         Log.d("Profiles", "Updated ${profile.name}: ${proxies.size} proxies")
+        null
     } catch (e: Exception) {
-        Log.e("Profiles", "Update failed: ${e.message}")
+        Log.e("Profiles", "Update failed: ${e.message}", e)
+        e.message ?: e.javaClass.simpleName
     }
 }

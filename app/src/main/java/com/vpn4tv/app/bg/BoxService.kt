@@ -129,10 +129,46 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
             Log.d(TAG, "Profile: ${profile.name}, path=${profile.typed.path}")
             val configFile = File(profile.typed.path)
-            if (!configFile.exists()) {
-                Log.w(TAG, "Config file not found: ${profile.typed.path}")
-                stopAndAlert(Alert.EmptyConfiguration)
-                return
+
+            // Auto-recovery for the "profile row exists but config JSON is
+            // missing/empty" state. Real user report from 50016: migration
+            // from the Flutter fork created the Profile row but the initial
+            // subscription download failed (network hiccup / DNS / rate
+            // limit), leaving an empty file and a permanent "EmptyConfiguration:
+            // unknown" error because nothing retried on subsequent boots. If
+            // this is a remote profile, pull the subscription inline before
+            // failing so the user doesn't need to guess how to recover.
+            val configMissing = !configFile.exists() || configFile.length() == 0L
+            if (configMissing) {
+                val remoteUrl = profile.typed.remoteURL
+                if (remoteUrl.isEmpty()) {
+                    Log.w(TAG, "Config file not found for local profile: ${profile.typed.path}")
+                    stopAndAlert(Alert.EmptyConfiguration)
+                    return
+                }
+                Log.i(TAG, "Config empty, fetching subscription inline: $remoteUrl")
+                try {
+                    val sub = com.vpn4tv.app.converter.HwidService.fetchSubscription(
+                        service.applicationContext, remoteUrl,
+                    )
+                    val proxies = com.vpn4tv.app.converter.ProxyParser.parseSubscription(sub.body)
+                    if (proxies.isEmpty()) {
+                        stopAndAlert(Alert.EmptyConfiguration, "subscription returned no proxies")
+                        return
+                    }
+                    val result = com.vpn4tv.app.converter.ConfigGenerator.generateFull(proxies)
+                    com.vpn4tv.app.converter.ConfigGenerator.writeAll(profile.typed.path, result)
+                    if (!sub.title.isNullOrBlank() && sub.title != profile.name) {
+                        profile.name = sub.title
+                    }
+                    profile.typed.lastUpdated = java.util.Date()
+                    ProfileManager.update(profile)
+                    Log.i(TAG, "Inline recovery OK: ${proxies.size} proxies written to ${profile.typed.path}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Inline subscription fetch failed: ${e.message}", e)
+                    stopAndAlert(Alert.CreateService, "subscription fetch failed: ${e.message}")
+                    return
+                }
             }
 
             var content = configFile.readText()

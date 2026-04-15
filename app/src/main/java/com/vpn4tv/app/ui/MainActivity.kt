@@ -206,14 +206,28 @@ class MainActivity : ComponentActivity() {
 
     private fun updateProfileConfig(profile: Profile) {
         try {
-            val subContent = com.vpn4tv.app.converter.HwidService.downloadSubscription(applicationContext, profile.typed.remoteURL)
-            val proxies = ProxyParser.parseSubscription(subContent)
+            val sub = com.vpn4tv.app.converter.HwidService.fetchSubscription(
+                applicationContext, profile.typed.remoteURL,
+            )
+            val proxies = ProxyParser.parseSubscription(sub.body)
             if (proxies.isEmpty()) {
                 Log.w(TAG, "No proxies in subscription")
                 return
             }
             val result = ConfigGenerator.generateFull(proxies)
             ConfigGenerator.writeAll(profile.typed.path, result)
+            var nameChanged = false
+            if (!sub.title.isNullOrBlank() && sub.title != profile.name) {
+                profile.name = sub.title
+                nameChanged = true
+            }
+            sub.updateIntervalHours?.let { hours ->
+                profile.typed.autoUpdateInterval = (hours.coerceAtLeast(1) * 60)
+                nameChanged = true
+            }
+            if (nameChanged) {
+                kotlinx.coroutines.runBlocking { ProfileManager.update(profile) }
+            }
             Log.d(TAG, "Config updated: ${proxies.size} proxies, xray=${result.xrayJson != null}, outline=${result.outlineJson != null}")
         } catch (e: Exception) {
             Log.e(TAG, "Config update failed: ${e.message}")

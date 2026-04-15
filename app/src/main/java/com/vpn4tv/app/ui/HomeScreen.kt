@@ -166,12 +166,25 @@ fun HomeScreen(
         var activeProfile by remember { mutableStateOf<com.vpn4tv.app.database.Profile?>(null) }
         var isUpdating by remember { mutableStateOf(false) }
 
-        LaunchedEffect(ready) {
-            if (ready && AppSettings.selectedProfile != -1L) {
-                withContext(Dispatchers.IO) {
-                    activeProfile = com.vpn4tv.app.database.ProfileManager.get(AppSettings.selectedProfile)
+        // Refresh the displayed profile every time HomeScreen resumes — this
+        // catches the "user just added a new subscription" case, where
+        // AddProfileScreen bumps Settings.selectedProfile and pops back here.
+        // Without the lifecycle observer the name stays stale until process
+        // restart.
+        val homeLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        DisposableEffect(homeLifecycleOwner, ready) {
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && ready) {
+                    scope.launch(Dispatchers.IO) {
+                        val id = AppSettings.selectedProfile
+                        activeProfile = if (id != -1L) {
+                            com.vpn4tv.app.database.ProfileManager.get(id)
+                        } else null
+                    }
                 }
             }
+            homeLifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { homeLifecycleOwner.lifecycle.removeObserver(observer) }
         }
 
         Row(
@@ -194,19 +207,41 @@ fun HomeScreen(
                                 if (!isUpdating && activeProfile != null) {
                                     isUpdating = true
                                     GlobalScope.launch(Dispatchers.IO) {
+                                        var errorMsg: String? = null
                                         try {
                                             val p = activeProfile!!
                                             if (p.typed.remoteURL.isNotEmpty()) {
-                                                val sub = com.vpn4tv.app.converter.HwidService.downloadSubscription(com.vpn4tv.app.Application.application, p.typed.remoteURL)
-                                                val proxies = com.vpn4tv.app.converter.ProxyParser.parseSubscription(sub)
-                                                if (proxies.isNotEmpty()) {
+                                                val sub = com.vpn4tv.app.converter.HwidService.fetchSubscription(
+                                                    com.vpn4tv.app.Application.application, p.typed.remoteURL,
+                                                )
+                                                val proxies = com.vpn4tv.app.converter.ProxyParser.parseSubscription(sub.body)
+                                                if (proxies.isEmpty()) {
+                                                    errorMsg = "подписка пуста"
+                                                } else {
                                                     val result = com.vpn4tv.app.converter.ConfigGenerator.generateFull(proxies)
                                                     com.vpn4tv.app.converter.ConfigGenerator.writeAll(p.typed.path, result)
                                                     p.typed.lastUpdated = java.util.Date()
+                                                    if (!sub.title.isNullOrBlank() && sub.title != p.name) {
+                                                        p.name = sub.title
+                                                    }
+                                                    sub.updateIntervalHours?.let { hours ->
+                                                        p.typed.autoUpdateInterval = (hours.coerceAtLeast(1) * 60)
+                                                    }
                                                     com.vpn4tv.app.database.ProfileManager.update(p)
+                                                    activeProfile = p
                                                 }
                                             }
-                                        } catch (_: Exception) {}
+                                        } catch (e: Exception) {
+                                            errorMsg = e.message ?: e.javaClass.simpleName
+                                        }
+                                        // Push refresh failure into the shared
+                                        // lastError LiveData so the existing
+                                        // red line under the connect button
+                                        // surfaces it — no Toast, no separate
+                                        // banner. Clear on success.
+                                        BoxService.lastError.postValue(
+                                            errorMsg?.let { "Обновление подписки: $it" }
+                                        )
                                         withContext(Dispatchers.Main) {
                                             isUpdating = false
                                         }
@@ -278,9 +313,11 @@ fun HomeScreen(
             }
         }
 
-        // Main content
+        // Main content — weight(1f) so the pinned Add button below still
+        // has room. Previously this Column was fillMaxSize which left no
+        // space for siblings.
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxWidth().weight(1f),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -435,11 +472,22 @@ fun HomeScreen(
             }
             }
 
-            if (!ready || AppSettings.selectedProfile == -1L) {
-                TextButton(onClick = onAddProfile) {
-                    Text(stringResource(R.string.link_add_telegram), color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
-                }
-            }
+        }
+
+        // Pinned "Add subscription" button at the bottom of the screen.
+        // Always visible (not just when there's no profile) so users adding
+        // a second key can find the entry point — previously this button
+        // was conditional on selectedProfile == -1L and people couldn't
+        // locate the flow once they had any profile at all.
+        TextButton(
+            onClick = onAddProfile,
+            modifier = Modifier.padding(bottom = 8.dp),
+        ) {
+            Text(
+                stringResource(R.string.link_add_telegram),
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = if (isTV) 18.sp else 16.sp,
+            )
         }
     }
 }
