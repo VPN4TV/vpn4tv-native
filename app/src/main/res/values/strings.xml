@@ -570,6 +570,8 @@
     <string name="setting_auto_connect_desc">Restore VPN connection when device starts</string>
     <string name="setting_proxy_mode">Proxy mode (SOCKS5)</string>
     <string name="setting_proxy_mode_desc">Run as a local SOCKS5 on 127.0.0.1:12334. For devices without the VPN permission dialog (SberBox etc.); configure SmartTube or other apps manually.</string>
+    <string name="setting_bypass_lan">Bypass LAN</string>
+    <string name="setting_bypass_lan_desc">Local network traffic skips the tunnel — Chromecast, Plex/Jellyfin on NAS, router admin, printers keep working while VPN is on.</string>
     <string name="proxy_mode_card_title">Proxy running</string>
     <string name="proxy_mode_card_hint">Configure SmartTube or another app to use SOCKS5 proxy at 127.0.0.1:12334</string>
     <string name="update_available">Update available</string>

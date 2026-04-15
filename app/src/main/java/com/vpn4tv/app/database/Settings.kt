@@ -126,6 +126,19 @@ object Settings {
     }
 
     var allowBypass by dataStore.boolean(SettingsKey.ALLOW_BYPASS) { false }
+
+    /**
+     * Default-on LAN bypass: traffic to RFC1918 / link-local / ULA / multicast
+     * stays on the underlying network instead of going through the VPN tunnel.
+     * Enables Chromecast, Plex/Jellyfin on local NAS, router admin panels, etc.
+     * The ip_is_private rule is injected at service start in [BoxService] so
+     * a toggle in Settings takes effect on the next reconnect without a
+     * subscription refetch. Irrelevant to proxy mode (sing-box only sees
+     * traffic apps explicitly route through SOCKS5, LAN traffic never lands
+     * there in the first place).
+     */
+    var bypassLan by dataStore.boolean(SettingsKey.BYPASS_LAN) { true }
+
     var systemProxyEnabled by dataStore.boolean(SettingsKey.SYSTEM_PROXY_ENABLED) { true }
 
     var privilegeSettingsEnabled by dataStore.boolean(SettingsKey.PRIVILEGE_SETTINGS_ENABLED) { false }

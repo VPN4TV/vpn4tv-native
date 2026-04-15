@@ -596,6 +596,8 @@
     <string name="setting_auto_connect_desc">Восстанавливать VPN при включении устройства</string>
     <string name="setting_proxy_mode">Режим прокси (SOCKS5)</string>
     <string name="setting_proxy_mode_desc">Запускать как локальный SOCKS5 на 127.0.0.1:12334. Для устройств без диалога разрешений VPN (SberBox и т.п.); в SmartTube и других приложениях нужно указать прокси вручную.</string>
+    <string name="setting_bypass_lan">Обход локальной сети</string>
+    <string name="setting_bypass_lan_desc">Трафик в локальную сеть идёт напрямую — Chromecast, Plex/Jellyfin на NAS, админка роутера, принтеры продолжают работать при включённом VPN.</string>
     <string name="proxy_mode_card_title">Прокси запущен</string>
     <string name="proxy_mode_card_hint">В SmartTube или другом приложении укажите SOCKS5-прокси: 127.0.0.1 порт 12334</string>
     <string name="update_available">Доступно обновление</string>

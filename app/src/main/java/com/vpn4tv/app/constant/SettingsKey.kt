@@ -26,6 +26,7 @@ object SettingsKey {
 
     const val AUTO_CONNECT_ON_BOOT = "auto_connect_on_boot"
     const val ALLOW_BYPASS = "allow_bypass"
+    const val BYPASS_LAN = "bypass_lan"
     const val SYSTEM_PROXY_ENABLED = "system_proxy_enabled"
 
     const val PRIVILEGE_SETTINGS_ENABLED = "hide_settings_enabled"

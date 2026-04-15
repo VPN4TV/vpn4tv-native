@@ -23,6 +23,7 @@ import com.vpn4tv.app.database.Settings
 fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}) {
     var autoConnect by remember { mutableStateOf(Settings.autoConnectOnBoot) }
     var proxyMode by remember { mutableStateOf(Settings.isProxyMode) }
+    var bypassLan by remember { mutableStateOf(Settings.bypassLan) }
 
     Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
         Row(
@@ -81,6 +82,21 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}) {
                 Settings.serviceMode = if (it) ServiceMode.PROXY else ServiceMode.VPN
             }
         )
+
+        // LAN bypass only applies in VPN mode. In proxy mode sing-box never
+        // sees LAN traffic in the first place — apps route to 127.0.0.1:12334
+        // explicitly — so the toggle would be a no-op and just adds noise.
+        if (!proxyMode) {
+            SettingsToggle(
+                title = stringResource(R.string.setting_bypass_lan),
+                subtitle = stringResource(R.string.setting_bypass_lan_desc),
+                checked = bypassLan,
+                onCheckedChange = {
+                    bypassLan = it
+                    Settings.bypassLan = it
+                }
+            )
+        }
 
         // Auto-connect on boot
         SettingsToggle(

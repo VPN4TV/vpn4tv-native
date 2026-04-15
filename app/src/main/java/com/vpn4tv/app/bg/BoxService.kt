@@ -155,6 +155,18 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     stopAndAlert(Alert.CreateService, "proxy-mode rewrite: ${e.message}")
                     return
                 }
+            } else if (Settings.bypassLan) {
+                // VPN mode + default-on LAN bypass: inject a route rule that
+                // keeps RFC1918 / link-local / ULA / multicast traffic on the
+                // underlying network. Applied at start time so the toggle is
+                // instant and existing profiles generated before this setting
+                // existed also benefit without a subscription refetch.
+                try {
+                    content = injectBypassLanRule(content)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to inject bypass-lan rule: ${e.message}")
+                    // Non-fatal — fall back to the original config.
+                }
             }
 
             lastProfileName = profile.name
@@ -605,6 +617,57 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
             route.put("rules", keptRules)
         }
+
+        return root.toString()
+    }
+
+    /**
+     * Insert `{ip_is_private: true, outbound: "direct"}` into the route rules
+     * so that LAN traffic (RFC1918, link-local, ULA, multicast) stays on the
+     * underlying network. The rule is placed *after* the leading sniff and
+     * hijack-dns rules so DNS still goes through the tunnel, but *before*
+     * any fallback UDP-direct rule so LAN UDP is handled here explicitly.
+     * Idempotent: checks for an existing ip_is_private rule and returns the
+     * config unchanged if one is already present.
+     */
+    private fun injectBypassLanRule(jsonText: String): String {
+        val root = org.json.JSONObject(jsonText)
+        val route = root.optJSONObject("route") ?: return jsonText
+        val oldRules = route.optJSONArray("rules") ?: return jsonText
+
+        // Already there? No-op.
+        for (i in 0 until oldRules.length()) {
+            if (oldRules.getJSONObject(i).optBoolean("ip_is_private", false)) {
+                return jsonText
+            }
+        }
+
+        val bypassRule = org.json.JSONObject().apply {
+            put("ip_is_private", true)
+            put("outbound", "direct")
+        }
+
+        // Rebuild rules as [leading action prelude] + [bypass] + [rest].
+        // The prelude contains action-only rules (sniff, hijack-dns) that
+        // set up state for subsequent matching; bypass goes immediately
+        // after them so LAN traffic is diverted before any outbound rules
+        // can route it through a proxy.
+        val rebuilt = org.json.JSONArray()
+        var placed = false
+        for (i in 0 until oldRules.length()) {
+            val rule = oldRules.getJSONObject(i)
+            if (!placed) {
+                val action = rule.optString("action", "")
+                val isPrelude = action == "sniff" || action == "hijack-dns"
+                if (!isPrelude) {
+                    rebuilt.put(bypassRule)
+                    placed = true
+                }
+            }
+            rebuilt.put(rule)
+        }
+        if (!placed) rebuilt.put(bypassRule)
+        route.put("rules", rebuilt)
 
         return root.toString()
     }
