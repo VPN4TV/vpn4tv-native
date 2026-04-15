@@ -47,7 +47,10 @@ private fun logLineLevel(line: String): Int = when {
 fun LogsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var allLogs by remember { mutableStateOf(listOf<String>()) }
-    var filterLevel by remember { mutableStateOf(LogLevel.ALL) }
+    // Default to WARN+: sing-box at INFO is noisy (several lines per
+    // connection) and users opening Logs are almost always chasing a
+    // problem, not reviewing steady-state traffic.
+    var filterLevel by remember { mutableStateOf(LogLevel.WARN) }
     val listState = rememberLazyListState()
 
     val filteredLogs = remember(allLogs, filterLevel) {
