@@ -35,6 +35,11 @@ class Application : Application() {
         super.onCreate()
         AppLifecycleObserver.register(this)
 
+        // MUST run before any Room or Settings access: on first v5 boot we
+        // wipe legacy Flutter state (including databases/) and that would
+        // destroy a fresh Room DB created by Settings.ensureXrayPortBase().
+        migrateLegacyProfiles()
+
         // Persist xray bridge port on first run so it stays stable across reads.
         Settings.ensureXrayPortBase()
         // Drop the global selectedServer key from older versions; per-profile keys take over.
@@ -54,9 +59,6 @@ class Application : Application() {
         val tempDir = cacheDir
         tempDir.mkdirs()
         workingDir?.mkdirs()
-
-        // Migrate subscriptions from Flutter/hiddify fork on first run
-        migrateLegacyProfiles()
 
         @Suppress("OPT_IN_USAGE")
         GlobalScope.launch(Dispatchers.IO) {
@@ -85,68 +87,109 @@ class Application : Application() {
     }
 
     /**
-     * Migrate subscription URLs from Flutter/hiddify drift DB to Room DB.
-     * Runs once — checks for legacy db.sqlite in app_flutter/ directory.
+     * Migrate subscription URLs from any Flutter-era hiddify install to the
+     * native Room DB, then wipe every legacy state blob that lingers on disk.
+     *
+     * Why the broad sweep: users reported 2.3 → 5.0 upgrades booting into a
+     * broken state where the app launched but nothing worked until they
+     * cleared cache / reinstalled. The old code only touched
+     * `app_flutter/db.sqlite` with the `profile_entries` table — that schema
+     * is from late 4.x. Older Flutter builds shipped different layouts, and
+     * other Flutter state (FlutterSharedPreferences, stale sing-box caches
+     * under files/, abandoned databases/ entries) was never removed, so the
+     * native code inherited conflicting state.
+     *
+     * On first v5 run we look for *any* legacy marker and, if present:
+     *   1. harvest subscription URLs from every known legacy schema we can
+     *      probe — tolerating missing tables / columns;
+     *   2. wipe cacheDir, `app_flutter/`, Flutter shared_prefs, any legacy
+     *      Room DBs under databases/, and stray files in filesDir.
+     * This runs once, guarded by the `v5_migrated` flag.
      */
     private fun migrateLegacyProfiles() {
+        val prefs = getSharedPreferences("migration", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("v5_migrated", false)) return
         try {
-            val prefs = getSharedPreferences("migration", Context.MODE_PRIVATE)
-            if (prefs.getBoolean("v5_migrated", false)) return
+            val dataRoot = filesDir.parentFile ?: return
 
-            val legacyDbFile = File(filesDir.parentFile, "app_flutter/db.sqlite")
-            if (!legacyDbFile.exists()) {
-                // No legacy data — mark as migrated
-                prefs.edit().putBoolean("v5_migrated", true).apply()
-                return
-            }
-
-            Log.i("Migration", "Found legacy hiddify DB: ${legacyDbFile.path}")
-
-            val legacyDb = android.database.sqlite.SQLiteDatabase.openDatabase(
-                legacyDbFile.path, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+            // Any of these signals the user had a Flutter-era hiddify install
+            // in this package, even if the DB itself is unreadable.
+            val legacySignals = listOf(
+                File(dataRoot, "app_flutter"),
+                File(dataRoot, "shared_prefs/FlutterSharedPreferences.xml"),
             )
+            val isUpgrade = legacySignals.any { it.exists() }
 
-            val cursor = legacyDb.rawQuery(
-                "SELECT name, url FROM profile_entries WHERE type = 'remote' AND url IS NOT NULL AND url != ''",
-                null
+            // hiddify's drift DB has lived at a few names over its history.
+            // From app_database era → db_v1 era it was always `db.sqlite`;
+            // during the db_v2 coexistence era there was also a `db_v2.sqlite`
+            // next to it; after commit fd59c8db (Oct 2025) v2 was renamed
+            // back to `db.sqlite`. Every schema version (v1–v5) uses the
+            // same `profile_entries` table with `name` and `url` columns —
+            // `url` is NOT NULL in v1 and nullable in v2+, so the same query
+            // works everywhere.
+            val candidateDbPaths = listOf(
+                "app_flutter/db.sqlite",
+                "app_flutter/db_v2.sqlite",
             )
-
-            val profiles = mutableListOf<Pair<String, String>>() // name, url
-            while (cursor.moveToNext()) {
-                val name = cursor.getString(0) ?: "Subscription"
-                val url = cursor.getString(1) ?: continue
-                profiles.add(name to url)
+            val candidateTables = listOf("profile_entries")
+            val harvested = linkedMapOf<String, String>() // url -> name (dedup by url)
+            for (rel in candidateDbPaths) {
+                val f = File(dataRoot, rel)
+                if (!f.exists()) continue
+                try {
+                    val db = android.database.sqlite.SQLiteDatabase.openDatabase(
+                        f.path, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY,
+                    )
+                    for (table in candidateTables) {
+                        try {
+                            db.rawQuery(
+                                "SELECT name, url FROM $table WHERE url IS NOT NULL AND url != ''",
+                                null,
+                            ).use { c ->
+                                while (c.moveToNext()) {
+                                    val name = c.getString(0) ?: "Subscription"
+                                    val url = c.getString(1) ?: continue
+                                    if (url.startsWith("http")) harvested.putIfAbsent(url, name)
+                                }
+                            }
+                        } catch (_: Exception) { /* table absent or shape differs */ }
+                    }
+                    db.close()
+                } catch (e: Exception) {
+                    Log.w("Migration", "unreadable legacy db ${f.path}: ${e.message}")
+                }
             }
-            cursor.close()
-            legacyDb.close()
 
-            if (profiles.isEmpty()) {
-                Log.i("Migration", "No remote profiles to migrate")
-                prefs.edit().putBoolean("v5_migrated", true).apply()
-                return
+            if (isUpgrade) {
+                Log.i("Migration", "legacy install detected, harvested ${harvested.size} URLs, wiping state")
+                runCatching { File(dataRoot, "app_flutter").deleteRecursively() }
+                runCatching { File(dataRoot, "databases").deleteRecursively() }
+                runCatching { cacheDir.deleteRecursively(); cacheDir.mkdirs() }
+                runCatching {
+                    File(dataRoot, "shared_prefs").listFiles()?.forEach { f ->
+                        if (f.name.startsWith("FlutterSharedPreferences") ||
+                            f.name.contains("hiddify", ignoreCase = true)
+                        ) f.delete()
+                    }
+                }
+                // No native-app state exists yet on the first v5 boot, so it's
+                // safe to nuke anything that happens to be in filesDir — those
+                // are leftovers from Flutter sing-box-core directories.
+                runCatching {
+                    filesDir.listFiles()?.forEach { it.deleteRecursively() }
+                }
             }
 
-            Log.i("Migration", "Migrating ${profiles.size} profiles")
-
-            // Create profiles in Room DB (on background thread in ensureDefaultProfile)
-            val migratedUrls = profiles.map { it.second }
-            prefs.edit()
-                .putBoolean("v5_migrated", true)
-                .putString("v5_migrate_urls", migratedUrls.joinToString("\n"))
-                .putString("v5_migrate_names", profiles.map { it.first }.joinToString("\n"))
-                .apply()
-
-            // Clean up legacy Flutter data
-            File(filesDir.parentFile, "app_flutter").deleteRecursively()
-            cacheDir.deleteRecursively()
-            cacheDir.mkdirs()
-
-            Log.i("Migration", "Legacy data cleaned, ${profiles.size} URLs saved for import")
+            val editor = prefs.edit().putBoolean("v5_migrated", true)
+            if (harvested.isNotEmpty()) {
+                editor.putString("v5_migrate_urls", harvested.keys.joinToString("\n"))
+                editor.putString("v5_migrate_names", harvested.values.joinToString("\n"))
+            }
+            editor.apply()
         } catch (e: Exception) {
-            Log.w("Migration", "Migration failed: ${e.message}")
-            // Mark as migrated anyway to avoid retry loops
-            getSharedPreferences("migration", Context.MODE_PRIVATE)
-                .edit().putBoolean("v5_migrated", true).apply()
+            Log.w("Migration", "migration failed: ${e.message}")
+            prefs.edit().putBoolean("v5_migrated", true).apply()
         }
     }
 
