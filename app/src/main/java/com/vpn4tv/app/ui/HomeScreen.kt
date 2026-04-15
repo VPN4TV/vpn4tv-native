@@ -353,6 +353,38 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
+            // Proxy-mode banner. When the user runs sing-box without a TUN
+            // (SberBox-class devices), they need to know the loopback address
+            // SmartTube / other apps should be pointed at.
+            if (status == Status.Started && AppSettings.isProxyMode) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)) {
+                        Text(
+                            stringResource(R.string.proxy_mode_card_title),
+                            fontSize = 14.sp,
+                            color = Color.Gray,
+                        )
+                        Text(
+                            "SOCKS5 127.0.0.1:${com.vpn4tv.app.constant.ServiceMode.PROXY_PORT}",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            stringResource(R.string.proxy_mode_card_hint),
+                            fontSize = 13.sp,
+                            color = Color.Gray,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             // Active server info — clickable to open servers list
             if (status == Status.Started && activeServer != null) {
                 Card(
