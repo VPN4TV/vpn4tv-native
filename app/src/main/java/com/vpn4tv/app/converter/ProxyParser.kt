@@ -42,8 +42,11 @@ data class ProxyConfig(
 
 /** DNS extracted from subscription (if any) */
 data class SubscriptionDns(
-    val remoteDns: String = "https://1.1.1.1/dns-query",
-    val directDns: String = "1.1.1.1",
+    // Default to Google DNS — Cloudflare 1.1.1.1 is aggressively MITM'd
+    // by Russian ISPs/TSPU on both UDP (port 53) and DoT (port 853),
+    // causing x509 certificate errors. Google 8.8.8.8 is less targeted.
+    val remoteDns: String = "https://8.8.8.8/dns-query",
+    val directDns: String = "8.8.8.8",
 )
 
 object ProxyParser {
@@ -481,7 +484,7 @@ object ProxyParser {
             inflater.end()
             val payload = out.copyOf(produced)
             val root = JSONObject(String(payload, Charsets.UTF_8))
-            val dns1 = root.optString("dns1", "1.1.1.1")
+            val dns1 = root.optString("dns1", "8.8.8.8")
             val dns2 = root.optString("dns2", "1.0.0.1")
             val description = root.optString("description", root.optString("hostName", "AmneziaVPN"))
             val containers = root.optJSONArray("containers") ?: return emptyList()
@@ -634,7 +637,7 @@ object ProxyParser {
             // "cannot marshal DNS message". The bot's wg:// URI format
             // doesn't carry DNS fields, so default to Cloudflare (queries
             // will actually travel through the tunnel).
-            sb.append("DNS = 1.1.1.1, 1.0.0.1\n")
+            sb.append("DNS = 8.8.8.8, 8.8.4.4\n")
             sb.append("MTU = ").append(mtu).append('\n')
             if (jc != null) sb.append("Jc = ").append(jc).append('\n')
             if (jmin != null) sb.append("Jmin = ").append(jmin).append('\n')
@@ -679,8 +682,8 @@ object ProxyParser {
         if (dnsConfig != null) {
             val servers = dnsConfig.optJSONArray("servers")
             if (servers != null && servers.length() > 0) {
-                var remoteDns = "https://1.1.1.1/dns-query"
-                var directDns = "1.1.1.1"
+                var remoteDns = "https://8.8.8.8/dns-query"
+                var directDns = "8.8.8.8"
                 for (i in 0 until servers.length()) {
                     val server = servers.optString(i, "")
                     if (server.startsWith("https://") || server.startsWith("https+local://")) {
