@@ -30,7 +30,7 @@ android {
         applicationId = "com.vpn4tv.hiddify"
         minSdk = 23
         targetSdk = 36
-        versionCode = 50300
+        versionCode = 50301
         versionName = "5.0.3"
         base.archivesName.set("VPN4TV-Native-${versionName}")
 
@@ -163,6 +163,7 @@ dependencies {
 
     // QR code generation
     implementation("com.google.zxing:core:3.5.4")
+
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")

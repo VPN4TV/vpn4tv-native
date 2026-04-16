@@ -593,6 +593,7 @@
     <string name="logs_empty">Подключите VPN, чтобы видеть логи</string>
     <string name="action_clear">Очистить</string>
     <string name="about_license">GPLv3 • На базе sing-box от SagerNet\nXray-core (MPLv2) • Outline SDK (Apache 2.0) • AmneziaWG (MIT)</string>
+    <string name="about_licenses">Лицензии открытого ПО</string>
     <string name="about_telegram">Telegram-канал:</string>
     <string name="setting_auto_connect">Автоподключение при загрузке</string>
     <string name="setting_auto_connect_desc">Восстанавливать VPN при включении устройства</string>
