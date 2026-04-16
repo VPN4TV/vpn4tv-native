@@ -89,8 +89,12 @@ object UpdateChecker {
     }
 
     fun openDownload(context: Context, update: UpdateInfo) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl))
-        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        context.startActivity(intent)
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl))
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.w(TAG, "openDownload failed (no browser?): ${e.message}")
+        }
     }
 }
