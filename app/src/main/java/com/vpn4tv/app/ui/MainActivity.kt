@@ -45,6 +45,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
 
+        // Fire-and-forget Play in-app update check. Will only actually
+        // prompt when Play Store has a release with priority >= 4 and
+        // the installed version is older. On non-GMS / direct-APK
+        // installs this is a no-op by design (see PlayUpdateChecker).
+        com.vpn4tv.app.utils.PlayUpdateChecker.maybePromptImmediate(this)
+
         // Load profiles in background
         GlobalScope.launch(Dispatchers.IO) {
             ensureDefaultProfile()
@@ -81,7 +87,32 @@ class MainActivity : ComponentActivity() {
         val uri = intent.data ?: return
         val data: String = when (uri.scheme) {
             "file", "content" -> try {
-                contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: return
+                // Hard cap on import size: a real subscription / .conf /
+                // .vpn file is at most a few hundred KB, so 2 MB is
+                // already 10x worst case. Without this cap a user who
+                // accidentally picked a video or log file blew up our
+                // heap with OutOfMemoryError in handleImportIntent
+                // (Vitals report 2026-04-15 on 50016).
+                val maxBytes = 2 * 1024 * 1024
+                contentResolver.openInputStream(uri)?.use { input ->
+                    val buf = ByteArray(maxBytes + 1)
+                    var read = 0
+                    while (read < buf.size) {
+                        val n = input.read(buf, read, buf.size - read)
+                        if (n <= 0) break
+                        read += n
+                    }
+                    if (read > maxBytes) {
+                        Log.w(TAG, "Import file > 2 MB, refusing: $uri")
+                        Toast.makeText(
+                            this,
+                            getString(R.string.error_import_too_large),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        return
+                    }
+                    String(buf, 0, read, Charsets.UTF_8)
+                } ?: return
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to read intent file", e)
                 return

@@ -30,8 +30,8 @@ android {
         applicationId = "com.vpn4tv.hiddify"
         minSdk = 23
         targetSdk = 36
-        versionCode = 50103
-        versionName = "5.0.1"
+        versionCode = 50200
+        versionName = "5.0.2"
         base.archivesName.set("VPN4TV-Native-${versionName}")
 
         // libbox.aar ships only armeabi-v7a + arm64-v8a; x86 variants would
@@ -139,6 +139,13 @@ dependencies {
 
     // WorkManager (subscription auto-update)
     implementation("androidx.work:work-runtime-ktx:2.11.1")
+
+    // Play Core in-app update — used to force-prompt users on a stale build
+    // when the corresponding release on Play Store has inAppUpdatePriority
+    // set high (5). On devices without Google Play Services (SberBox, some
+    // Chinese TVs, direct-APK installs) the manager gracefully returns a
+    // failed Task; the checker catches that and the app starts normally.
+    implementation("com.google.android.play:app-update-ktx:2.1.0")
 
     // Compose + TV
     val composeBom = platform("androidx.compose:compose-bom:2026.02.00")

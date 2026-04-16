@@ -351,6 +351,7 @@
     <string name="error_missing_vpn_permission">Missiong VPN permission</string>
     <string name="error_empty_configuration">Empty configuration</string>
     <string name="error_empty_file">Empty file</string>
+    <string name="error_import_too_large">File is too large to import — did you pick the right file?</string>
     <string name="error_decode_profile">Failed to decode profile: %s</string>
     <string name="error_invalid_configuration">Invalid sing-box configuration: %s</string>
     <string name="error_start_command_server">Start command server</string>

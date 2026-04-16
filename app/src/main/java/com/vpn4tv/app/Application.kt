@@ -38,12 +38,29 @@ class Application : Application() {
         // MUST run before any Room or Settings access: on first v5 boot we
         // wipe legacy Flutter state (including databases/) and that would
         // destroy a fresh Room DB created by Settings.ensureXrayPortBase().
-        migrateLegacyProfiles()
+        try {
+            migrateLegacyProfiles()
+        } catch (e: Throwable) {
+            Log.e("Application", "migrateLegacyProfiles failed: ${e.message}", e)
+        }
 
-        // Persist xray bridge port on first run so it stays stable across reads.
-        Settings.ensureXrayPortBase()
-        // Drop the global selectedServer key from older versions; per-profile keys take over.
-        com.vpn4tv.app.ui.migrateLegacySelectedServer(this)
+        // Early Settings/Room calls are wrapped individually — a
+        // SQLiteCantOpenDatabaseException at this point (seen on 50016
+        // with one user whose databases/ dir was in an unrecoverable
+        // state) would otherwise kill the process via handleBindApplication
+        // and the user would never reach the HomeScreen to retry.
+        try {
+            // Persist xray bridge port on first run so it stays stable across reads.
+            Settings.ensureXrayPortBase()
+        } catch (e: Throwable) {
+            Log.e("Application", "Settings.ensureXrayPortBase failed: ${e.message}", e)
+        }
+        try {
+            // Drop the global selectedServer key from older versions; per-profile keys take over.
+            com.vpn4tv.app.ui.migrateLegacySelectedServer(this)
+        } catch (e: Throwable) {
+            Log.e("Application", "migrateLegacySelectedServer failed: ${e.message}", e)
+        }
 
         // libbox 1.14+ expects BCP-47 tags ("ru-RU"), not POSIX ("ru_RU").
         try {
@@ -164,7 +181,26 @@ class Application : Application() {
             if (isUpgrade) {
                 Log.i("Migration", "legacy install detected, harvested ${harvested.size} URLs, wiping state")
                 runCatching { File(dataRoot, "app_flutter").deleteRecursively() }
-                runCatching { File(dataRoot, "databases").deleteRecursively() }
+                // Do NOT delete the `databases/` directory itself — only its
+                // files. One user on 50016 hit SQLiteCantOpenDatabaseException
+                // from Application.onCreate because `deleteRecursively()` had
+                // removed the parent dir and the subsequent Room open
+                // couldn't recreate it on their device (likely a vendor FS
+                // quirk — the usual mkdirs() path inside SQLiteOpenHelper is
+                // a noop if the parent is already present and can fail
+                // silently when it isn't). Delete only Flutter-era files by
+                // name; 5.x's own profiles.db/settings.db do not exist yet
+                // on the first boot after upgrade so nothing worth keeping is
+                // lost, but the directory stays.
+                val dbDir = File(dataRoot, "databases")
+                runCatching {
+                    dbDir.listFiles()?.forEach { it.delete() }
+                }
+                // Defence in depth: if something else deleted the dir out from
+                // under us, recreate it so Settings.ensureXrayPortBase below
+                // doesn't land on a missing parent.
+                runCatching { dbDir.mkdirs() }
+
                 runCatching { cacheDir.deleteRecursively(); cacheDir.mkdirs() }
                 runCatching {
                     File(dataRoot, "shared_prefs").listFiles()?.forEach { f ->
