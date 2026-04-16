@@ -158,6 +158,14 @@ fun AboutScreen(onBack: () -> Unit) {
                     .clickable { openUrl("https://t.me/VPN4TV") }
                     .focusable()
             )
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Text(
+                com.vpn4tv.app.converter.HwidService.getHwid(context),
+                fontSize = 10.sp,
+                color = Color.Gray.copy(alpha = 0.4f),
+            )
         }
     }
 }
