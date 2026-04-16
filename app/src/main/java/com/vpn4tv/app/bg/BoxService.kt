@@ -177,6 +177,18 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 return
             }
 
+            // Inject the DNS servers that DnsProber found to actually work
+            // on this ISP. The generated config has whatever defaults
+            // ConfigGenerator wrote at subscription-fetch time, but the
+            // user's ISP may block those. DnsProber runs at app start and
+            // tells us which DoH + UDP server responded — we overwrite the
+            // config's dns.servers with those.
+            try {
+                content = injectProbedDns(content)
+            } catch (e: Exception) {
+                Log.w(TAG, "DNS injection failed, using config defaults: ${e.message}")
+            }
+
             // In proxy mode we swap the TUN inbound for a plain SOCKS5 listener
             // on 127.0.0.1:12334 and drop every route rule that only exists to
             // route TUN traffic. The generated profile always carries a TUN
@@ -714,6 +726,48 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         }
         if (!placed) rebuilt.put(bypassRule)
         route.put("rules", rebuilt)
+
+        return root.toString()
+    }
+
+    /**
+     * Replace the DNS servers in the config with the ones that
+     * [DnsProber] found to actually work on this ISP. If DnsProber
+     * hasn't finished yet (unlikely — it runs at app start), keep the
+     * config's original servers.
+     */
+    private fun injectProbedDns(jsonText: String): String {
+        val probed = com.vpn4tv.app.utils.DnsProber.result
+        if (probed == null) {
+            Log.w(TAG, "DNS probe not ready yet, keeping config defaults")
+            return jsonText
+        }
+        Log.i(TAG, "DNS probe result: doh=${probed.dohUrl} udp=${probed.udpServer}")
+        val root = org.json.JSONObject(jsonText)
+        val dns = root.optJSONObject("dns") ?: return jsonText
+        val servers = dns.optJSONArray("servers") ?: return jsonText
+
+        for (i in 0 until servers.length()) {
+            val server = servers.getJSONObject(i)
+            val tag = server.optString("tag", "")
+            when (tag) {
+                "dns-remote" -> {
+                    // DoH server that goes through the VPN tunnel.
+                    val dohHost = com.vpn4tv.app.utils.DnsProber.dohServer()
+                    server.put("type", "https")
+                    server.put("server", dohHost)
+                    Log.i(TAG, "DNS: dns-remote → https $dohHost (probed)")
+                }
+                "dns-direct" -> {
+                    // Plain UDP for resolving dns-remote's hostname and
+                    // for the "any outbound" catch-all rule.
+                    val udp = com.vpn4tv.app.utils.DnsProber.udpServer()
+                    server.put("type", "udp")
+                    server.put("server", udp)
+                    Log.i(TAG, "DNS: dns-direct → udp $udp (probed)")
+                }
+            }
+        }
 
         return root.toString()
     }

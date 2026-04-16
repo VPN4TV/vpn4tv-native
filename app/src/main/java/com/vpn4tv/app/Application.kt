@@ -70,6 +70,15 @@ class Application : Application() {
             try { Libbox.setLocale("en") } catch (_: Exception) {}
         }
 
+        // Probe DNS servers on a background thread so by the time the
+        // user taps Connect, we know which DoH/UDP server works on their
+        // ISP. Results feed into BoxService (config rewrite) and
+        // HwidService (subscription fetch fallback).
+        @Suppress("OPT_IN_USAGE")
+        GlobalScope.launch(Dispatchers.IO) {
+            com.vpn4tv.app.utils.DnsProber.probe()
+        }
+
         val baseDir = filesDir
         baseDir.mkdirs()
         val workingDir = getExternalFilesDir(null)

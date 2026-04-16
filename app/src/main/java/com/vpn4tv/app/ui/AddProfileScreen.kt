@@ -289,7 +289,13 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
 private suspend fun pollServer(id: String): JSONObject? {
     return withContext(Dispatchers.IO) {
         try {
-            val response = URL("https://api.vpn4tv.com/poll?uuid=$id").readText()
+            val url = "https://api.vpn4tv.com/poll?uuid=$id"
+            val conn = com.vpn4tv.app.converter.HwidService
+                .openConnectionWithDnsFallbackPublic(url)
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
+            val response = conn.inputStream.bufferedReader().readText()
+            conn.disconnect()
             val json = JSONObject(response)
             if (json.optString("type") != "timeout") json else null
         } catch (e: Exception) {

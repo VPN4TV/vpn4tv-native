@@ -80,7 +80,7 @@ object HwidService {
      * Callers that only want the body can use [downloadSubscription].
      */
     fun fetchSubscription(context: Context, url: String): SubscriptionResponse {
-        val conn = URL(url).openConnection() as HttpURLConnection
+        val conn = openConnectionWithDnsFallback(url)
         conn.setRequestProperty("x-hwid", getHwid(context))
         conn.setRequestProperty("x-device-os", "Android")
         conn.setRequestProperty("x-ver-os", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
@@ -119,6 +119,88 @@ object HwidService {
     /** Body-only shim so existing callers keep compiling during the transition. */
     fun downloadSubscription(context: Context, url: String): String =
         fetchSubscription(context, url).body
+
+    /**
+     * Open an HTTP connection with DNS fallback. If system DNS fails
+     * (UnknownHostException — common when Russian ISPs block VPN-related
+     * domains), resolve the hostname via the DoH server that [DnsProber]
+     * found to work, then connect by IP with the Host header set manually.
+     */
+    fun openConnectionWithDnsFallbackPublic(url: String): HttpURLConnection =
+        openConnectionWithDnsFallback(url)
+
+    private fun openConnectionWithDnsFallback(url: String): HttpURLConnection {
+        return try {
+            URL(url).openConnection() as HttpURLConnection
+        } catch (e: java.net.UnknownHostException) {
+            android.util.Log.w("HwidService", "System DNS failed for $url, trying DoH fallback")
+            val parsed = URL(url)
+            val host = parsed.host
+            val ip = resolveViaDoH(host)
+                ?: throw java.net.UnknownHostException("DoH fallback also failed for $host")
+            // Replace hostname with resolved IP, set Host header manually
+            val directUrl = url.replace(host, ip)
+            val conn = URL(directUrl).openConnection() as HttpURLConnection
+            conn.setRequestProperty("Host", host)
+            // For HTTPS, SNI is derived from the URL host (which is now an IP).
+            // HttpsURLConnection uses Host header for SNI when the URL host
+            // is an IP — but some implementations don't. To be safe, set
+            // the hostname verifier to accept the cert for our original host.
+            if (conn is javax.net.ssl.HttpsURLConnection) {
+                conn.hostnameVerifier = javax.net.ssl.HostnameVerifier { hostname, session ->
+                    hostname == ip || hostname == host ||
+                        javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(host, session)
+                }
+            }
+            android.util.Log.i("HwidService", "DoH resolved $host → $ip, connecting directly")
+            conn
+        }
+    }
+
+    /** DoH endpoints for hostname resolution fallback (JSON API).
+     *  Tried in order; each wrapped in try/catch so failures just skip.
+     *  Yandex is excluded — only supports RFC 8484 wireformat, no JSON. */
+    private val JSON_DOH_ENDPOINTS = listOf(
+        "https://dns.adguard-dns.com/resolve",     // AdGuard — JSON API at /resolve
+        "https://dns.google/resolve",              // Google — JSON API at /resolve
+        "https://1.0.0.1/dns-query",               // Cloudflare secondary — JSON via Accept header
+        "https://8.8.8.8/dns-query",               // Google by IP — JSON via Accept header
+        "https://one.one.one.one/dns-query",       // Cloudflare alt hostname
+        "https://1.1.1.1/dns-query",               // Cloudflare primary
+    )
+
+    private fun resolveViaDoH(hostname: String): String? {
+        for (dohUrl in JSON_DOH_ENDPOINTS) {
+            val result = tryResolveDoH(dohUrl, hostname)
+            if (result != null) return result
+        }
+        return null
+    }
+
+    private fun tryResolveDoH(dohUrl: String, hostname: String): String? {
+        return try {
+            val queryUrl = "$dohUrl?name=$hostname&type=A"
+            val conn = URL(queryUrl).openConnection() as HttpURLConnection
+            conn.setRequestProperty("Accept", "application/dns-json")
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            val body = conn.inputStream.bufferedReader().readText()
+            conn.disconnect()
+            // Parse DNS-over-HTTPS JSON response (RFC 8484 / Google JSON API)
+            val json = org.json.JSONObject(body)
+            val answers = json.optJSONArray("Answer") ?: return null
+            for (i in 0 until answers.length()) {
+                val answer = answers.getJSONObject(i)
+                if (answer.optInt("type") == 1) { // A record
+                    return answer.optString("data")
+                }
+            }
+            null
+        } catch (e: Exception) {
+            android.util.Log.w("HwidService", "DoH resolve failed for $hostname: ${e.message}")
+            null
+        }
+    }
 
     private const val SUB_INFO_PREFS = "sub_userinfo"
 
