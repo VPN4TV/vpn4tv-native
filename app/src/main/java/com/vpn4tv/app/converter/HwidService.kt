@@ -102,7 +102,8 @@ object HwidService {
             read += n
         }
         if (read > maxBytes) {
-            throw java.io.IOException("Subscription response too large (>${maxBytes / 1024 / 1024} MB), refusing")
+            android.util.Log.w("HwidService", "Subscription response >${maxBytes / 1024 / 1024} MB, truncating (proxy links are usually in the first few KB)")
+            read = maxBytes
         }
         val body = String(buf, 0, read, Charsets.UTF_8)
         return SubscriptionResponse(
