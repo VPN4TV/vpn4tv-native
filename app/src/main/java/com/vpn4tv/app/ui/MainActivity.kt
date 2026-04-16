@@ -20,6 +20,7 @@ import com.vpn4tv.app.database.ProfileManager
 import com.vpn4tv.app.database.Settings
 import com.vpn4tv.app.database.TypedProfile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import java.io.File
@@ -164,6 +165,35 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, getString(R.string.error_no_subscription), Toast.LENGTH_SHORT).show()
             return
         }
+
+        // If cached subscription-userinfo says the subscription expired,
+        // refresh it BEFORE connecting. Users whose key expired used to hit
+        // "server unavailable" errors repeatedly because the old config had
+        // dead server addresses — they had to guess that "refresh" was the
+        // fix. Now we do it automatically: fetch the subscription, write
+        // fresh config, then proceed to connect as usual. The refresh is
+        // async + shows a Toast so the user knows something is happening.
+        val profileId = Settings.selectedProfile
+        val cachedInfo = com.vpn4tv.app.converter.HwidService.loadUserInfo(this, profileId)
+        val expired = cachedInfo?.expireEpochSec?.let { it > 0 && it * 1000 < System.currentTimeMillis() } == true
+        if (expired) {
+            Toast.makeText(this, getString(R.string.refreshing_expired_subscription), Toast.LENGTH_SHORT).show()
+            GlobalScope.launch(Dispatchers.IO) {
+                val profile = ProfileManager.get(profileId) ?: return@launch
+                if (profile.typed.remoteURL.isNotEmpty()) {
+                    try {
+                        updateProfileConfig(profile)
+                    } catch (_: Exception) {}
+                }
+                withContext(Dispatchers.Main) { doConnect() }
+            }
+            return
+        }
+
+        doConnect()
+    }
+
+    private fun doConnect() {
         // Proxy mode runs sing-box as a local SOCKS5 listener inside a plain
         // foreground service — no VpnService binding, so no system permission
         // dialog. Skip VpnService.prepare entirely; asking for it on a
@@ -259,6 +289,9 @@ class MainActivity : ComponentActivity() {
             if (nameChanged) {
                 kotlinx.coroutines.runBlocking { ProfileManager.update(profile) }
             }
+            com.vpn4tv.app.converter.HwidService.saveUserInfo(
+                applicationContext, profile.id, sub.userInfo,
+            )
             Log.d(TAG, "Config updated: ${proxies.size} proxies, xray=${result.xrayJson != null}, outline=${result.outlineJson != null}")
         } catch (e: Exception) {
             Log.e(TAG, "Config update failed: ${e.message}")

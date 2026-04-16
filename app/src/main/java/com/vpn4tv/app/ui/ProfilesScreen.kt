@@ -238,6 +238,9 @@ private fun updateProfile(profile: Profile): String? {
             profile.typed.autoUpdateInterval = (hours.coerceAtLeast(1) * 60)
         }
         kotlinx.coroutines.runBlocking { ProfileManager.update(profile) }
+        com.vpn4tv.app.converter.HwidService.saveUserInfo(
+            com.vpn4tv.app.Application.application, profile.id, sub.userInfo,
+        )
         Log.d("Profiles", "Updated ${profile.name}: ${proxies.size} proxies")
         null
     } catch (e: Exception) {
