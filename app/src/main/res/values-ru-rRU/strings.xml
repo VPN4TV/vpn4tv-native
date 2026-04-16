@@ -358,6 +358,7 @@
     <string name="error_empty_configuration">Пустая конфигурация</string>
     <string name="error_empty_file">Пустой файл</string>
     <string name="error_import_too_large">Файл слишком большой для импорта — вы выбрали нужный файл?</string>
+    <string name="refreshing_expired_subscription">Подписка истекла — обновляем…</string>
     <string name="error_decode_profile">Не удалось декодировать профиль: %s</string>
     <string name="error_invalid_configuration">Недопустимая конфигурация sing-box: %s</string>
     <string name="error_start_command_server">Запуск сервера команд</string>

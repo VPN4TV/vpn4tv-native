@@ -165,6 +165,12 @@ fun HomeScreen(
         // Top bar with profile info
         var activeProfile by remember { mutableStateOf<com.vpn4tv.app.database.Profile?>(null) }
         var isUpdating by remember { mutableStateOf(false) }
+        var subscriptionInfo by remember { mutableStateOf<com.vpn4tv.app.converter.SubscriptionUserInfo?>(null) }
+        // Whether to show traffic/expire line: only for third-party subscriptions, not our own VPN4TV Premium.
+        val isOwnSubscription = activeProfile?.typed?.remoteURL?.contains("api.vpn4tv.com") == true
+        val isExpired = subscriptionInfo?.expireEpochSec?.let {
+            it > 0 && it * 1000 < System.currentTimeMillis()
+        } == true
 
         // Refresh the displayed profile every time HomeScreen resumes — this
         // catches the "user just added a new subscription" case, where
@@ -179,6 +185,11 @@ fun HomeScreen(
                         val id = AppSettings.selectedProfile
                         activeProfile = if (id != -1L) {
                             com.vpn4tv.app.database.ProfileManager.get(id)
+                        } else null
+                        subscriptionInfo = if (id != -1L) {
+                            com.vpn4tv.app.converter.HwidService.loadUserInfo(
+                                com.vpn4tv.app.Application.application, id,
+                            )
                         } else null
                     }
                 }
@@ -229,6 +240,10 @@ fun HomeScreen(
                                                     }
                                                     com.vpn4tv.app.database.ProfileManager.update(p)
                                                     activeProfile = p
+                                                    subscriptionInfo = sub.userInfo
+                                                    com.vpn4tv.app.converter.HwidService.saveUserInfo(
+                                                        com.vpn4tv.app.Application.application, p.id, sub.userInfo,
+                                                    )
                                                 }
                                             }
                                         } catch (e: Exception) {
@@ -263,6 +278,42 @@ fun HomeScreen(
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
+                        }
+                    }
+                    // Subscription traffic / expiry from the `subscription-userinfo`
+                    // header. For api.vpn4tv.com (our own, unlimited traffic)
+                    // we show only the expire date, not traffic. For third-party
+                    // providers we show both. An "Истекла" label surfaces in red
+                    // when expire < now regardless of provider.
+                    if (subscriptionInfo != null) {
+                        val info = subscriptionInfo!!
+                        val parts = mutableListOf<String>()
+                        // Traffic — only for non-own subscriptions.
+                        if (!isOwnSubscription && (info.download != null || info.upload != null)) {
+                            val used = (info.download ?: 0) + (info.upload ?: 0)
+                            val usedStr = formatBytes(used)
+                            if (info.total != null && info.total > 0) {
+                                parts.add("$usedStr / ${formatBytes(info.total)}")
+                            } else {
+                                parts.add(usedStr)
+                            }
+                        }
+                        // Expire — for everyone.
+                        if (info.expireEpochSec != null && info.expireEpochSec > 0) {
+                            if (isExpired) {
+                                parts.add("истекла")
+                            } else {
+                                val sdf = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault())
+                                parts.add("до ${sdf.format(java.util.Date(info.expireEpochSec * 1000))}")
+                            }
+                        }
+                        if (parts.isNotEmpty()) {
+                            Text(
+                                parts.joinToString(" · "),
+                                fontSize = 12.sp,
+                                color = if (isExpired) Color.Red.copy(alpha = 0.8f)
+                                        else Color.Gray.copy(alpha = 0.7f),
+                            )
                         }
                     }
                 }

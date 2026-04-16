@@ -34,7 +34,29 @@ data class SubscriptionUserInfo(
     val download: Long?,
     val total: Long?,
     val expireEpochSec: Long?,
-)
+) {
+    fun toJson(): String = org.json.JSONObject().apply {
+        upload?.let { put("u", it) }
+        download?.let { put("d", it) }
+        total?.let { put("t", it) }
+        expireEpochSec?.let { put("e", it) }
+    }.toString()
+
+    companion object {
+        fun fromJson(s: String?): SubscriptionUserInfo? {
+            if (s.isNullOrBlank()) return null
+            return try {
+                val j = org.json.JSONObject(s)
+                SubscriptionUserInfo(
+                    upload = if (j.has("u")) j.getLong("u") else null,
+                    download = if (j.has("d")) j.getLong("d") else null,
+                    total = if (j.has("t")) j.getLong("t") else null,
+                    expireEpochSec = if (j.has("e")) j.getLong("e") else null,
+                )
+            } catch (_: Exception) { null }
+        }
+    }
+}
 
 object HwidService {
     private const val PREFS = "hwid"
@@ -79,6 +101,19 @@ object HwidService {
     /** Body-only shim so existing callers keep compiling during the transition. */
     fun downloadSubscription(context: Context, url: String): String =
         fetchSubscription(context, url).body
+
+    private const val SUB_INFO_PREFS = "sub_userinfo"
+
+    fun saveUserInfo(context: Context, profileId: Long, info: SubscriptionUserInfo?) {
+        context.getSharedPreferences(SUB_INFO_PREFS, Context.MODE_PRIVATE)
+            .edit().putString("p$profileId", info?.toJson()).apply()
+    }
+
+    fun loadUserInfo(context: Context, profileId: Long): SubscriptionUserInfo? {
+        val s = context.getSharedPreferences(SUB_INFO_PREFS, Context.MODE_PRIVATE)
+            .getString("p$profileId", null)
+        return SubscriptionUserInfo.fromJson(s)
+    }
 
     /**
      * The `profile-title` header may be plain UTF-8 or `base64:<payload>`,
