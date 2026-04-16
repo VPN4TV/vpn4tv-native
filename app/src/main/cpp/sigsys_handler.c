@@ -66,7 +66,15 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     action.sa_sigaction = sigsys_handler;
-    action.sa_flags = SA_SIGINFO | SA_NODEFER | SA_RESTART;
+    // SA_ONSTACK: deliver signal on Go's alternate signal stack (set up
+    // by the Go runtime via sigaltstack). Without this, SIGSYS lands on
+    // the goroutine's current stack — which during a cgo transition
+    // (_cgo_topofstack) may be half-swapped, causing stack corruption
+    // and a secondary SIGABRT. This was the root cause of the
+    // _cgo_topofstack crash cluster on arm32 (5 hits in 14 days).
+    // SA_NODEFER removed: it allowed re-entrant SIGSYS delivery during
+    // handler execution → recursion on the same stack → overflow.
+    action.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESTART;
     sigemptyset(&action.sa_mask);
 
     if (sigaction(SIGSYS, &action, &g_prev_action) != 0) {
