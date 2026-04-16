@@ -87,7 +87,24 @@ object HwidService {
         conn.setRequestProperty("User-Agent", "VPN4TV-Native/0.1.0")
         conn.connectTimeout = 15000
         conn.readTimeout = 15000
-        val body = conn.inputStream.bufferedReader().readText()
+        // Cap body at 2 MB — a real subscription is at most a few hundred
+        // KB. Without this, a misconfigured server returning a huge
+        // response (or an accidental redirect to a binary file) blows up
+        // the heap with OutOfMemoryError inside ProxyParser.parseSubscription
+        // (Vitals: 50103, 1 user).
+        val maxBytes = 2 * 1024 * 1024
+        val input = conn.inputStream
+        val buf = ByteArray(maxBytes + 1)
+        var read = 0
+        while (read < buf.size) {
+            val n = input.read(buf, read, buf.size - read)
+            if (n <= 0) break
+            read += n
+        }
+        if (read > maxBytes) {
+            throw java.io.IOException("Subscription response too large (>${maxBytes / 1024 / 1024} MB), refusing")
+        }
+        val body = String(buf, 0, read, Charsets.UTF_8)
         return SubscriptionResponse(
             body = body,
             title = decodeTitleHeader(conn.getHeaderField("profile-title")),
