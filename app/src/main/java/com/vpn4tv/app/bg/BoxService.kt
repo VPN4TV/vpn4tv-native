@@ -497,6 +497,16 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         if (status.value != Status.Stopped) return Service.START_NOT_STICKY
         status.value = Status.Starting
 
+        // Android 14 gives a foreground service only 5 seconds between
+        // startForegroundService() and startForeground(). Our previous
+        // code deferred startForeground() into the coroutine below,
+        // which could miss the deadline on a loaded device and cause
+        // ForegroundServiceDidNotStartInTimeException (seen on Xiaomi
+        // TV Box S 2nd Gen / Android 14, 50103). Call immediately with
+        // a placeholder notification; startService() updates the text
+        // once the profile name is known.
+        notification.show("", R.string.status_starting)
+
         if (!receiverRegistered) {
             ContextCompat.registerReceiver(
                 service,
