@@ -1,6 +1,7 @@
 package com.vpn4tv.app.outline
 
 import android.util.Log
+import com.vpn4tv.app.ktx.unwrap
 import io.nekohasekai.libbox.Libbox
 
 /**
@@ -54,7 +55,7 @@ object OutlineBridge {
             var lastSize = 0
             while (running) {
                 try {
-                    val all = Libbox.outlineLog()
+                    val all = Libbox.outlineLog().unwrap
                     val lines = if (all.isEmpty()) emptyList() else all.split("\n")
                     if (lines.size > lastSize) {
                         for (i in lastSize until lines.size) {

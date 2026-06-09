@@ -14,7 +14,7 @@ class HTTPClient : Closeable {
             userAgent += " ("
             userAgent += BuildConfig.VERSION_CODE
             userAgent += "; sing-box "
-            userAgent += Libbox.version()
+            userAgent += Libbox.version().unwrap
             userAgent += "; language "
             userAgent += Locale.getDefault().toLanguageTag().replace("-", "_")
             userAgent += ")"

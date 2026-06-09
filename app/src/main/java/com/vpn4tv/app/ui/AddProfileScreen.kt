@@ -53,6 +53,9 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
     var userName by remember { mutableStateOf<String?>(null) }
     var isAdding by remember { mutableStateOf(false) }
     var isDone by remember { mutableStateOf(false) }
+    // Retry progress shown in red while subscription fetch is timing out —
+    // user sees "Попытка N/10 (через резервный сервер)" instead of a frozen UI.
+    var retryInfo by remember { mutableStateOf<com.vpn4tv.app.converter.HwidService.RetryProgress?>(null) }
 
     // Disconnect any active session before we start polling. A user adding
     // a SECOND subscription was seeing "бесконечное ожидание" because the
@@ -79,8 +82,13 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
                                 isAdding = true; status = "adding"
                                 scope.launch(Dispatchers.IO) {
                                     var errorMsg = ""
-                                    val added = processConfigs(context, configs, userName) { errorMsg = it }
+                                    val added = processConfigs(
+                                        context, configs, userName,
+                                        onError = { errorMsg = it },
+                                        onProgress = { retryInfo = it },
+                                    )
                                     withContext(Dispatchers.Main) {
+                                        retryInfo = null
                                         if (added) { isDone = true; status = "done"; delay(1000); onProfileAdded() }
                                         else { isAdding = false; status = if (errorMsg.isNotEmpty()) "error:$errorMsg" else "failed" }
                                     }
@@ -108,8 +116,13 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
                             status = "adding"
                             scope.launch(Dispatchers.IO) {
                                 var errorMsg = ""
-                                val added = processConfigs(context, configs, userName) { errorMsg = it }
+                                val added = processConfigs(
+                                    context, configs, userName,
+                                    onError = { errorMsg = it },
+                                    onProgress = { retryInfo = it },
+                                )
                                 withContext(Dispatchers.Main) {
+                                    retryInfo = null
                                     if (added) {
                                         isDone = true
                                         status = "done"
@@ -134,8 +147,14 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
                                 isAdding = true
                                 status = "adding"
                                 scope.launch(Dispatchers.IO) {
-                                    val added = processConfigs(context, configs, userName)
+                                    var errorMsg = ""
+                                    val added = processConfigs(
+                                        context, configs, userName,
+                                        onError = { errorMsg = it },
+                                        onProgress = { retryInfo = it },
+                                    )
                                     withContext(Dispatchers.Main) {
+                                        retryInfo = null
                                         if (added) {
                                             isDone = true
                                             status = "done"
@@ -143,7 +162,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
                                             onProfileAdded()
                                         } else {
                                             isAdding = false
-                                            status = "failed"
+                                            status = if (errorMsg.isNotEmpty()) "error:$errorMsg" else "failed"
                                         }
                                     }
                                 }
@@ -185,8 +204,12 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
             context.packageManager.hasSystemFeature("android.software.leanback")
         }
 
-        val qrBitmap = remember(uuid) {
-            generateQrBitmap("https://t.me/VPN4TV_Bot?start=$uuid", 200)
+        // QR encoding + ICU charset init can block main thread >5s on slow
+        // TV SoCs (Xiaomi MiTV ANR, vc50307). Generate off-thread.
+        val qrBitmap by produceState<Bitmap?>(initialValue = null, uuid) {
+            value = withContext(Dispatchers.Default) {
+                generateQrBitmap("https://t.me/VPN4TV_Bot?start=$uuid", 200)
+            }
         }
 
         if (isTV) {
@@ -196,9 +219,9 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (qrBitmap != null) {
+                qrBitmap?.let { bmp ->
                     Image(
-                        bitmap = qrBitmap.asImageBitmap(),
+                        bitmap = bmp.asImageBitmap(),
                         contentDescription = "QR Code",
                         modifier = Modifier.size(200.dp)
                     )
@@ -249,10 +272,10 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                if (qrBitmap != null) {
+                qrBitmap?.let { bmp ->
                     Text(stringResource(R.string.add_scan_qr), fontSize = 14.sp, color = Color.Gray)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Image(bitmap = qrBitmap.asImageBitmap(), contentDescription = "QR Code", modifier = Modifier.size(150.dp))
+                    Image(bitmap = bmp.asImageBitmap(), contentDescription = "QR Code", modifier = Modifier.size(150.dp))
                 }
             }
         }
@@ -263,6 +286,19 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
         if (isAdding) {
             CircularProgressIndicator(modifier = Modifier.size(32.dp))
             Spacer(modifier = Modifier.height(8.dp))
+            retryInfo?.let { p ->
+                if (p.attempt > 1) {
+                    val src = if (p.mirror) stringResource(R.string.add_retry_mirror)
+                              else stringResource(R.string.add_retry_primary)
+                    Text(
+                        "${stringResource(R.string.add_retry_prefix)} ${p.attempt}/${p.maxAttempts} ($src)",
+                        fontSize = 14.sp,
+                        color = Color.Red,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
         }
         val statusText = when {
             status == "" -> stringResource(R.string.add_waiting)
@@ -288,19 +324,23 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
 
 private suspend fun pollServer(id: String): JSONObject? {
     return withContext(Dispatchers.IO) {
-        try {
-            val url = "https://api.vpn4tv.com/poll?uuid=$id"
-            val conn = com.vpn4tv.app.converter.HwidService
-                .openConnectionWithDnsFallbackPublic(url)
-            conn.connectTimeout = 15000
-            conn.readTimeout = 15000
-            val response = conn.inputStream.bufferedReader().readText()
-            conn.disconnect()
-            val json = JSONObject(response)
-            if (json.optString("type") != "timeout") json else null
-        } catch (e: Exception) {
-            null
+        val primaryUrl = "https://api.vpn4tv.com/poll?uuid=$id"
+        val endpoints = com.vpn4tv.app.converter.HwidService.endpointsWithMirror(primaryUrl)
+        for (url in endpoints) {
+            try {
+                val conn = com.vpn4tv.app.converter.HwidService
+                    .openConnectionWithDnsFallbackPublic(url)
+                conn.connectTimeout = 30000
+                conn.readTimeout = 30000
+                val response = conn.inputStream.bufferedReader().readText()
+                conn.disconnect()
+                val json = JSONObject(response)
+                return@withContext if (json.optString("type") != "timeout") json else null
+            } catch (_: Exception) {
+                // try next endpoint (mirror)
+            }
         }
+        null
     }
 }
 
@@ -333,6 +373,7 @@ private suspend fun processConfigs(
     configs: List<String>,
     userName: String?,
     onError: ((String) -> Unit)? = null,
+    onProgress: ((com.vpn4tv.app.converter.HwidService.RetryProgress) -> Unit)? = null,
 ): Boolean {
     return try {
         // Configs can be URLs (https://...) or direct proxy links (vless://...)
@@ -347,7 +388,7 @@ private suspend fun processConfigs(
         for (config in configs) {
             val trimmed = config.trim()
             if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-                val sub = com.vpn4tv.app.converter.HwidService.fetchSubscription(context, trimmed)
+                val sub = com.vpn4tv.app.converter.HwidService.fetchSubscription(context, trimmed, onProgress)
                 allContent.appendLine(sub.body)
                 if (remoteUrl.isEmpty()) {
                     remoteUrl = trimmed

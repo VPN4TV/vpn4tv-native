@@ -1,6 +1,7 @@
 package com.vpn4tv.app.wireproxy
 
 import android.util.Log
+import com.vpn4tv.app.ktx.unwrap
 import io.nekohasekai.libbox.Libbox
 
 /**
@@ -69,7 +70,7 @@ object WgBridge {
             var lastSize = 0
             while (running) {
                 try {
-                    val all = Libbox.wireproxyLog()
+                    val all = Libbox.wireproxyLog().unwrap
                     val lines = if (all.isEmpty()) emptyList() else all.split("\n")
                     if (lines.size > lastSize) {
                         for (i in lastSize until lines.size) {

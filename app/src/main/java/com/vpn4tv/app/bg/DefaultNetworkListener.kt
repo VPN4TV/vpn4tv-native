@@ -181,43 +181,54 @@ object DefaultNetworkListener {
      * Source: https://android.googlesource.com/platform/frameworks/base/+/2df4c7d/services/core/java/com/android/server/ConnectivityService.java#887
      */
     private fun register() {
-        when (Build.VERSION.SDK_INT) {
-            in 31..Int.MAX_VALUE ->
-                @TargetApi(31)
-                {
-                    Application.connectivity.registerBestMatchingNetworkCallback(
-                        request,
-                        Callback,
-                        mainHandler,
-                    )
-                }
+        // Multi-user Android TVs (Haier MatrixTV DVB, similar firmwares) reject
+        // ConnectivityManager calls with SecurityException "Package android
+        // does not belong to <uid>" when the app is installed under user 0
+        // but runs under user 10+. Fall back to broadcast-based monitoring
+        // (fallback = true) so VPN still starts; we just lose default-network
+        // change notifications on those devices.
+        try {
+            when (Build.VERSION.SDK_INT) {
+                in 31..Int.MAX_VALUE ->
+                    @TargetApi(31)
+                    {
+                        Application.connectivity.registerBestMatchingNetworkCallback(
+                            request,
+                            Callback,
+                            mainHandler,
+                        )
+                    }
 
-            in 28 until 31 ->
-                @TargetApi(28)
-                { // we want REQUEST here instead of LISTEN
-                    Application.connectivity.requestNetwork(request, Callback, mainHandler)
-                }
+                in 28 until 31 ->
+                    @TargetApi(28)
+                    { // we want REQUEST here instead of LISTEN
+                        Application.connectivity.requestNetwork(request, Callback, mainHandler)
+                    }
 
-            in 26 until 28 ->
-                @TargetApi(26)
-                {
-                    Application.connectivity.registerDefaultNetworkCallback(Callback, mainHandler)
-                }
+                in 26 until 28 ->
+                    @TargetApi(26)
+                    {
+                        Application.connectivity.registerDefaultNetworkCallback(Callback, mainHandler)
+                    }
 
-            in 24 until 26 ->
-                @TargetApi(24)
-                {
-                    Application.connectivity.registerDefaultNetworkCallback(Callback)
-                }
+                in 24 until 26 ->
+                    @TargetApi(24)
+                    {
+                        Application.connectivity.registerDefaultNetworkCallback(Callback)
+                    }
 
-            else ->
-                try {
+                else -> {
                     fallback = false
                     Application.connectivity.requestNetwork(request, Callback)
-                } catch (e: RuntimeException) {
-                    fallback =
-                        true // known bug on API 23: https://stackoverflow.com/a/33509180/2245107
                 }
+            }
+        } catch (e: SecurityException) {
+            android.util.Log.w("DefaultNetworkListener", "ConnectivityManager SecurityException, falling back to broadcasts: ${e.message}")
+            fallback = true
+        } catch (e: RuntimeException) {
+            // Known bug on API 23: https://stackoverflow.com/a/33509180/2245107
+            android.util.Log.w("DefaultNetworkListener", "ConnectivityManager RuntimeException, falling back to broadcasts: ${e.message}")
+            fallback = true
         }
     }
 

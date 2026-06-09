@@ -477,6 +477,15 @@ object ProxyParser {
                 ((bytes[1].toInt() and 0xff) shl 16) or
                 ((bytes[2].toInt() and 0xff) shl 8) or
                 (bytes[3].toInt() and 0xff)
+            // Cap at 16 MB. Real Amnezia configs are <1 MB; a multi-GB header
+            // means the body was non-Amnezia (HTML error page from a broken
+            // subscription, random binary, etc.) — preallocating that buffer
+            // OOMs on TV with 1-2 GB RAM (vc50318 cluster, TCL G07_4K_GB_NF).
+            val MAX_AMNEZIA_PAYLOAD = 16 * 1024 * 1024
+            if (expectedLen <= 0 || expectedLen > MAX_AMNEZIA_PAYLOAD) {
+                android.util.Log.w("ProxyParser", "parseAmneziaVpn: rejecting absurd expectedLen=$expectedLen — body is not a valid Amnezia config")
+                return emptyList()
+            }
             val inflater = java.util.zip.Inflater()
             inflater.setInput(bytes, 4, bytes.size - 4)
             val out = ByteArray(maxOf(expectedLen, 8192))

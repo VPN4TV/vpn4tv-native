@@ -46,7 +46,7 @@ fun LogIterator.toList(): List<LogEntry> = mutableListOf<LogEntry>().apply {
 }
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-fun RoutePrefix.toIpPrefix() = IpPrefix(InetAddress.getByName(address()), prefix())
+fun RoutePrefix.toIpPrefix() = IpPrefix(InetAddress.getByName(address().unwrap), prefix())
 
 fun ConnectionIterator.toList(): List<LibboxConnection> = mutableListOf<LibboxConnection>().apply {
     while (hasNext()) {

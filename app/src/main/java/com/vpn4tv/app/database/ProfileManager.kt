@@ -30,7 +30,6 @@ object ProfileManager {
             )
             .addMigrations(ProfileDatabase.MIGRATION_1_2)
             .fallbackToDestructiveMigrationOnDowngrade()
-            .enableMultiInstanceInvalidation()
             .setQueryExecutor { GlobalScope.launch { it.run() } }
             .build()
     }

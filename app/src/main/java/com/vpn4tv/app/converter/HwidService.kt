@@ -75,18 +75,53 @@ object HwidService {
         return hwid
     }
 
+    private const val MAX_ATTEMPTS = 10
+
+    data class RetryProgress(val attempt: Int, val maxAttempts: Int, val mirror: Boolean)
+
     /**
      * Download subscription content + honour the Hiddify metadata headers.
-     * Callers that only want the body can use [downloadSubscription].
+     * Retries each endpoint on SocketTimeoutException (up to [MAX_ATTEMPTS])
+     * and falls back to the bell.a4e.ar mirror if api.vpn4tv.com is
+     * unreachable from the user's network (ISP blocks, TSPU interference).
+     * `onProgress` fires on every attempt so the UI can show a counter.
      */
-    fun fetchSubscription(context: Context, url: String): SubscriptionResponse {
+    fun fetchSubscription(
+        context: Context,
+        url: String,
+        onProgress: ((RetryProgress) -> Unit)? = null,
+    ): SubscriptionResponse {
+        val endpoints = endpointsWithMirror(url)
+        var lastError: Exception? = null
+        for ((endpointIdx, endpoint) in endpoints.withIndex()) {
+            val isMirror = endpointIdx > 0
+            for (attempt in 1..MAX_ATTEMPTS) {
+                onProgress?.invoke(RetryProgress(attempt, MAX_ATTEMPTS, isMirror))
+                try {
+                    return fetchSubscriptionOnce(context, endpoint)
+                } catch (e: java.net.SocketTimeoutException) {
+                    lastError = e
+                    android.util.Log.w("HwidService", "fetchSubscription timeout ${attempt}/${MAX_ATTEMPTS} @ $endpoint")
+                    if (attempt < MAX_ATTEMPTS) Thread.sleep(1000L)
+                } catch (e: java.io.IOException) {
+                    // Non-timeout IO (reset, 5xx) — jump to mirror without retries
+                    lastError = e
+                    android.util.Log.w("HwidService", "fetchSubscription IO error at $endpoint: ${e.message}")
+                    break
+                }
+            }
+        }
+        throw lastError ?: java.net.SocketTimeoutException("all subscription endpoints exhausted")
+    }
+
+    private fun fetchSubscriptionOnce(context: Context, url: String): SubscriptionResponse {
         val conn = openConnectionWithDnsFallback(url)
         conn.setRequestProperty("x-hwid", getHwid(context))
         conn.setRequestProperty("x-device-os", "Android")
         conn.setRequestProperty("x-ver-os", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         conn.setRequestProperty("User-Agent", "VPN4TV-Native/0.1.0")
-        conn.connectTimeout = 15000
-        conn.readTimeout = 15000
+        conn.connectTimeout = 30000
+        conn.readTimeout = 30000
         // Cap body at 2 MB — a real subscription is at most a few hundred
         // KB. Without this, a misconfigured server returning a huge
         // response (or an accidental redirect to a binary file) blows up
@@ -114,6 +149,17 @@ object HwidService {
             supportUrl = conn.getHeaderField("support-url"),
             userInfo = parseUserInfo(conn.getHeaderField("subscription-userinfo")),
         )
+    }
+
+    /**
+     * Primary endpoint plus mirror for ISP-blocked users. bell.a4e.ar proxies
+     * requests to api.vpn4tv.com; when the primary is unreachable (Russian
+     * TSPU dropping TLS to api.vpn4tv.com, SocketTimeoutException cluster
+     * on vc50313 AddProfile flow), the mirror delivers the same payload.
+     */
+    fun endpointsWithMirror(url: String): List<String> {
+        val mirror = url.replace("//api.vpn4tv.com/", "//bell.a4e.ar/")
+        return if (mirror != url) listOf(url, mirror) else listOf(url)
     }
 
     /** Body-only shim so existing callers keep compiling during the transition. */

@@ -585,6 +585,9 @@
     <string name="add_adding">Добавление подписки…</string>
     <string name="add_success">Подписка добавлена!</string>
     <string name="add_failed">Ошибка добавления подписки</string>
+    <string name="add_retry_prefix">Попытка</string>
+    <string name="add_retry_primary">основной сервер</string>
+    <string name="add_retry_mirror">резервный сервер</string>
     <string name="add_waiting_sub">Ожидание подписки…</string>
     <string name="error_no_subscription">Подписка не настроена</string>
     <string name="error_vpn_denied">VPN разрешение отклонено</string>

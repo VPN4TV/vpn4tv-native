@@ -20,6 +20,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <android/log.h>
 
@@ -63,6 +64,21 @@ static void sigsys_handler(int sig, siginfo_t *info, void *ucontext_void) {
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
+    // Set GODEBUG before libgojni.so loads. Go runtime reads env var at
+    // init, and setting Java system properties doesn't propagate to Go.
+    // - asyncpreemptoff=1 disables goroutine async preemption. Dominant
+    //   cause of SIGABRT in _cgo_topofstack clusters on arm32 gomobile
+    //   apps since Go 1.14 (golang/go#35055, #37741, #42888).
+    // - cgocheck=1 (default) catches bad pointer arguments at the cgo
+    //   call boundary. Disabled briefly in 50317-50321 — bad pointers
+    //   then slipped through to the Go heap and tripped GC scan with
+    //   "found bad pointer in Go heap" runtime.throw (62-byte cluster
+    //   on 50318+, persistent even after Green Tea GC was disabled in
+    //   50320, so the pointers are real not a GC false positive). Keep
+    //   cgocheck on to surface the cgo call site in the next dump.
+    setenv("GODEBUG", "asyncpreemptoff=1,cgocheck=1", 1);
+    LOGI("GODEBUG set: asyncpreemptoff=1,cgocheck=1");
+
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     action.sa_sigaction = sigsys_handler;

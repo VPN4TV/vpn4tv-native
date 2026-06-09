@@ -620,6 +620,9 @@
     <string name="add_adding">Adding subscription…</string>
     <string name="add_success">Subscription added!</string>
     <string name="add_failed">Failed to add subscription</string>
+    <string name="add_retry_prefix">Retry</string>
+    <string name="add_retry_primary">primary server</string>
+    <string name="add_retry_mirror">backup server</string>
     <string name="add_waiting_sub">Waiting for subscription…</string>
     <string name="error_no_subscription">No subscription configured</string>
     <string name="error_vpn_denied">VPN permission denied</string>

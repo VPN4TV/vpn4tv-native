@@ -13,7 +13,7 @@ import com.vpn4tv.app.Application
 import com.vpn4tv.app.database.ProfileManager
 import com.vpn4tv.app.database.Settings
 import com.vpn4tv.app.database.TypedProfile
-import com.vpn4tv.app.utils.HTTPClient
+import com.vpn4tv.app.converter.HwidService
 import java.io.File
 import java.util.Date
 import java.util.concurrent.TimeUnit
@@ -75,7 +75,13 @@ class UpdateProfileWork {
                     continue
                 }
                 try {
-                    val content = HTTPClient().use { it.getString(profile.typed.remoteURL) }
+                    // Go through HwidService.fetchSubscription — it carries
+                    // DNS fallback + 10-attempt retry + bell.a4e.ar mirror.
+                    // Silent WorkManager updates previously used Libbox's
+                    // HTTPClient which has no such fallback, so users whose
+                    // ISP blocks api.vpn4tv.com never got a fresh config in
+                    // the background.
+                    val content = HwidService.fetchSubscription(applicationContext, profile.typed.remoteURL).body
                     Libbox.checkConfig(content)
                     val file = File(profile.typed.path)
                     if (file.readText() != content) {

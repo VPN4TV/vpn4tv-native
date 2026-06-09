@@ -29,6 +29,7 @@ object DnsProber {
     data class DnsResult(
         val dohUrl: String,
         val udpServer: String,
+        val dohWorks: Boolean,
     )
 
     /** Ordered by preference: least-blocked first, most-obvious last. */
@@ -80,10 +81,10 @@ object DnsProber {
 
         val doh = bestDoh ?: "https://8.8.8.8/dns-query"
         val udp = bestUdp ?: "8.8.8.8"
-        result = DnsResult(dohUrl = doh, udpServer = udp)
+        result = DnsResult(dohUrl = doh, udpServer = udp, dohWorks = bestDoh != null)
 
         val elapsed = System.currentTimeMillis() - startMs
-        Log.i(TAG, "probe done in ${elapsed}ms: doh=$doh udp=$udp")
+        Log.i(TAG, "probe done in ${elapsed}ms: doh=$doh (works=${bestDoh != null}) udp=$udp")
     }
 
     private fun probeDoH(dohUrl: String): Boolean {
@@ -133,4 +134,24 @@ object DnsProber {
     }
 
     fun udpServer(): String = result?.udpServer ?: "8.8.8.8"
+
+    fun dohWorks(): Boolean = result?.dohWorks == true
+
+    /**
+     * IP that is known to serve DoH on /dns-query with a cert valid for
+     * the raw IP (no SNI / hostname verification shenanigans). Used by
+     * dns-direct, which cannot have a bootstrap resolver and therefore
+     * must be addressed by IP. Google and Cloudflare both ship DoH on
+     * their anycast IPs; Yandex does not (only dns.yandex.net).
+     */
+    private val DOH_CAPABLE_IPS = setOf("8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1")
+
+    fun dohCapableIp(): String? {
+        val r = result ?: return null
+        if (!r.dohWorks) return null
+        val host = r.dohUrl.removePrefix("https://").substringBefore("/")
+        if (host.matches(Regex("^[0-9.]+$"))) return host
+        if (r.udpServer in DOH_CAPABLE_IPS) return r.udpServer
+        return "1.1.1.1"
+    }
 }

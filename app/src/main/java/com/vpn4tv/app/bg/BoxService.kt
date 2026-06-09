@@ -224,8 +224,24 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
             DefaultNetworkMonitor.start()
 
-            // Start xray bridge if the profile needs it (xhttp/splithttp outbounds)
+            // Record which bridges this session needs. consumeAndSurfaceCrashLog
+            // reads these on the next launch and prepends a synthetic stack
+            // frame so Vitals shows xray=Y/outline=Y/wireproxy=Y next to each
+            // _cgo_topofstack abort — lets us correlate residual races with
+            // the bridge subset that was running.
             val xraySidecar = File(com.vpn4tv.app.converter.ConfigGenerator.xraySidecarPath(profile.typed.path))
+            val outlineSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.outlineSidecarPath(profile.typed.path))
+            val wgSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.wgSidecarPath(profile.typed.path))
+            Application.application
+                .getSharedPreferences("session", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("xray", xraySidecar.exists())
+                .putBoolean("outline", outlineSidecar.exists())
+                .putBoolean("wireproxy", wgSidecar.exists())
+                .putLong("started_at", System.currentTimeMillis())
+                .apply()
+
+            // Start xray bridge if the profile needs it (xhttp/splithttp outbounds)
             if (xraySidecar.exists()) {
                 try {
                     Log.d(TAG, "Starting xray bridge from ${xraySidecar.name}")
@@ -238,7 +254,6 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
 
             // Start outline bridge if the profile has Outline-prefix Shadowsocks endpoints
-            val outlineSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.outlineSidecarPath(profile.typed.path))
             if (outlineSidecar.exists()) {
                 try {
                     Log.d(TAG, "Starting outline bridge from ${outlineSidecar.name}")
@@ -253,7 +268,6 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
 
             // Start wireproxy bridge if the profile has AmneziaWG endpoints
-            val wgSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.wgSidecarPath(profile.typed.path))
             if (wgSidecar.exists()) {
                 try {
                     Log.d(TAG, "Starting wireproxy bridge from ${wgSidecar.name}")
@@ -294,6 +308,20 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             } catch (e: Exception) {
                 Log.e(TAG, "startOrReloadService FAILED: ${e.message}", e)
                 lastError.postValue("startService: ${e.message}")
+                // Self-heal: external-storage cache-file EACCES on multi-user TV.
+                // Set flag so next launch uses internal filesDir, then kill the
+                // process — Android restarts it on the next user tap.
+                val msg = e.message.orEmpty()
+                if ((msg.contains("cache-file") || msg.contains("cache_file")) && msg.contains("permission denied")) {
+                    Log.w(TAG, "Detected cache-file EACCES, switching to internal storage on next launch")
+                    Application.application
+                        .getSharedPreferences("storage", android.content.Context.MODE_PRIVATE)
+                        .edit().putBoolean("use_internal", true).commit()
+                    stopAndAlert(Alert.CreateService, "${e.message}\n\nПерезапускаю с внутренним хранилищем...")
+                    kotlinx.coroutines.delay(2000)
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                    return
+                }
                 stopAndAlert(Alert.CreateService, e.message)
                 return
             }
@@ -424,6 +452,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
     @RequiresApi(Build.VERSION_CODES.M)
     private fun serviceUpdateIdleMode() {
+        if (!::commandServer.isInitialized) return
         if (Application.powerManager.isDeviceIdleMode) {
             commandServer.pause()
         } else {
@@ -752,19 +781,38 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             val tag = server.optString("tag", "")
             when (tag) {
                 "dns-remote" -> {
-                    // DoH server that goes through the VPN tunnel.
-                    val dohHost = com.vpn4tv.app.utils.DnsProber.dohServer()
-                    server.put("type", "https")
-                    server.put("server", dohHost)
-                    Log.i(TAG, "DNS: dns-remote → https $dohHost (probed)")
+                    // DoH server that goes through the VPN tunnel. Same
+                    // rule as dns-direct — prefer DoH, fall back to UDP
+                    // only if nothing in the DoH chain was reachable.
+                    if (com.vpn4tv.app.utils.DnsProber.dohWorks()) {
+                        val dohHost = com.vpn4tv.app.utils.DnsProber.dohServer()
+                        server.put("type", "https")
+                        server.put("server", dohHost)
+                        Log.i(TAG, "DNS: dns-remote → https $dohHost (probed)")
+                    } else {
+                        val udp = com.vpn4tv.app.utils.DnsProber.udpServer()
+                        server.put("type", "udp")
+                        server.put("server", udp)
+                        Log.i(TAG, "DNS: dns-remote → udp $udp (DoH unavailable, fallback)")
+                    }
                 }
                 "dns-direct" -> {
-                    // Plain UDP for resolving dns-remote's hostname and
-                    // for the "any outbound" catch-all rule.
-                    val udp = com.vpn4tv.app.utils.DnsProber.udpServer()
-                    server.put("type", "udp")
-                    server.put("server", udp)
-                    Log.i(TAG, "DNS: dns-direct → udp $udp (probed)")
+                    // Prefer DoH over plain UDP: Russian TSPU per-domain-filters
+                    // UDP DNS (narva.a4e.ar "empty result" cluster on vc50307).
+                    // DoH inside TLS hides the queried name. Fall back to UDP
+                    // only if no DoH endpoint was reachable during probe.
+                    val dohIp = com.vpn4tv.app.utils.DnsProber.dohCapableIp()
+                    if (dohIp != null) {
+                        server.put("type", "https")
+                        server.put("server", dohIp)
+                        server.put("path", "/dns-query")
+                        Log.i(TAG, "DNS: dns-direct → https $dohIp/dns-query (probed)")
+                    } else {
+                        val udp = com.vpn4tv.app.utils.DnsProber.udpServer()
+                        server.put("type", "udp")
+                        server.put("server", udp)
+                        Log.i(TAG, "DNS: dns-direct → udp $udp (DoH unavailable, fallback)")
+                    }
                 }
             }
         }

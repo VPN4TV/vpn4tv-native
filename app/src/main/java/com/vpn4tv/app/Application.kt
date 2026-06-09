@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.util.Log
 import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.PowerManager
 import androidx.core.content.getSystemService
 import io.nekohasekai.libbox.Libbox
@@ -63,11 +64,15 @@ class Application : Application() {
         }
 
         // libbox 1.14+ expects BCP-47 tags ("ru-RU"), not POSIX ("ru_RU").
+        // Catch Throwable (not just Exception) — first Libbox.* call triggers
+        // libgojni.so load via go.Seq.<clinit>; on Play-split misdelivery
+        // (Xiaomi TV Stick 4K, vc50317) that throws UnsatisfiedLinkError which
+        // extends Error and would kill onCreate. App stays alive but degraded.
         try {
             Libbox.setLocale(Locale.getDefault().toLanguageTag())
-        } catch (e: Exception) {
-            Log.w("Application", "unsupported locale, falling back to en: ${e.message}")
-            try { Libbox.setLocale("en") } catch (_: Exception) {}
+        } catch (e: Throwable) {
+            Log.e("Application", "Libbox.setLocale failed (libgojni load?): ${e.javaClass.simpleName}: ${e.message}", e)
+            try { Libbox.setLocale("en") } catch (_: Throwable) {}
         }
 
         // Probe DNS servers on a background thread so by the time the
@@ -79,18 +84,49 @@ class Application : Application() {
             com.vpn4tv.app.utils.DnsProber.probe()
         }
 
-        val baseDir = filesDir
-        baseDir.mkdirs()
-        val workingDir = getExternalFilesDir(null)
-        val tempDir = cacheDir
-        tempDir.mkdirs()
-        workingDir?.mkdirs()
-
+        // All storage init runs off main thread. mkdirs() + getExternalFilesDir()
+        // can block on slow / broken storage; ANR reports on MY_PACKAGE_REPLACED
+        // and SystemJobService broadcasts trace back to a slow Application.onCreate.
+        // Sony BRAVIA VH2 skips external entirely (that device's external path
+        // hangs File.mkdirs indefinitely — prior vc50303 boot-loop cluster).
         @Suppress("OPT_IN_USAGE")
         GlobalScope.launch(Dispatchers.IO) {
-            if (workingDir != null) {
-                setupLibbox(baseDir, workingDir, tempDir)
+            val baseDir = filesDir.apply { mkdirs() }
+            // External storage path is unreliable on multi-user Android TVs:
+            // app installed under user 0 but process runs as user 10+, so
+            // /storage/emulated/0/Android/data/<pkg>/... returns EACCES.
+            // BRAVIA VH2 was the first known case; later we saw Haier
+            // MatrixTV, Skyworth, Xiaomi MiBox S all hit it (vc50317-50318
+            // CreateService cache.db permission denied cluster). Test write
+            // access at startup; on failure fall back to internal filesDir.
+            // Self-healing flag: BoxService sets it when sing-box CreateService
+            // throws cache-file permission denied. On next launch we skip
+            // external entirely. Spares us mass-migrating healthy users while
+            // still recovering devices whose write_test passed but cache.db
+            // open later EACCES'd (Haier multi-user firmware quirk).
+            val storagePrefs = getSharedPreferences("storage", Context.MODE_PRIVATE)
+            val forceInternal = storagePrefs.getBoolean("use_internal", false)
+            val workingDir = if (Build.DEVICE == "BRAVIA_VH2" || forceInternal) {
+                if (forceInternal) Log.i("Application", "Using internal storage (use_internal flag)")
+                baseDir
+            } else {
+                val external = getExternalFilesDir(null)
+                val writable = external?.let { dir ->
+                    try {
+                        dir.mkdirs()
+                        val test = File(dir, ".write_test_${System.currentTimeMillis()}")
+                        test.createNewFile() && test.delete()
+                    } catch (e: Exception) {
+                        Log.w("Application", "External storage not writable, using internal: ${e.message}")
+                        false
+                    }
+                } ?: false
+                if (writable) external!! else baseDir
             }
+            val tempDir = cacheDir.apply { mkdirs() }
+            workingDir.mkdirs()
+            consumeAndSurfaceCrashLog(tempDir)
+            setupLibbox(baseDir, workingDir, tempDir)
             UpdateProfileWork.reconfigureUpdater()
         }
 
@@ -108,8 +144,112 @@ class Application : Application() {
         // No-op for libbox 1.13.x; setup options are set once at startup
     }
 
+    /**
+     * Diagnostic one-shot: if the previous process aborted inside Go runtime
+     * (cgo_topofstack family), the runtime wrote a goroutine dump to the
+     * crash file via debug.SetCrashOutput. Read it, surface as an uncaught
+     * exception so it lands in Play Vitals with real stack content.
+     *
+     * Cost: every original abort produces a second crash report (this one)
+     * — crash rate metric ~doubles for the cluster while this is on.
+     * Remove on the next release once we have actionable data.
+     *
+     * One-shot guard: rename last_crash → consumed_crash before throwing
+     * so the next launch finds nothing and boots normally.
+     */
+    private fun consumeAndSurfaceCrashLog(tempDir: File) {
+        val crashFile = File(tempDir, "go_crash.log")
+        if (!crashFile.exists() || crashFile.length() == 0L) return
+        val content = try {
+            crashFile.readText()
+        } catch (e: Exception) {
+            Log.e("Application", "consumeCrashLog read failed", e)
+            return
+        }
+        // One-shot: move (atomic rename) so next launch doesn't see it
+        runCatching { crashFile.renameTo(File(tempDir, "go_crash_consumed.log")) }
+        Log.e("Application", "Previous Go crash dump (${content.length} bytes):\n$content")
+        // Vitals truncates after the first ~3 stack frames, so pack as much
+        // crash log into each frame as possible. Allow any printable ASCII
+        // (only strip control chars) and use chunks of ~250 chars in the
+        // methodName slot — that field is rendered verbatim by Vitals.
+        val cleaned = content
+            .replace(Regex("[\\x00-\\x1F\\x7F]"), " ")
+            .replace(Regex(" +"), " ")
+            .trim()
+        // Anchor at the actual panic source: SetCrashOutput dumps ALL
+        // goroutines; the panicking one is rarely first. Search for
+        // "runtime.throw(", "panic:", or "fatal error:" and chunk from
+        // there. Falls back to start-of-dump if no anchor found (e.g. raw
+        // SIGSEGV with no Go-side message) — message gets a NoAnchor:
+        // prefix so Vitals groups anchored vs unanchored dumps separately.
+        val anchorIdxRaw = listOf("runtime.throw(", "panic:", "fatal error:")
+            .map { cleaned.indexOf(it) }
+            .filter { it >= 0 }
+            .minOrNull()
+        val anchorIdx = anchorIdxRaw ?: 0
+        val anchorTag = if (anchorIdxRaw == null) "NoAnchor: " else ""
+        // Bridge subset that was active when sing-box ran. BoxService.startService
+        // writes this; correlating with residual _cgo_topofstack tells us
+        // whether the bad-pointer source is in xray-core, outline-sdk,
+        // wireproxy-awg, or sing-box itself. Prepended to EVERY chunk —
+        // Vitals groups by stack hash and shows the representative chunk
+        // which is often not chunk 1, so per-chunk tagging is the only
+        // way to guarantee visibility. ~30 chars/chunk overhead.
+        val sessionPrefs = getSharedPreferences("session", Context.MODE_PRIVATE)
+        val startedAt = sessionPrefs.getLong("started_at", 0L)
+        val bridgesTag = buildString {
+            append("[xray=").append(if (sessionPrefs.getBoolean("xray", false)) "Y" else "N")
+            append(" outline=").append(if (sessionPrefs.getBoolean("outline", false)) "Y" else "N")
+            append(" wireproxy=").append(if (sessionPrefs.getBoolean("wireproxy", false)) "Y" else "N")
+            if (startedAt == 0L) {
+                // Distinguish "VPN never started this install" from "session ran with no bridges".
+                append(" sessionAgeMin=?")
+            } else {
+                val ageMin = (System.currentTimeMillis() - startedAt) / 60_000
+                if (ageMin in 0..10_080) append(" sessionAgeMin=").append(ageMin)
+            }
+            append("] ")
+        }
+        val body = cleaned.substring(anchorIdx)
+        // maxChunks=5 matches the ~3-frame render window Vitals shows for a
+        // RuntimeException, plus 2 extra in case the cap rises for some report
+        // formats. 250 chars per chunk avoids Vitals' methodName truncation.
+        val maxChunks = 5
+        val chunkSize = 250
+        val dataPerChunk = (chunkSize - bridgesTag.length).coerceAtLeast(50)
+        val take = minOf(body.length, maxChunks * dataPerChunk)
+        val chunks = (0 until take step dataPerChunk).map { offset ->
+            bridgesTag + body.substring(offset, minOf(offset + dataPerChunk, take))
+        }
+        val frames = chunks.mapIndexed { idx, chunk ->
+            StackTraceElement("GoCrash", chunk, "go_crash.log", idx + 1)
+        }.toTypedArray()
+        val firstLine = body.take(180)
+        val ex = RuntimeException("Go crash: $anchorTag$bridgesTag$firstLine")
+        ex.stackTrace = frames + ex.stackTrace
+        throw ex
+    }
+
     private fun setupLibbox(baseDir: File, workingDir: File, tempDir: File) {
-        Libbox.setup(createSetupOptions(baseDir, workingDir, tempDir))
+        // Play Vitals strips Throwable.getMessage() from error reports but
+        // preserves stack frames verbatim. Inject the Go error text as a
+        // synthetic StackTraceElement so it shows up at the top of the
+        // report — "at <message>(Err.go)" — the only way to get diagnostic
+        // detail past Vitals' PII filter (vc50312/50313 proxyerror cluster
+        // otherwise arrives bare, no message, no cause).
+        try {
+            Libbox.setup(createSetupOptions(baseDir, workingDir, tempDir))
+        } catch (t: Throwable) {
+            val rawMsg = t.message ?: t.javaClass.simpleName
+            Log.e("Application", "Libbox.setup failed: $rawMsg", t)
+            val safe = rawMsg.take(180).replace(Regex("[^A-Za-z0-9 ._:/=+-]"), "_")
+            val wrapped = RuntimeException("Libbox.setup: $safe", t)
+            wrapped.stackTrace = arrayOf(
+                StackTraceElement("LibboxSetupMsg", safe, "Err.go", 1),
+            ) + wrapped.stackTrace
+            throw wrapped
+        }
     }
 
     /**
@@ -245,6 +385,10 @@ class Application : Application() {
         it.fixAndroidStack = Bugs.fixAndroidStack
         it.logMaxLines = 3000
         it.debug = BuildConfig.DEBUG
+        // Diagnostic: Go runtime writes goroutine dump here on abort
+        // (debug.SetCrashOutput). Kotlin reads on next launch and
+        // surfaces via Vitals — see consumeAndSurfaceCrashLog().
+        it.crashLogPath = File(tempDir, "go_crash.log").path
     }
 
     companion object {

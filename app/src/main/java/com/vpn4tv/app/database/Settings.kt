@@ -31,7 +31,6 @@ object Settings {
             Path.SETTINGS_DATABASE_PATH,
         ).allowMainThreadQueries()
             .fallbackToDestructiveMigration()
-            .enableMultiInstanceInvalidation()
             .setQueryExecutor { GlobalScope.launch { it.run() } }
             .build()
     }
