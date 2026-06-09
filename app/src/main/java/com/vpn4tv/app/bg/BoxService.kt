@@ -546,7 +546,20 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         // TV Box S 2nd Gen / Android 14, 50103). Call immediately with
         // a placeholder notification; startService() updates the text
         // once the profile name is known.
-        notification.show("", R.string.status_starting)
+        //
+        // show() returns false when the system rejects the promotion
+        // (boot temp-allowlist expired before our >10s cold start finished,
+        // or FGS-type policy denial on multi-user firmware — vc50326
+        // ServiceNotification.show crash clusters, 37 reports). Stop
+        // cleanly: an unpromoted service gets killed anyway, and crashing
+        // tells the user nothing. Do NOT route through stopAndAlert — it
+        // clears startedByUser and would disable boot auto-connect forever.
+        if (!notification.show("", R.string.status_starting)) {
+            lastError.postValue("StartService: foreground start rejected by system")
+            status.value = Status.Stopped
+            service.stopSelf()
+            return Service.START_NOT_STICKY
+        }
 
         if (!receiverRegistered) {
             ContextCompat.registerReceiver(

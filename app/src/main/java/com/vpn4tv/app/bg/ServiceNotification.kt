@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.util.Log
 import androidx.annotation.StringRes
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -84,7 +85,24 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
             }
     }
 
-    fun show(lastProfileName: String, @StringRes contentTextId: Int) {
+    /**
+     * Promote the service to foreground. Returns false when the system
+     * rejected the promotion — the caller MUST stop the service in that
+     * case, because running un-promoted gets the process killed (and
+     * Android counts it against the app's background-start budget).
+     *
+     * Rejections seen in the field (vc50326, API 34 TV boxes):
+     * - ForegroundServiceStartNotAllowedException: cold start took >10s
+     *   (Go runtime page-in on cheap flash), the BOOT_COMPLETED temp
+     *   allowlist expired before onStartCommand ran, and the system
+     *   re-evaluated the grant at startForeground time.
+     * - SecurityException from validateForegroundServiceType: same boxes,
+     *   FGS-type permission policy rejects systemExempted for apps the
+     *   multi-user firmware considers background-restricted.
+     * Both are environmental, not bugs we can fix at this callsite —
+     * crash-free degradation is the only option.
+     */
+    fun show(lastProfileName: String, @StringRes contentTextId: Int): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Application.notification.createNotificationChannel(
                 NotificationChannel(
@@ -106,14 +124,23 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
                 else -> 0
             }
         } else 0
-        ServiceCompat.startForeground(
-            service,
-            notificationId,
-            notificationBuilder
-                .setContentTitle(lastProfileName.takeIf { it.isNotBlank() } ?: "VPN4TV")
-                .setContentText(service.getString(contentTextId)).build(),
-            fgsType,
-        )
+        return try {
+            ServiceCompat.startForeground(
+                service,
+                notificationId,
+                notificationBuilder
+                    .setContentTitle(lastProfileName.takeIf { it.isNotBlank() } ?: "VPN4TV")
+                    .setContentText(service.getString(contentTextId)).build(),
+                fgsType,
+            )
+            true
+        } catch (e: Exception) {
+            // ForegroundServiceStartNotAllowedException extends
+            // IllegalStateException; SecurityException is its sibling.
+            // Both mean "the system refuses the promotion right now".
+            Log.e("ServiceNotification", "startForeground rejected: ${e.javaClass.simpleName}: ${e.message}")
+            false
+        }
     }
 
     suspend fun start() {

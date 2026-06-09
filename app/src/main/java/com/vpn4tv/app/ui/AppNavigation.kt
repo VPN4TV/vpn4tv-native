@@ -4,6 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
+import androidx.lifecycle.Lifecycle
+import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -18,6 +20,24 @@ object Routes {
     const val SETTINGS = "settings"
     const val PER_APP_PROXY = "per_app_proxy"
     const val ABOUT = "about"
+}
+
+// TV remotes double-fire DPAD_CENTER / BACK. The RESUMED-lifecycle guard is
+// the standard navigation-compose idiom: the second event arrives while the
+// first transition has already moved the current entry to STARTED, so the
+// duplicate navigate/pop is dropped instead of corrupting the back stack
+// ("Cannot transition entry that is not in the back stack", vc50326).
+private fun NavController.navigateSafe(route: String, builder: androidx.navigation.NavOptionsBuilder.() -> Unit = {}) {
+    if (currentBackStackEntry?.lifecycle?.currentState == Lifecycle.State.RESUMED) {
+        navigate(route, builder)
+    }
+}
+
+private fun NavController.popBackStackSafe(): Boolean {
+    if (currentBackStackEntry?.lifecycle?.currentState == Lifecycle.State.RESUMED) {
+        return popBackStack()
+    }
+    return false
 }
 
 @Composable
@@ -54,44 +74,46 @@ fun AppNavigation(
             HomeScreen(
                 onConnect = onConnect,
                 onDisconnect = onDisconnect,
-                onNavigateProfiles = { navController.navigate(Routes.PROFILES) },
-                onNavigateServers = { navController.navigate(Routes.SERVERS) },
-                onAddProfile = { navController.navigate(Routes.ADD_PROFILE) },
-                onNavigateLogs = { navController.navigate(Routes.LOGS) },
-                onNavigateSettings = { navController.navigate(Routes.SETTINGS) },
-                onNavigateAbout = { navController.navigate(Routes.ABOUT) },
+                onNavigateProfiles = { navController.navigateSafe(Routes.PROFILES) },
+                onNavigateServers = { navController.navigateSafe(Routes.SERVERS) },
+                onAddProfile = { navController.navigateSafe(Routes.ADD_PROFILE) },
+                onNavigateLogs = { navController.navigateSafe(Routes.LOGS) },
+                onNavigateSettings = { navController.navigateSafe(Routes.SETTINGS) },
+                onNavigateAbout = { navController.navigateSafe(Routes.ABOUT) },
             )
         }
         composable(Routes.PROFILES) {
             ProfilesScreen(
-                onBack = { navController.popBackStack() },
-                onAddViaTelegram = { navController.navigate(Routes.ADD_PROFILE) }
+                onBack = { navController.popBackStackSafe() },
+                onAddViaTelegram = { navController.navigateSafe(Routes.ADD_PROFILE) }
             )
         }
         composable(Routes.SERVERS) {
             ServersScreen(
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStackSafe() }
             )
         }
         composable(Routes.LOGS) {
-            LogsScreen(onBack = { navController.popBackStack() })
+            LogsScreen(onBack = { navController.popBackStackSafe() })
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(
-                onBack = { navController.popBackStack() },
-                onPerAppProxy = { navController.navigate(Routes.PER_APP_PROXY) }
+                onBack = { navController.popBackStackSafe() },
+                onPerAppProxy = { navController.navigateSafe(Routes.PER_APP_PROXY) }
             )
         }
         composable(Routes.PER_APP_PROXY) {
-            PerAppProxyScreen(onBack = { navController.popBackStack() })
+            PerAppProxyScreen(onBack = { navController.popBackStackSafe() })
         }
         composable(Routes.ABOUT) {
-            AboutScreen(onBack = { navController.popBackStack() })
+            AboutScreen(onBack = { navController.popBackStackSafe() })
         }
         composable(Routes.ADD_PROFILE) {
             AddProfileScreen(
-                onBack = { navController.popBackStack() },
+                onBack = { navController.popBackStackSafe() },
                 onProfileAdded = {
+                    // Intentionally NOT lifecycle-guarded: fires from a
+                    // background import callback, the entry may be STARTED.
                     navController.popBackStack(Routes.HOME, false)
                 }
             )

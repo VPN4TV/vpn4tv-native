@@ -3,8 +3,10 @@ package com.vpn4tv.app.bg
 import android.content.Context
 import android.util.Log
 import androidx.work.BackoffPolicy
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequest
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -52,7 +54,23 @@ class UpdateProfileWork {
                 PeriodicWorkRequest.Builder(UpdateTask::class.java, minDelay, TimeUnit.MINUTES)
                     .apply {
                         if (minInitDelay > 0) setInitialDelay(minInitDelay, TimeUnit.SECONDS)
-                        setBackoffCriteria(BackoffPolicy.LINEAR, 15, TimeUnit.MINUTES)
+                        // NetworkType.CONNECTED: TV boxes in standby drop
+                        // connectivity; without the constraint JobScheduler
+                        // kept dispatching the job into a frozen/starved
+                        // process all night — vc50326's biggest ANR cluster
+                        // (SystemJobService, 50 reports / 33 users). A
+                        // subscription refresh is useless offline anyway.
+                        setConstraints(
+                            Constraints.Builder()
+                                .setRequiredNetworkType(NetworkType.CONNECTED)
+                                .build(),
+                        )
+                        // EXPONENTIAL 30m (was LINEAR 15m): fetch failures
+                        // re-armed the job every 15 minutes, amplifying the
+                        // standby dispatch storm. ExistingPeriodicWorkPolicy
+                        // UPDATE applies this to the existing unique work on
+                        // next app start — no migration needed.
+                        setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.MINUTES)
                     }
                     .build(),
             )

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -73,6 +74,27 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         GlobalScope.launch(Dispatchers.IO) { handleImportIntent(intent) }
+    }
+
+    // TV remotes double-fire BACK easily (contact bounce + key repeat).
+    // navigation-compose's internal PredictiveBackHandler launches a gesture
+    // coroutine per BACK dispatch; a second dispatch before the first pop
+    // recomposes captures an already-popped entry and crashes with
+    // "Cannot transition entry that is not in the back stack"
+    // (NavControllerImpl.prepareForTransition — vc50326, 12 reports).
+    // The handler is internal to NavHost, so the dispatch itself is the
+    // only place we can debounce.
+    private var lastBackEventTime = 0L
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastBackEventTime < 300) {
+                return true // swallow the duplicate
+            }
+            lastBackEventTime = now
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     /**

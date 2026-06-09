@@ -63,18 +63,6 @@ class Application : Application() {
             Log.e("Application", "migrateLegacySelectedServer failed: ${e.message}", e)
         }
 
-        // libbox 1.14+ expects BCP-47 tags ("ru-RU"), not POSIX ("ru_RU").
-        // Catch Throwable (not just Exception) — first Libbox.* call triggers
-        // libgojni.so load via go.Seq.<clinit>; on Play-split misdelivery
-        // (Xiaomi TV Stick 4K, vc50317) that throws UnsatisfiedLinkError which
-        // extends Error and would kill onCreate. App stays alive but degraded.
-        try {
-            Libbox.setLocale(Locale.getDefault().toLanguageTag())
-        } catch (e: Throwable) {
-            Log.e("Application", "Libbox.setLocale failed (libgojni load?): ${e.javaClass.simpleName}: ${e.message}", e)
-            try { Libbox.setLocale("en") } catch (_: Throwable) {}
-        }
-
         // Probe DNS servers on a background thread so by the time the
         // user taps Connect, we know which DoH/UDP server works on their
         // ISP. Results feed into BoxService (config rewrite) and
@@ -89,8 +77,26 @@ class Application : Application() {
         // and SystemJobService broadcasts trace back to a slow Application.onCreate.
         // Sony BRAVIA VH2 skips external entirely (that device's external path
         // hangs File.mkdirs indefinitely — prior vc50303 boot-loop cluster).
+        //
+        // IMPORTANT: the FIRST Libbox.* call in the process triggers
+        // go.Seq.<clinit> -> System.loadLibrary -> 70+ MB .so page-in plus
+        // full Go runtime boot. On cheap TV flash that takes 10-20s; doing it
+        // on the main thread was the root of the Application.onCreate /
+        // BOOT_COMPLETED / setLocale ANR clusters on vc50326 (~40 reports/wk).
+        // setLocale therefore runs HERE, first in this coroutine, not in
+        // onCreate. Keep every first-touch of Libbox off the main thread.
         @Suppress("OPT_IN_USAGE")
         GlobalScope.launch(Dispatchers.IO) {
+            // libbox 1.14+ expects BCP-47 tags ("ru-RU"), not POSIX ("ru_RU").
+            // Catch Throwable (not just Exception) — on Play-split misdelivery
+            // (Xiaomi TV Stick 4K, vc50317) the library load throws
+            // UnsatisfiedLinkError which extends Error. App stays degraded.
+            try {
+                Libbox.setLocale(Locale.getDefault().toLanguageTag())
+            } catch (e: Throwable) {
+                Log.e("Application", "Libbox.setLocale failed (libgojni load?): ${e.javaClass.simpleName}: ${e.message}", e)
+                try { Libbox.setLocale("en") } catch (_: Throwable) {}
+            }
             val baseDir = filesDir.apply { mkdirs() }
             // External storage path is unreliable on multi-user Android TVs:
             // app installed under user 0 but process runs as user 10+, so
@@ -130,14 +136,22 @@ class Application : Application() {
             UpdateProfileWork.reconfigureUpdater()
         }
 
-        registerReceiver(
-            AppChangeReceiver(),
-            IntentFilter().apply {
-                addAction(Intent.ACTION_PACKAGE_ADDED)
-                addAction(Intent.ACTION_PACKAGE_REPLACED)
-                addDataScheme("package")
-            },
-        )
+        // Off main thread: registerReceiver is a synchronous binder call into
+        // system_server; at boot/wake AMS can be overloaded for seconds and
+        // this transact showed up as the blocking frame in vc50326 onCreate
+        // ANRs (cluster #23). Registration from a background thread is legal —
+        // the 2-arg overload still dispatches onReceive on the main looper.
+        @Suppress("OPT_IN_USAGE")
+        GlobalScope.launch(Dispatchers.IO) {
+            registerReceiver(
+                AppChangeReceiver(),
+                IntentFilter().apply {
+                    addAction(Intent.ACTION_PACKAGE_ADDED)
+                    addAction(Intent.ACTION_PACKAGE_REPLACED)
+                    addDataScheme("package")
+                },
+            )
+        }
     }
 
     fun reloadSetupOptions() {
@@ -241,6 +255,27 @@ class Application : Application() {
         try {
             Libbox.setup(createSetupOptions(baseDir, workingDir, tempDir))
         } catch (t: Throwable) {
+            // Native lib never loaded (Play split ABI misdelivery → go.Seq
+            // class erroneous → NoClassDefFoundError on every later touch):
+            // the failure is permanent for the install, so crash-looping every
+            // launch adds no information. Rethrow ONCE per install+version so
+            // Vitals still shows the failure (distinct-user counts stay exact,
+            // a bad AAR release still spikes), then degrade on later launches.
+            // vc50326: 12 reports / 3 users = exactly this loop.
+            val nativeLoadFailure = generateSequence(t as Throwable?) { it.cause }
+                .take(10)
+                .any { it is UnsatisfiedLinkError || it is NoClassDefFoundError }
+            if (nativeLoadFailure) {
+                val prefs = getSharedPreferences("diagnostics", Context.MODE_PRIVATE)
+                val key = "native_load_failure_reported_${BuildConfig.VERSION_CODE}"
+                if (prefs.getBoolean(key, false)) {
+                    Log.e("Application", "Libbox unavailable (native lib load failed), skipping setup", t)
+                    return
+                }
+                // commit(), not apply(): we are on Dispatchers.IO and the throw
+                // below kills the process before an async write would land.
+                prefs.edit().putBoolean(key, true).commit()
+            }
             val rawMsg = t.message ?: t.javaClass.simpleName
             Log.e("Application", "Libbox.setup failed: $rawMsg", t)
             val safe = rawMsg.take(180).replace(Regex("[^A-Za-z0-9 ._:/=+-]"), "_")
