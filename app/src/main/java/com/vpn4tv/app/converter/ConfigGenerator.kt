@@ -176,6 +176,20 @@ object ConfigGenerator {
         // Route
         config.put("route", buildRoute(proxies))
 
+        // Cache: persist fakeip mappings across service restarts — TV apps
+        // cache resolved (fake) IPs aggressively; without store_fakeip a
+        // restart would orphan every cached fake IP until the app re-resolves.
+        // cache.db lives in the working dir; the multi-user EACCES self-heal
+        // in BoxService already covers permission-denied on broken externals.
+        if (fakeDnsEnabled(proxies)) {
+            config.put("experimental", JSONObject().apply {
+                put("cache_file", JSONObject().apply {
+                    put("enabled", true)
+                    put("store_fakeip", true)
+                })
+            })
+        }
+
         val xrayJson = if (xrayOutbounds.isNotEmpty()) {
             XrayConfigGenerator.build(xrayOutbounds).first
         } else null
@@ -219,6 +233,8 @@ object ConfigGenerator {
         val (remoteType, remoteServer) = parseDnsUrl(dns.remoteDns)
         val (directType, directServer) = parseDnsUrl(dns.directDns)
 
+        val fakeDnsEnabled = fakeDnsEnabled(proxies)
+
         return JSONObject().apply {
             put("servers", JSONArray().apply {
                 put(JSONObject().apply {
@@ -233,12 +249,41 @@ object ConfigGenerator {
                     put("tag", "dns-direct")
                     put("server", directServer)
                 })
+                if (fakeDnsEnabled) {
+                    put(JSONObject().apply {
+                        put("type", "fakeip")
+                        put("tag", "dns-fakeip")
+                        put("inet4_range", "198.18.0.0/15")
+                        put("inet6_range", "fc00::/18")
+                    })
+                }
             })
             put("rules", JSONArray().apply {
+                // Proxy-server hostnames must resolve to REAL addresses —
+                // keep this rule first so it wins over the fakeip rule.
                 put(JSONObject().apply {
                     put("outbound", "any")
                     put("server", "dns-direct")
                 })
+                if (fakeDnsEnabled) {
+                    // HTTPS/SVCB (type 65/64) answers carry real IP hints —
+                    // apps would use those and bypass the fakeip mapping.
+                    // Reject so clients fall back to plain A/AAAA.
+                    // COUPLED to BoxService.stripFakeDns: it matches this
+                    // exact query_type set to undo the rule at start time.
+                    put(JSONObject().apply {
+                        put("query_type", JSONArray().apply { put("HTTPS"); put("SVCB") })
+                        put("action", "reject")
+                    })
+                    // Apps get instant fake IPs; the sniffed domain is sent
+                    // to the proxy server which resolves it remotely. The
+                    // ISP never sees the DNS query at all — DNS-level
+                    // blocking and poisoning can't touch resolution.
+                    put(JSONObject().apply {
+                        put("query_type", JSONArray().apply { put("A"); put("AAAA") })
+                        put("server", "dns-fakeip")
+                    })
+                }
             })
             if (allTcpBridged) {
                 // Top-level default strategy as a belt-and-suspenders fallback
@@ -246,6 +291,23 @@ object ConfigGenerator {
                 put("strategy", "ipv4_only")
             }
         }
+    }
+
+    /**
+     * FakeDNS is generated for profiles with at least one native sing-box /
+     * xray outbound — those pass the sniffed domain through to the proxy
+     * server (remote resolution, full DNS-blocking bypass). It must stay OFF
+     * for outline/wireproxy-only profiles: their UDP traffic routes via
+     * "direct", so a fake IP handed to an app would leak into the raw
+     * network where nothing can map it back to a domain.
+     *
+     * Deliberately ignores Settings.fakeDns: the user toggle is applied at
+     * service start (BoxService.stripFakeDns), same as the proxy-mode and
+     * bypass-LAN rewrites — otherwise toggling would silently not take
+     * effect until the next subscription refresh regenerates this file.
+     */
+    private fun fakeDnsEnabled(proxies: List<ProxyConfig>): Boolean {
+        return !proxies.all { it.outlineUrl != null || it.awgIni != null }
     }
 
     private fun buildOutbounds(proxies: List<ProxyConfig>): JSONArray {

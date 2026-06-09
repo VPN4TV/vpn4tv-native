@@ -69,6 +69,14 @@ object Settings {
     var startedByUser by dataStore.boolean(SettingsKey.STARTED_BY_USER)
     var autoConnectOnBoot by dataStore.boolean(SettingsKey.AUTO_CONNECT_ON_BOOT) { true }
 
+    // FakeDNS (sing-box fakeip): apps get instant fake IPs from
+    // 198.18.0.0/15, the sniffed domain travels to the proxy server which
+    // resolves it remotely — the ISP never sees a plaintext DNS query, so
+    // DNS-level blocking can't poison resolution. Disabled automatically
+    // for outline/wireproxy-only profiles in ConfigGenerator (their UDP
+    // path routes direct and fake IPs would leak unroutable).
+    var fakeDns by dataStore.boolean(SettingsKey.FAKE_DNS) { true }
+
     var updateSource by dataStore.string(SettingsKey.UPDATE_SOURCE) { "github" }
     var checkUpdateEnabled by dataStore.boolean(SettingsKey.CHECK_UPDATE_ENABLED) { false }
     var updateCheckPrompted by dataStore.boolean(SettingsKey.UPDATE_CHECK_PROMPTED) { false }

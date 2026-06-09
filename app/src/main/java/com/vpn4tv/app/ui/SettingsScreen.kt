@@ -24,6 +24,7 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}) {
     var autoConnect by remember { mutableStateOf(Settings.autoConnectOnBoot) }
     var proxyMode by remember { mutableStateOf(Settings.isProxyMode) }
     var bypassLan by remember { mutableStateOf(Settings.bypassLan) }
+    var fakeDns by remember { mutableStateOf(Settings.fakeDns) }
 
     Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
         Row(
@@ -106,6 +107,18 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}) {
             onCheckedChange = {
                 autoConnect = it
                 Settings.autoConnectOnBoot = it
+            }
+        )
+
+        // FakeDNS — DNS-blocking bypass. Takes effect on next connect
+        // (config is regenerated at every service start).
+        SettingsToggle(
+            title = stringResource(R.string.setting_fake_dns),
+            subtitle = stringResource(R.string.setting_fake_dns_desc),
+            checked = fakeDns,
+            onCheckedChange = {
+                fakeDns = it
+                Settings.fakeDns = it
             }
         )
     }

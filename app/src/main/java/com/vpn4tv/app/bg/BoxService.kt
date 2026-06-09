@@ -189,6 +189,25 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 Log.w(TAG, "DNS injection failed, using config defaults: ${e.message}")
             }
 
+            // FakeDNS off-switch. ConfigGenerator always emits the fakeip
+            // server for capable profiles; the user toggle is honored here
+            // at start time (same pattern as proxy-mode / bypass-LAN
+            // rewrites) so flipping it only needs a reconnect.
+            //
+            // Proxy mode strips unconditionally: fakeip only works when the
+            // TUN captures the app's connection to the fake IP and maps it
+            // back to a domain. A SOCKS5 client (SmartTube) resolves via the
+            // normal Android resolver — no TUN, no mapping; at best fakeip
+            // is dead weight, at worst a fake IP reaches the listener and
+            // the connection dies unrecoverable.
+            if (!Settings.fakeDns || Settings.isProxyMode) {
+                try {
+                    content = stripFakeDns(content)
+                } catch (e: Exception) {
+                    Log.w(TAG, "FakeDNS strip failed, keeping config as-is: ${e.message}")
+                }
+            }
+
             // In proxy mode we swap the TUN inbound for a plain SOCKS5 listener
             // on 127.0.0.1:12334 and drop every route rule that only exists to
             // route TUN traffic. The generated profile always carries a TUN
@@ -769,6 +788,46 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         if (!placed) rebuilt.put(bypassRule)
         route.put("rules", rebuilt)
 
+        return root.toString()
+    }
+
+    /**
+     * Removes everything ConfigGenerator emitted for FakeDNS: the fakeip
+     * server, the HTTPS/SVCB-reject and A/AAAA-fakeip DNS rules, and the
+     * whole experimental.cache_file block (it exists solely to persist
+     * fakeip mappings — removing it entirely restores pre-feature behavior,
+     * including not creating cache.db on multi-user TVs with broken
+     * externals). Queries then fall through to dns-remote like before the
+     * feature existed.
+     *
+     * COUPLED to ConfigGenerator.buildDns: the reject-rule predicate below
+     * matches the exact query_type set generated there. Any new DNS reject
+     * rule with a query_type must be excluded from this match.
+     */
+    private fun stripFakeDns(jsonText: String): String {
+        val root = org.json.JSONObject(jsonText)
+        val dns = root.optJSONObject("dns") ?: return jsonText
+        dns.optJSONArray("servers")?.let { servers ->
+            for (i in servers.length() - 1 downTo 0) {
+                if (servers.getJSONObject(i).optString("tag") == "dns-fakeip") servers.remove(i)
+            }
+        }
+        dns.optJSONArray("rules")?.let { rules ->
+            for (i in rules.length() - 1 downTo 0) {
+                val rule = rules.getJSONObject(i)
+                val isFakeipRule = rule.optString("server") == "dns-fakeip"
+                val queryTypes = rule.optJSONArray("query_type")?.let { qt ->
+                    (0 until qt.length()).map { qt.optString(it) }.toSet()
+                }
+                val isHttpsReject = rule.optString("action") == "reject" &&
+                    queryTypes == setOf("HTTPS", "SVCB")
+                if (isFakeipRule || isHttpsReject) rules.remove(i)
+            }
+        }
+        root.optJSONObject("experimental")?.let { experimental ->
+            experimental.remove("cache_file")
+            if (experimental.length() == 0) root.remove("experimental")
+        }
         return root.toString()
     }
 

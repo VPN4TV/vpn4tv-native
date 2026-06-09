@@ -28,6 +28,7 @@ object SettingsKey {
     const val ALLOW_BYPASS = "allow_bypass"
     const val BYPASS_LAN = "bypass_lan"
     const val SYSTEM_PROXY_ENABLED = "system_proxy_enabled"
+    const val FAKE_DNS = "fake_dns"
 
     const val PRIVILEGE_SETTINGS_ENABLED = "hide_settings_enabled"
     const val PRIVILEGE_SETTINGS_LIST = "hide_settings_list"
