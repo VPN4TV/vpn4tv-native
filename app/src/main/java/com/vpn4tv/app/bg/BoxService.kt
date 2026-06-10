@@ -51,6 +51,19 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         val globalStatus = MutableLiveData(Status.Stopped)
         val lastError = MutableLiveData<String?>(null)
 
+        // Set by the post-connect FakeDNS health check when the proxy is
+        // provably alive but the fakeip/domain path is broken on this
+        // network/router. While set, the config pipeline strips FakeDNS, so the
+        // auto-disable reload converges (no probe→reload loop). CLEARED at the
+        // start of every fresh user-initiated connect (startService), so a flag
+        // set on a previously-broken network or by a transient blip is re-tested
+        // rather than permanently forfeiting the DNS-bypass. The auto-disable
+        // reload uses serviceReload (not startService), so it doesn't clear the
+        // flag it just set.
+        @Volatile
+        var fakeDnsAutoDisabled = false
+
+
         fun start() {
             val intent =
                 runBlocking {
@@ -177,64 +190,25 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 return
             }
 
-            // Inject the DNS servers that DnsProber found to actually work
-            // on this ISP. The generated config has whatever defaults
-            // ConfigGenerator wrote at subscription-fetch time, but the
-            // user's ISP may block those. DnsProber runs at app start and
-            // tells us which DoH + UDP server responded — we overwrite the
-            // config's dns.servers with those.
-            try {
-                content = injectProbedDns(content)
+            // Re-test FakeDNS on every fresh (user-initiated) connect: clear the
+            // process-sticky auto-disable so a flag set on a previously-broken
+            // network (or by a transient blip) doesn't permanently forfeit the
+            // DNS-bypass. The post-connect health check re-evaluates and only
+            // re-disables if the fakeip path is still genuinely broken here.
+            // (The auto-disable reload goes through serviceReload, not
+            // startService, so it does not clear the flag it just set.)
+            fakeDnsAutoDisabled = false
+
+            content = try {
+                applyConfigTransforms(content)
             } catch (e: Exception) {
-                Log.w(TAG, "DNS injection failed, using config defaults: ${e.message}")
+                Log.e(TAG, "config transform (proxy-mode) failed: ${e.message}", e)
+                stopAndAlert(Alert.CreateService, "proxy-mode rewrite: ${e.message}")
+                return
             }
-
-            // FakeDNS off-switch. ConfigGenerator always emits the fakeip
-            // server for capable profiles; the user toggle is honored here
-            // at start time (same pattern as proxy-mode / bypass-LAN
-            // rewrites) so flipping it only needs a reconnect.
-            //
-            // Proxy mode strips unconditionally: fakeip only works when the
-            // TUN captures the app's connection to the fake IP and maps it
-            // back to a domain. A SOCKS5 client (SmartTube) resolves via the
-            // normal Android resolver — no TUN, no mapping; at best fakeip
-            // is dead weight, at worst a fake IP reaches the listener and
-            // the connection dies unrecoverable.
-            if (!Settings.fakeDns || Settings.isProxyMode) {
-                try {
-                    content = stripFakeDns(content)
-                } catch (e: Exception) {
-                    Log.w(TAG, "FakeDNS strip failed, keeping config as-is: ${e.message}")
-                }
-            }
-
-            // In proxy mode we swap the TUN inbound for a plain SOCKS5 listener
-            // on 127.0.0.1:12334 and drop every route rule that only exists to
-            // route TUN traffic. The generated profile always carries a TUN
-            // inbound because most devices use it, so the mutation is done at
-            // start time rather than at profile-save time — toggling modes
-            // then only requires a reconnect, no subscription refetch.
-            if (Settings.isProxyMode) {
-                try {
-                    content = rewriteConfigForProxyMode(content)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to rewrite config for proxy mode: ${e.message}", e)
-                    stopAndAlert(Alert.CreateService, "proxy-mode rewrite: ${e.message}")
-                    return
-                }
-            } else if (Settings.bypassLan) {
-                // VPN mode + default-on LAN bypass: inject a route rule that
-                // keeps RFC1918 / link-local / ULA / multicast traffic on the
-                // underlying network. Applied at start time so the toggle is
-                // instant and existing profiles generated before this setting
-                // existed also benefit without a subscription refetch.
-                try {
-                    content = injectBypassLanRule(content)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to inject bypass-lan rule: ${e.message}")
-                    // Non-fatal — fall back to the original config.
-                }
-            }
+            // Whether the running config actually carries FakeDNS — used to arm
+            // the post-connect health check only when it's worth checking.
+            val fakeDnsInConfig = content.contains("\"dns-fakeip\"")
 
             lastProfileName = profile.name
             withContext(Dispatchers.Main) {
@@ -380,10 +354,138 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 notification.show(lastProfileName, R.string.status_started)
             }
             notification.start()
+
+            // FakeDNS reachability self-heal. FakeDNS is default-on and rewrites
+            // DNS for the whole tunnel; on a network/router where the fakeip
+            // path is broken it silently kills connectivity for every app. If
+            // the running config actually carries FakeDNS, probe a known-good
+            // endpoint (YouTube generate_204) THROUGH the tunnel; if it's
+            // unreachable, auto-disable FakeDNS and reload. Only ever disables
+            // (never enables), so the worst case is reverting to the pre-feature
+            // config — it cannot make connectivity worse.
+            if (fakeDnsInConfig && !fakeDnsAutoDisabled) {
+                Thread { runFakeDnsHealthCheck() }.start()
+            }
         } catch (e: Exception) {
             stopAndAlert(Alert.StartService, e.message)
             return
         }
+    }
+
+    /**
+     * Probe YouTube through the tunnel after connect; if unreachable while
+     * FakeDNS is active, auto-disable FakeDNS and reload. Runs on its own
+     * thread. One-shot per process via the fakeDnsAutoDisabled flag, so there
+     * is no probe→reload→probe loop.
+     */
+    private fun runFakeDnsHealthCheck() {
+        try {
+            Thread.sleep(4000) // let the tunnel + bridges settle
+            if (fakeDnsAutoDisabled || globalStatus.value != Status.Started) return
+
+            // Test the fakeip/domain path first.
+            if (probeReachableThroughTunnel(attempts = 4)) {
+                Log.i(TAG, "FakeDNS health check OK — reachable through tunnel")
+                return
+            }
+            if (fakeDnsAutoDisabled || globalStatus.value != Status.Started) return
+
+            // DISCRIMINATOR: the domain probe failed — but is that because the
+            // fakeip path is broken, or just because the proxy itself is down /
+            // the wrong server is selected? Connect to a stable anycast IP
+            // through the tunnel (no DNS, fakeip-independent). If THAT also
+            // fails, the proxy is down — NOT a FakeDNS fault — so don't strip
+            // FakeDNS (stripping wouldn't help and would silently forfeit the
+            // DNS-bypass for the session). Only disable when the proxy is
+            // provably alive but domain resolution via fakeip is broken.
+            if (!probeProxyAliveByIp()) {
+                Log.w(TAG, "FakeDNS health check: domain unreachable but proxy also down — not attributing to FakeDNS")
+                return
+            }
+
+            Log.w(TAG, "FakeDNS health check FAILED — proxy alive but fakeip path broken; auto-disabling FakeDNS and reloading")
+            fakeDnsAutoDisabled = true
+            // Diagnostic breadcrumb (read by support / next-launch crash tag).
+            Application.application
+                .getSharedPreferences("session", android.content.Context.MODE_PRIVATE)
+                .edit().putBoolean("fakeDns_auto_disabled", true).apply()
+            if (globalStatus.value != Status.Started) return
+            // Route the reload through the command-server IPC (same path as the
+            // WorkManager auto-update) rather than poking this BoxService
+            // instance directly from an arbitrary thread — it serializes with
+            // the server's own lifecycle and sidesteps the stop/reload TOCTOU.
+            try {
+                val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
+                try { client.serviceReload() } finally { client.disconnect() }
+            } catch (e: Exception) {
+                Log.w(TAG, "FakeDNS auto-disable reload failed: ${e.message}")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "FakeDNS health check error: ${e.message}")
+        }
+    }
+
+    /**
+     * Proxy-liveness discriminator: TCP-connect to a stable anycast IP through
+     * the tunnel. By IP, so no DNS / fakeip involved — it isolates "proxy is
+     * forwarding" from "fakeip resolution works". Success on either IP = the
+     * selected outbound is alive.
+     */
+    private fun probeProxyAliveByIp(): Boolean {
+        for (ip in listOf("1.1.1.1", "8.8.8.8")) {
+            if (globalStatus.value != Status.Started) return false
+            var sock: java.net.Socket? = null
+            try {
+                sock = java.net.Socket()
+                sock.connect(java.net.InetSocketAddress(ip, 443), 8000)
+                if (sock.isConnected) return true
+            } catch (e: Exception) {
+                Log.w(TAG, "proxy-alive probe $ip failed: ${e.message}")
+            } finally {
+                try { sock?.close() } catch (_: Exception) {}
+            }
+        }
+        return false
+    }
+
+    /**
+     * Hit YouTube's connectivity endpoint with a plain HttpURLConnection.
+     * Deliberately NOT the libbox HTTP client: that one is used for
+     * subscription fetching and dials on the underlying network (it would
+     * bypass the tunnel and test nothing). Our app process's own sockets are
+     * NOT protected, so with auto_route they traverse the TUN — the OS
+     * resolves youtube.com through sing-box's DNS (→ fake IP under FakeDNS),
+     * connects to the fake IP, the TUN captures it, sniff recovers the domain,
+     * and the proxy resolves remotely. So this exercises the exact fakeip path
+     * a real app uses. A transport failure (can't reach the fake IP) throws;
+     * generate_204 returns 204 on success. Retries ride out the flaky first
+     * seconds after a TV connects.
+     */
+    private fun probeReachableThroughTunnel(attempts: Int): Boolean {
+        repeat(attempts) { i ->
+            if (fakeDnsAutoDisabled || globalStatus.value != Status.Started) return false
+            var conn: java.net.HttpURLConnection? = null
+            try {
+                conn = (java.net.URL("https://www.youtube.com/generate_204").openConnection()
+                    as java.net.HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 8000
+                    readTimeout = 8000
+                    instanceFollowRedirects = false
+                    setRequestProperty("User-Agent", "VPN4TV-healthcheck")
+                }
+                val code = conn.responseCode
+                // Any real HTTP response means the fakeip path reached YouTube.
+                if (code in 200..399) return true
+                Log.w(TAG, "tunnel probe attempt ${i + 1}/$attempts: HTTP $code")
+            } catch (e: Exception) {
+                Log.w(TAG, "tunnel probe attempt ${i + 1}/$attempts failed: ${e.message}")
+            } finally {
+                conn?.disconnect()
+            }
+            if (i < attempts - 1) try { Thread.sleep(5000) } catch (_: InterruptedException) { return false }
+        }
+        return false
     }
 
     override fun serviceStop() {
@@ -416,9 +518,21 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             return
         }
 
-        val content = File(profile.typed.path).readText()
-        if (content.isBlank()) {
+        val rawContent = File(profile.typed.path).readText()
+        if (rawContent.isBlank()) {
             stopAndAlert(Alert.EmptyConfiguration)
+            return
+        }
+        val content = try {
+            applyConfigTransforms(rawContent)
+        } catch (e: Exception) {
+            stopAndAlert(Alert.CreateService, "proxy-mode rewrite: ${e.message}")
+            return
+        }
+        // Bail if the service is being torn down — a reload landing concurrently
+        // with stopService()/closeService() would hit a closed command server.
+        if (!::commandServer.isInitialized || globalStatus.value == Status.Stopped) {
+            Log.w(TAG, "serviceReload skipped — service not running")
             return
         }
         lastProfileName = profile.name
@@ -697,6 +811,50 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         } catch (e: Exception) {
             Log.w(TAG, "Failed to restore server: ${e.message}")
         }
+    }
+
+    /**
+     * Shared runtime config pipeline applied by BOTH startService and
+     * serviceReload0 so a reload produces the same config as a fresh start
+     * (previously serviceReload reloaded the raw file, silently dropping
+     * proxy-mode / FakeDNS / probed-DNS / bypass-LAN — so e.g. a proxy-mode
+     * user got the TUN config back on every auto-update reload).
+     *
+     * Order matters: probed-DNS first (rewrites servers), then FakeDNS strip
+     * (removes the fakeip server/rules when off / proxy-mode / auto-disabled),
+     * then proxy-mode rewrite OR bypass-LAN. Throws only on a fatal proxy-mode
+     * rewrite failure; the caller stopAndAlerts.
+     */
+    private fun applyConfigTransforms(raw: String): String {
+        var content = raw
+        // Probed DNS: the generated config has ConfigGenerator's defaults, but
+        // the ISP may block those; DnsProber found which DoH/UDP actually work.
+        try {
+            content = injectProbedDns(content)
+        } catch (e: Exception) {
+            Log.w(TAG, "DNS injection failed, using config defaults: ${e.message}")
+        }
+        // FakeDNS off-switch: user toggle off, proxy mode (no TUN to map fake
+        // IPs back), or the post-connect health check auto-disabled it because
+        // the fakeip path is broken on this network.
+        if (!Settings.fakeDns || Settings.isProxyMode || fakeDnsAutoDisabled) {
+            try {
+                content = stripFakeDns(content)
+            } catch (e: Exception) {
+                Log.w(TAG, "FakeDNS strip failed, keeping config as-is: ${e.message}")
+            }
+        }
+        if (Settings.isProxyMode) {
+            // Swap TUN for a SOCKS5 listener; may throw → fatal (caller alerts).
+            content = rewriteConfigForProxyMode(content)
+        } else if (Settings.bypassLan) {
+            try {
+                content = injectBypassLanRule(content)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to inject bypass-lan rule: ${e.message}")
+            }
+        }
+        return content
     }
 
     /**
