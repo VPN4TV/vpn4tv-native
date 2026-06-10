@@ -226,6 +226,18 @@ class Application : Application() {
             append("] ")
         }
         val body = cleaned.substring(anchorIdx)
+        // Empty/contentless dump guard. SetCrashOutput can leave a non-zero
+        // file with no usable Go content (a native SIGSEGV/SIGKILL that never
+        // ran Go's panic machinery, or an all-whitespace partial write). Once
+        // the 50328 StringBox sweep killed the real heap-panic dumps, THIS was
+        // the entire residual 50328 crash cluster: a contentless "Go crash: "
+        // RuntimeException with no frames — pure self-inflicted crash rate,
+        // zero diagnostic value. Below a real-dump threshold, log and return
+        // instead of throwing.
+        if (body.length < 40) {
+            Log.w("Application", "Crash dump too short to surface (${body.length} chars) — skipping throw")
+            return
+        }
         // maxChunks=5 matches the ~3-frame render window Vitals shows for a
         // RuntimeException, plus 2 extra in case the cap rises for some report
         // formats. 250 chars per chunk avoids Vitals' methodName truncation.
