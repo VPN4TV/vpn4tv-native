@@ -577,6 +577,15 @@
     <string name="setting_bypass_lan_desc">Local network traffic skips the tunnel — Chromecast, Plex/Jellyfin on NAS, router admin, printers keep working while VPN is on.</string>
     <string name="setting_fake_dns">DNS blocking bypass (FakeDNS)</string>
     <string name="setting_fake_dns_desc">Domains are resolved on the VPN server — your ISP never sees DNS queries and can\'t block or spoof them. Turn off if some app can\'t connect.</string>
+    <string name="setting_lan_import_desc">Add a key or subscription from your phone\'s browser over the local network</string>
+    <string name="lan_import_title">Import over local network</string>
+    <string name="lan_import_step1">On your phone, open in any browser:</string>
+    <string name="lan_import_step2">Or scan the QR code. Paste your key or subscription link there.</string>
+    <string name="lan_import_no_network">No local network. Connect the TV to Wi-Fi or Ethernet and try again.</string>
+    <string name="lan_import_added">Added: %1$s</string>
+    <string name="lan_import_done">Key added — check your TV</string>
+    <string name="add_lan_fallback_hint">Telegram not reachable? Add your key another way:</string>
+    <string name="add_lan_fallback_button">Add over local network</string>
     <string name="proxy_mode_card_title">Proxy running</string>
     <string name="proxy_mode_card_hint">Configure SmartTube or another app to use SOCKS5 proxy at 127.0.0.1:12334</string>
     <string name="update_available">Update available</string>

@@ -20,7 +20,7 @@ import com.vpn4tv.app.constant.ServiceMode
 import com.vpn4tv.app.database.Settings
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}) {
+fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}, onLanImport: () -> Unit = {}) {
     var autoConnect by remember { mutableStateOf(Settings.autoConnectOnBoot) }
     var proxyMode by remember { mutableStateOf(Settings.isProxyMode) }
     var bypassLan by remember { mutableStateOf(Settings.bypassLan) }
@@ -121,6 +121,29 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}) {
                 Settings.fakeDns = it
             }
         )
+
+        // LAN import — bring-your-own-key over the local network. Deliberately
+        // tucked in Settings, not surfaced in the default onboarding, so the
+        // Telegram funnel (buy-or-bring-key) stays the primary path.
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .clickable { onLanImport() }
+                .focusable(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.lan_import_title), fontSize = 18.sp, color = Color.White)
+                    Text(stringResource(R.string.setting_lan_import_desc), fontSize = 13.sp, color = Color.Gray)
+                }
+                Text("›", fontSize = 20.sp, color = Color.Gray)
+            }
+        }
     }
 }
 

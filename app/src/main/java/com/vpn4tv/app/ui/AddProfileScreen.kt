@@ -39,7 +39,7 @@ import java.net.URL
 import java.util.UUID
 
 @Composable
-fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
+fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit, onLanImport: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -56,6 +56,11 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
     // Retry progress shown in red while subscription fetch is timing out —
     // user sees "Попытка N/10 (через резервный сервер)" instead of a frozen UI.
     var retryInfo by remember { mutableStateOf<com.vpn4tv.app.converter.HwidService.RetryProgress?>(null) }
+    // Consecutive poll iterations where BOTH endpoints were network-unreachable
+    // (ISP blocking our control server / DNS). After a threshold we surface the
+    // LAN-import fallback — the only onboarding path that needs no internet.
+    var pollNetFailures by remember { mutableStateOf(0) }
+    val showLanFallback = pollNetFailures >= 3
 
     // Disconnect any active session before we start polling. A user adding
     // a SECOND subscription was seeing "бесконечное ожидание" because the
@@ -75,8 +80,9 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && !isDone) {
                 scope.launch(Dispatchers.IO) {
-                    pollServer(uuid)?.let { data ->
-                        handlePollResponse(data, context, scope,
+                    val outcome = pollServer(uuid)
+                    if (outcome is PollOutcome.Data) {
+                        handlePollResponse(outcome.json, context, scope,
                             onUserInfo = { name -> userName = name; status = name },
                             onConfig = { configs ->
                                 isAdding = true; status = "adding"
@@ -106,69 +112,52 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
     // Polling both UUID and code
     DisposableEffect(Unit) {
         val job = scope.launch {
-            while (isActive && !isDone) {
-                // Poll UUID
-                pollServer(uuid)?.let { data ->
-                    handlePollResponse(data, context, scope,
-                        onUserInfo = { name -> userName = name; status = name },
-                        onConfig = { configs ->
-                            isAdding = true
-                            status = "adding"
-                            scope.launch(Dispatchers.IO) {
-                                var errorMsg = ""
-                                val added = processConfigs(
-                                    context, configs, userName,
-                                    onError = { errorMsg = it },
-                                    onProgress = { retryInfo = it },
-                                )
-                                withContext(Dispatchers.Main) {
-                                    retryInfo = null
-                                    if (added) {
-                                        isDone = true
-                                        status = "done"
-                                        delay(1000)
-                                        onProfileAdded()
-                                    } else {
-                                        isAdding = false
-                                        status = if (errorMsg.isNotEmpty()) "error:$errorMsg" else "failed"
-                                    }
-                                }
-                            }
-                        }
+            val onConfigArrived: (List<String>) -> Unit = { configs ->
+                isAdding = true
+                status = "adding"
+                scope.launch(Dispatchers.IO) {
+                    var errorMsg = ""
+                    val added = processConfigs(
+                        context, configs, userName,
+                        onError = { errorMsg = it },
+                        onProgress = { retryInfo = it },
                     )
+                    withContext(Dispatchers.Main) {
+                        retryInfo = null
+                        if (added) {
+                            isDone = true
+                            status = "done"
+                            delay(1000)
+                            onProfileAdded()
+                        } else {
+                            isAdding = false
+                            status = if (errorMsg.isNotEmpty()) "error:$errorMsg" else "failed"
+                        }
+                    }
+                }
+            }
+            while (isActive && !isDone) {
+                val uuidOutcome = pollServer(uuid)
+                if (uuidOutcome is PollOutcome.Data) {
+                    handlePollResponse(uuidOutcome.json, context, scope,
+                        onUserInfo = { name -> userName = name; status = name },
+                        onConfig = onConfigArrived)
                 }
 
-                // Poll code
-                if (!isDone) {
-                    pollServer(code10)?.let { data ->
-                        handlePollResponse(data, context, scope,
-                            onUserInfo = { name -> userName = name; status = name },
-                            onConfig = { configs ->
-                                isAdding = true
-                                status = "adding"
-                                scope.launch(Dispatchers.IO) {
-                                    var errorMsg = ""
-                                    val added = processConfigs(
-                                        context, configs, userName,
-                                        onError = { errorMsg = it },
-                                        onProgress = { retryInfo = it },
-                                    )
-                                    withContext(Dispatchers.Main) {
-                                        retryInfo = null
-                                        if (added) {
-                                            isDone = true
-                                            status = "done"
-                                            delay(1000)
-                                            onProfileAdded()
-                                        } else {
-                                            isAdding = false
-                                            status = if (errorMsg.isNotEmpty()) "error:$errorMsg" else "failed"
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                    }
+                val codeOutcome = if (!isDone) pollServer(code10) else PollOutcome.Empty
+                if (codeOutcome is PollOutcome.Data) {
+                    handlePollResponse(codeOutcome.json, context, scope,
+                        onUserInfo = { name -> userName = name; status = name },
+                        onConfig = onConfigArrived)
+                }
+
+                // Count an iteration as a network failure only when BOTH polls
+                // failed to reach any endpoint — a single mirror hiccup doesn't
+                // trip the LAN fallback. Any successful contact resets it.
+                if (uuidOutcome is PollOutcome.NetworkError && codeOutcome is PollOutcome.NetworkError) {
+                    pollNetFailures++
+                } else {
+                    pollNetFailures = 0
                 }
 
                 delay(5000) // Poll every 5 seconds
@@ -319,13 +308,43 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit) {
             },
             textAlign = TextAlign.Center
         )
+
+        // LAN-import fallback: appears only after repeated failures to reach
+        // our control server (ISP blocking the bot API / DNS). The Telegram
+        // funnel stays primary; this is the escape hatch so a blocked user
+        // isn't dead-ended on the very first screen.
+        if (showLanFallback && !isAdding && !isDone) {
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                stringResource(R.string.add_lan_fallback_hint),
+                fontSize = 14.sp, color = Color.Gray, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onLanImport,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
+            ) {
+                Text(stringResource(R.string.add_lan_fallback_button), fontSize = 16.sp)
+            }
+        }
     }
 }
 
-private suspend fun pollServer(id: String): JSONObject? {
+// Distinguishes "no data yet" (server reachable, nothing queued) from
+// "couldn't reach any endpoint" (ISP blocking us) so the caller can decide
+// when to surface the LAN-import fallback.
+private sealed class PollOutcome {
+    data class Data(val json: JSONObject) : PollOutcome()
+    object Empty : PollOutcome()        // reached server, type=timeout / nothing
+    object NetworkError : PollOutcome() // every endpoint threw
+}
+
+private suspend fun pollServer(id: String): PollOutcome {
     return withContext(Dispatchers.IO) {
         val primaryUrl = "https://api.vpn4tv.com/poll?uuid=$id"
         val endpoints = com.vpn4tv.app.converter.HwidService.endpointsWithMirror(primaryUrl)
+        var reachedAny = false
         for (url in endpoints) {
             try {
                 val conn = com.vpn4tv.app.converter.HwidService
@@ -334,13 +353,14 @@ private suspend fun pollServer(id: String): JSONObject? {
                 conn.readTimeout = 30000
                 val response = conn.inputStream.bufferedReader().readText()
                 conn.disconnect()
+                reachedAny = true
                 val json = JSONObject(response)
-                return@withContext if (json.optString("type") != "timeout") json else null
+                if (json.optString("type") != "timeout") return@withContext PollOutcome.Data(json)
             } catch (_: Exception) {
                 // try next endpoint (mirror)
             }
         }
-        null
+        if (reachedAny) PollOutcome.Empty else PollOutcome.NetworkError
     }
 }
 
@@ -478,7 +498,7 @@ private suspend fun processConfigs(
     }
 }
 
-private fun generateQrBitmap(content: String, size: Int): Bitmap? {
+internal fun generateQrBitmap(content: String, size: Int): Bitmap? {
     return try {
         val writer = QRCodeWriter()
         val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, size, size)

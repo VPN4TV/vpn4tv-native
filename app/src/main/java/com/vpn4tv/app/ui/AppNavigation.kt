@@ -20,6 +20,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val PER_APP_PROXY = "per_app_proxy"
     const val ABOUT = "about"
+    const val LAN_IMPORT = "lan_import"
 }
 
 // TV remotes double-fire DPAD_CENTER / BACK. The RESUMED-lifecycle guard is
@@ -99,11 +100,18 @@ fun AppNavigation(
         composable(Routes.SETTINGS) {
             SettingsScreen(
                 onBack = { navController.popBackStackSafe() },
-                onPerAppProxy = { navController.navigateSafe(Routes.PER_APP_PROXY) }
+                onPerAppProxy = { navController.navigateSafe(Routes.PER_APP_PROXY) },
+                onLanImport = { navController.navigateSafe(Routes.LAN_IMPORT) }
             )
         }
         composable(Routes.PER_APP_PROXY) {
             PerAppProxyScreen(onBack = { navController.popBackStackSafe() })
+        }
+        composable(Routes.LAN_IMPORT) {
+            LanImportScreen(
+                onBack = { navController.popBackStackSafe() },
+                onImported = { navController.popBackStack(Routes.HOME, false) }
+            )
         }
         composable(Routes.ABOUT) {
             AboutScreen(onBack = { navController.popBackStackSafe() })
@@ -115,7 +123,8 @@ fun AppNavigation(
                     // Intentionally NOT lifecycle-guarded: fires from a
                     // background import callback, the entry may be STARTED.
                     navController.popBackStack(Routes.HOME, false)
-                }
+                },
+                onLanImport = { navController.navigateSafe(Routes.LAN_IMPORT) }
             )
         }
     }

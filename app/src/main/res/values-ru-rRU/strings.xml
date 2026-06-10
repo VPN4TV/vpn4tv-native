@@ -606,6 +606,15 @@
     <string name="setting_bypass_lan_desc">Трафик в локальную сеть идёт напрямую — Chromecast, Plex/Jellyfin на NAS, админка роутера, принтеры продолжают работать при включённом VPN.</string>
     <string name="setting_fake_dns">Обход DNS-блокировок (FakeDNS)</string>
     <string name="setting_fake_dns_desc">Домены резолвятся на VPN-сервере — провайдер не видит DNS-запросы и не может их блокировать или подменять. Выключите, если какое-то приложение не подключается.</string>
+    <string name="setting_lan_import_desc">Добавить ключ или подписку из браузера телефона по локальной сети</string>
+    <string name="lan_import_title">Импорт по локальной сети</string>
+    <string name="lan_import_step1">На телефоне откройте в любом браузере:</string>
+    <string name="lan_import_step2">Или отсканируйте QR-код. Вставьте туда ключ или ссылку на подписку.</string>
+    <string name="lan_import_no_network">Нет локальной сети. Подключите телевизор к Wi-Fi или Ethernet и попробуйте снова.</string>
+    <string name="lan_import_added">Добавлен: %1$s</string>
+    <string name="lan_import_done">Ключ добавлен — проверьте телевизор</string>
+    <string name="add_lan_fallback_hint">Telegram недоступен? Добавьте ключ другим способом:</string>
+    <string name="add_lan_fallback_button">Добавить по локальной сети</string>
     <string name="proxy_mode_card_title">Прокси запущен</string>
     <string name="proxy_mode_card_hint">В SmartTube или другом приложении укажите SOCKS5-прокси: 127.0.0.1 порт 12334</string>
     <string name="update_available">Доступно обновление</string>

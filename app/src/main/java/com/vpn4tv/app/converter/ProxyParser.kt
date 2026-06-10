@@ -63,6 +63,7 @@ object ProxyParser {
             trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") -> parseHysteria2(trimmed)
             trimmed.startsWith("trojan://") -> parseTrojan(trimmed)
             trimmed.startsWith("ss://") -> parseShadowsocks(trimmed)
+            trimmed.startsWith("naive+https://") || trimmed.startsWith("naive+quic://") -> parseNaive(trimmed)
             trimmed.startsWith("wg://") -> parseWgUri(trimmed)
             else -> null
         }
@@ -292,6 +293,59 @@ object ProxyParser {
         }
 
         return ProxyConfig(tag = name, type = "trojan", server = host, serverPort = port, outbound = outbound)
+    }
+
+    // ─── NAIVEPROXY ─────────────────────────────────────────
+
+    /**
+     * NaiveProxy: naive+https://user:password@host:port?padding=true#name
+     * (or naive+quic:// for the HTTP/3 variant). Maps to the sing-box naive
+     * outbound — compiled into our libbox via the with_naive_outbound tag.
+     * Always TLS (naive is HTTP/2 or HTTP/3 over TLS by definition).
+     */
+    private fun parseNaive(uri: String): ProxyConfig? {
+        val isQuic = uri.startsWith("naive+quic://")
+        // Uri.parse doesn't handle the "naive+https" scheme cleanly; strip the
+        // naive+ prefix so the rest parses as a normal https/quic URL.
+        val normalized = uri.removePrefix("naive+")
+        val parsed = Uri.parse(normalized)
+        val userInfo = parsed.userInfo ?: return null
+        val host = parsed.host ?: return null
+        val port = parsed.port.takeIf { it > 0 } ?: 443
+        val name = URLDecoder.decode(parsed.fragment ?: host, "UTF-8")
+
+        // userInfo is "username:password" — naive requires both. It may be
+        // percent-encoded (passwords often contain special chars).
+        val sep = userInfo.indexOf(':')
+        if (sep < 0) return null
+        val username = URLDecoder.decode(userInfo.substring(0, sep), "UTF-8")
+        val password = URLDecoder.decode(userInfo.substring(sep + 1), "UTF-8")
+        // naive authenticates against a real CDN; an empty credential pair
+        // imports fine but fails at connect with an opaque 407. Reject at
+        // parse time so the user sees "no servers found" instead.
+        if (username.isEmpty() || password.isEmpty()) return null
+        val params = parseQueryParams(parsed)
+        val sni = params["sni"] ?: host
+
+        val outbound = JSONObject().apply {
+            put("type", "naive")
+            put("tag", name)
+            put("server", host)
+            put("server_port", port)
+            put("username", username)
+            put("password", password)
+            if (isQuic) put("quic", true)
+            // No alpn: the naive outbound sets its own (h2/h3) and HARD-REJECTS
+            // a user-supplied tls.alpn ("alpn is not supported on naive
+            // outbound"), which would brick the profile at connect. Same for
+            // insecure/utls/reality — we never emit them here.
+            put("tls", JSONObject().apply {
+                put("enabled", true)
+                put("server_name", sni)
+            })
+        }
+
+        return ProxyConfig(tag = name, type = "naive", server = host, serverPort = port, outbound = outbound)
     }
 
     // ─── SHADOWSOCKS ────────────────────────────────────────
