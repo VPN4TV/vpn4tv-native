@@ -380,11 +380,11 @@ class BoxService(private val service: Service, private val platformInterface: Pl
      */
     private fun runFakeDnsHealthCheck() {
         try {
-            Thread.sleep(4000) // let the tunnel + bridges settle
+            Thread.sleep(3000) // let the tunnel + bridges settle
             if (fakeDnsAutoDisabled || globalStatus.value != Status.Started) return
 
             // Test the fakeip/domain path first.
-            if (probeReachableThroughTunnel(attempts = 4)) {
+            if (probeReachableThroughTunnel(attempts = 3)) {
                 Log.i(TAG, "FakeDNS health check OK — reachable through tunnel")
                 return
             }
@@ -437,7 +437,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             var sock: java.net.Socket? = null
             try {
                 sock = java.net.Socket()
-                sock.connect(java.net.InetSocketAddress(ip, 443), 8000)
+                sock.connect(java.net.InetSocketAddress(ip, 443), 5000)
                 if (sock.isConnected) return true
             } catch (e: Exception) {
                 Log.w(TAG, "proxy-alive probe $ip failed: ${e.message}")
@@ -469,8 +469,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 conn = (java.net.URL("https://www.youtube.com/generate_204").openConnection()
                     as java.net.HttpURLConnection).apply {
                     requestMethod = "GET"
-                    connectTimeout = 8000
-                    readTimeout = 8000
+                    connectTimeout = 5000
+                    readTimeout = 5000
                     instanceFollowRedirects = false
                     setRequestProperty("User-Agent", "VPN4TV-healthcheck")
                 }
@@ -483,7 +483,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             } finally {
                 conn?.disconnect()
             }
-            if (i < attempts - 1) try { Thread.sleep(5000) } catch (_: InterruptedException) { return false }
+            if (i < attempts - 1) try { Thread.sleep(3000) } catch (_: InterruptedException) { return false }
         }
         return false
     }
