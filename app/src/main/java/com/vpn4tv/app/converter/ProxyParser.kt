@@ -298,10 +298,11 @@ object ProxyParser {
     // ─── NAIVEPROXY ─────────────────────────────────────────
 
     /**
-     * NaiveProxy: naive+https://user:password@host:port?padding=true#name
-     * (or naive+quic:// for the HTTP/3 variant). Maps to the sing-box naive
-     * outbound — compiled into our libbox via the with_naive_outbound tag.
-     * Always TLS (naive is HTTP/2 or HTTP/3 over TLS by definition).
+     * NaiveProxy: naive+https://USER:PASS@DOMAIN:PORT#remark (or naive+quic://
+     * for the HTTP/3 variant), with userinfo and remark URL-escaped. Maps to
+     * the sing-box naive outbound — compiled into our libbox via the
+     * with_naive_outbound tag. Always TLS (naive is HTTP/2 or HTTP/3 over TLS
+     * by definition).
      */
     private fun parseNaive(uri: String): ProxyConfig? {
         val isQuic = uri.startsWith("naive+quic://")
@@ -309,17 +310,21 @@ object ProxyParser {
         // naive+ prefix so the rest parses as a normal https/quic URL.
         val normalized = uri.removePrefix("naive+")
         val parsed = Uri.parse(normalized)
-        val userInfo = parsed.userInfo ?: return null
         val host = parsed.host ?: return null
         val port = parsed.port.takeIf { it > 0 } ?: 443
-        val name = URLDecoder.decode(parsed.fragment ?: host, "UTF-8")
+        // Uri.getFragment() already URI-decodes the remark (and keeps a literal
+        // '+' as '+', unlike URLDecoder). Use it as-is — no second decode.
+        val name = parsed.fragment ?: host
 
-        // userInfo is "username:password" — naive requires both. It may be
-        // percent-encoded (passwords often contain special chars).
-        val sep = userInfo.indexOf(':')
+        // Split user:password on the ENCODED userinfo: a ':' inside the
+        // password is escaped as %3A there, so the first raw ':' is always the
+        // real separator. Then Uri.decode each half (proper URI percent-decode,
+        // not URLDecoder — the latter wrongly turns '+' into a space).
+        val encodedUserInfo = parsed.encodedUserInfo ?: return null
+        val sep = encodedUserInfo.indexOf(':')
         if (sep < 0) return null
-        val username = URLDecoder.decode(userInfo.substring(0, sep), "UTF-8")
-        val password = URLDecoder.decode(userInfo.substring(sep + 1), "UTF-8")
+        val username = Uri.decode(encodedUserInfo.substring(0, sep))
+        val password = Uri.decode(encodedUserInfo.substring(sep + 1))
         // naive authenticates against a real CDN; an empty credential pair
         // imports fine but fails at connect with an opaque 407. Reject at
         // parse time so the user sees "no servers found" instead.
