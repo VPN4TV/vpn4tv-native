@@ -217,11 +217,11 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
             DefaultNetworkMonitor.start()
 
-            // Record which bridges this session needs. consumeAndSurfaceCrashLog
-            // reads these on the next launch and prepends a synthetic stack
-            // frame so Vitals shows xray=Y/outline=Y/wireproxy=Y next to each
-            // _cgo_topofstack abort — lets us correlate residual races with
-            // the bridge subset that was running.
+            // Record which bridges this session needs. consumeCrashLog reads
+            // these on the next launch and logs xray/outline/wireproxy next to
+            // any Go crash dump — lets us correlate residual races with the
+            // bridge subset that was running (and feeds the planned server
+            // upload).
             val xraySidecar = File(com.vpn4tv.app.converter.ConfigGenerator.xraySidecarPath(profile.typed.path))
             val outlineSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.outlineSidecarPath(profile.typed.path))
             val wgSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.wgSidecarPath(profile.typed.path))

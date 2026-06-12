@@ -131,7 +131,7 @@ class Application : Application() {
             }
             val tempDir = cacheDir.apply { mkdirs() }
             workingDir.mkdirs()
-            consumeAndSurfaceCrashLog(tempDir)
+            consumeCrashLog(tempDir)
             setupLibbox(baseDir, workingDir, tempDir)
             UpdateProfileWork.reconfigureUpdater()
         }
@@ -159,19 +159,21 @@ class Application : Application() {
     }
 
     /**
-     * Diagnostic one-shot: if the previous process aborted inside Go runtime
-     * (cgo_topofstack family), the runtime wrote a goroutine dump to the
-     * crash file via debug.SetCrashOutput. Read it, surface as an uncaught
-     * exception so it lands in Play Vitals with real stack content.
+     * Diagnostic one-shot: if a previous process aborted inside the Go runtime,
+     * debug.SetCrashOutput wrote a goroutine dump to go_crash.log (confirmed
+     * the only writer — stderr is redirected to a separate CrashReport file).
+     * Read it, log it with the bridge subset that was active, and move it aside
+     * so the next launch boots clean.
      *
-     * Cost: every original abort produces a second crash report (this one)
-     * — crash rate metric ~doubles for the cluster while this is on.
-     * Remove on the next release once we have actionable data.
-     *
-     * One-shot guard: rename last_crash → consumed_crash before throwing
-     * so the next launch finds nothing and boots normally.
+     * LOG-ONLY — we no longer rethrow it as an uncaught exception. The rethrow
+     * (a) crashed the app on the launch AFTER any Go crash (the throw lived in
+     * a GlobalScope coroutine with no handler → process death), inflicting a
+     * second failure on the user; (b) doubled the crash-rate metric; and Play
+     * stripped the synthetic stack frames anyway, so it yielded no readable
+     * data. The full dump goes to logcat now; a server upload to bell.a4e.ar
+     * (planned) will give untruncated off-device dumps + bridge correlation.
      */
-    private fun consumeAndSurfaceCrashLog(tempDir: File) {
+    private fun consumeCrashLog(tempDir: File) {
         val crashFile = File(tempDir, "go_crash.log")
         if (!crashFile.exists() || crashFile.length() == 0L) return
         val content = try {
@@ -180,81 +182,22 @@ class Application : Application() {
             Log.e("Application", "consumeCrashLog read failed", e)
             return
         }
-        // One-shot: move (atomic rename) so next launch doesn't see it
+        // One-shot: move aside so the next launch doesn't re-read it.
         runCatching { crashFile.renameTo(File(tempDir, "go_crash_consumed.log")) }
-        Log.e("Application", "Previous Go crash dump (${content.length} bytes):\n$content")
-        // Vitals truncates after the first ~3 stack frames, so pack as much
-        // crash log into each frame as possible. Allow any printable ASCII
-        // (only strip control chars) and use chunks of ~250 chars in the
-        // methodName slot — that field is rendered verbatim by Vitals.
-        val cleaned = content
-            .replace(Regex("[\\x00-\\x1F\\x7F]"), " ")
-            .replace(Regex(" +"), " ")
-            .trim()
-        // Anchor at the actual panic source: SetCrashOutput dumps ALL
-        // goroutines; the panicking one is rarely first. Search for
-        // "runtime.throw(", "panic:", or "fatal error:" and chunk from
-        // there. Falls back to start-of-dump if no anchor found (e.g. raw
-        // SIGSEGV with no Go-side message) — message gets a NoAnchor:
-        // prefix so Vitals groups anchored vs unanchored dumps separately.
-        val anchorIdxRaw = listOf("runtime.throw(", "panic:", "fatal error:")
-            .map { cleaned.indexOf(it) }
-            .filter { it >= 0 }
-            .minOrNull()
-        val anchorIdx = anchorIdxRaw ?: 0
-        val anchorTag = if (anchorIdxRaw == null) "NoAnchor: " else ""
-        // Bridge subset that was active when sing-box ran. BoxService.startService
-        // writes this; correlating with residual _cgo_topofstack tells us
-        // whether the bad-pointer source is in xray-core, outline-sdk,
-        // wireproxy-awg, or sing-box itself. Prepended to EVERY chunk —
-        // Vitals groups by stack hash and shows the representative chunk
-        // which is often not chunk 1, so per-chunk tagging is the only
-        // way to guarantee visibility. ~30 chars/chunk overhead.
+
+        // Bridge subset that was active when sing-box ran (BoxService writes it),
+        // plus whether the FakeDNS health check had auto-disabled — context for
+        // the upcoming server upload and useful in logcat now.
         val sessionPrefs = getSharedPreferences("session", Context.MODE_PRIVATE)
-        val startedAt = sessionPrefs.getLong("started_at", 0L)
-        val bridgesTag = buildString {
-            append("[xray=").append(if (sessionPrefs.getBoolean("xray", false)) "Y" else "N")
+        val bridges = buildString {
+            append("xray=").append(if (sessionPrefs.getBoolean("xray", false)) "Y" else "N")
             append(" outline=").append(if (sessionPrefs.getBoolean("outline", false)) "Y" else "N")
             append(" wireproxy=").append(if (sessionPrefs.getBoolean("wireproxy", false)) "Y" else "N")
-            if (startedAt == 0L) {
-                // Distinguish "VPN never started this install" from "session ran with no bridges".
-                append(" sessionAgeMin=?")
-            } else {
-                val ageMin = (System.currentTimeMillis() - startedAt) / 60_000
-                if (ageMin in 0..10_080) append(" sessionAgeMin=").append(ageMin)
-            }
-            append("] ")
+            append(" fakeDnsAutoDisabled=").append(sessionPrefs.getBoolean("fakeDns_auto_disabled", false))
         }
-        val body = cleaned.substring(anchorIdx)
-        // Empty/contentless dump guard. SetCrashOutput can leave a non-zero
-        // file with no usable Go content (a native SIGSEGV/SIGKILL that never
-        // ran Go's panic machinery, or an all-whitespace partial write). Once
-        // the 50328 StringBox sweep killed the real heap-panic dumps, THIS was
-        // the entire residual 50328 crash cluster: a contentless "Go crash: "
-        // RuntimeException with no frames — pure self-inflicted crash rate,
-        // zero diagnostic value. Below a real-dump threshold, log and return
-        // instead of throwing.
-        if (body.length < 40) {
-            Log.w("Application", "Crash dump too short to surface (${body.length} chars) — skipping throw")
-            return
-        }
-        // maxChunks=5 matches the ~3-frame render window Vitals shows for a
-        // RuntimeException, plus 2 extra in case the cap rises for some report
-        // formats. 250 chars per chunk avoids Vitals' methodName truncation.
-        val maxChunks = 5
-        val chunkSize = 250
-        val dataPerChunk = (chunkSize - bridgesTag.length).coerceAtLeast(50)
-        val take = minOf(body.length, maxChunks * dataPerChunk)
-        val chunks = (0 until take step dataPerChunk).map { offset ->
-            bridgesTag + body.substring(offset, minOf(offset + dataPerChunk, take))
-        }
-        val frames = chunks.mapIndexed { idx, chunk ->
-            StackTraceElement("GoCrash", chunk, "go_crash.log", idx + 1)
-        }.toTypedArray()
-        val firstLine = body.take(180)
-        val ex = RuntimeException("Go crash: $anchorTag$bridgesTag$firstLine")
-        ex.stackTrace = frames + ex.stackTrace
-        throw ex
+        Log.e("Application", "Previous Go crash dump (${content.length} bytes, $bridges):\n$content")
+        // TODO: POST content + bridges + version/device to bell.a4e.ar for
+        // untruncated off-device analysis, then this logcat dump can go.
     }
 
     private fun setupLibbox(baseDir: File, workingDir: File, tempDir: File) {
@@ -433,8 +376,8 @@ class Application : Application() {
         it.logMaxLines = 3000
         it.debug = BuildConfig.DEBUG
         // Diagnostic: Go runtime writes goroutine dump here on abort
-        // (debug.SetCrashOutput). Kotlin reads on next launch and
-        // surfaces via Vitals — see consumeAndSurfaceCrashLog().
+        // (debug.SetCrashOutput). Kotlin logs it on next launch — see
+        // consumeCrashLog().
         it.crashLogPath = File(tempDir, "go_crash.log").path
     }
 
