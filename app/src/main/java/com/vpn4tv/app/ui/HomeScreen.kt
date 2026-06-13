@@ -162,6 +162,41 @@ fun HomeScreen(
                   else Modifier.statusBarsPadding().navigationBarsPadding().padding(screenPadding)),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Broken-install banner: the native lib never loaded (Play per-ABI
+        // split misdelivery on some TV firmware). Persistent + proactive —
+        // guides the user to reinstall the direct universal APK from
+        // bell.a4e.ar, which carries both ABIs so the native lib is present.
+        val installBroken = remember { com.vpn4tv.app.utils.NativeLib.isBroken(context) }
+        if (installBroken) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.install_broken_banner),
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Button(
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse("https://bell.a4e.ar/vpn4tv-latest.apk"),
+                                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }
+                        },
+                        modifier = Modifier.padding(top = 10.dp),
+                    ) {
+                        Text(stringResource(R.string.install_broken_button))
+                    }
+                }
+            }
+        }
+
         // Top bar with profile info
         var activeProfile by remember { mutableStateOf<com.vpn4tv.app.database.Profile?>(null) }
         var isUpdating by remember { mutableStateOf(false) }

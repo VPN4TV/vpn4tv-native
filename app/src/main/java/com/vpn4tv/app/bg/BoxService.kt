@@ -713,8 +713,19 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             Settings.startedByUser = true
             try {
                 startCommandServer()
-            } catch (e: Exception) {
-                stopAndAlert(Alert.StartCommandServer, e.message)
+            } catch (t: Throwable) {
+                // catch Throwable, not Exception: a broken native-lib install
+                // throws NoClassDefFoundError/UnsatisfiedLinkError (Errors),
+                // which Exception wouldn't catch → the app crashed here on
+                // Play split-misdelivery devices. Recognise it, mark broken so
+                // HomeScreen guides reinstall, and stop cleanly instead.
+                if (com.vpn4tv.app.utils.NativeLib.isLoadFailure(t)) {
+                    com.vpn4tv.app.utils.NativeLib.markBroken(Application.application)
+                    stopAndAlert(Alert.StartCommandServer,
+                        Application.application.getString(R.string.error_install_broken))
+                } else {
+                    stopAndAlert(Alert.StartCommandServer, t.message)
+                }
                 return@launch
             }
             startService()

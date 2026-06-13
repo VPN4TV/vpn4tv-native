@@ -559,6 +559,9 @@
     <string name="privilege_module_restart_channel">Модуль LSPosed</string>
 
     <!-- VPN4TV UI strings -->
+    <string name="error_install_broken">Компонент приложения не загрузился — установка повреждена. Переустановите с bell.a4e.ar.</string>
+    <string name="install_broken_banner">⚠ Приложение установилось некорректно (отсутствует компонент). Удалите его, затем скачайте и установите с bell.a4e.ar.</string>
+    <string name="install_broken_button">Скачать с bell.a4e.ar</string>
     <string name="status_loading">Загрузка…</string>
     <string name="status_connected">Подключено</string>
     <string name="status_connecting">Подключение…</string>

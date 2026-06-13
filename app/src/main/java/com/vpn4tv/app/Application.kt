@@ -19,6 +19,7 @@ import com.vpn4tv.app.bg.UpdateProfileWork
 import com.vpn4tv.app.constant.Bugs
 import com.vpn4tv.app.database.Settings
 import com.vpn4tv.app.utils.AppLifecycleObserver
+import com.vpn4tv.app.utils.NativeLib
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -211,25 +212,14 @@ class Application : Application() {
             Libbox.setup(createSetupOptions(baseDir, workingDir, tempDir))
         } catch (t: Throwable) {
             // Native lib never loaded (Play split ABI misdelivery → go.Seq
-            // class erroneous → NoClassDefFoundError on every later touch):
-            // the failure is permanent for the install, so crash-looping every
-            // launch adds no information. Rethrow ONCE per install+version so
-            // Vitals still shows the failure (distinct-user counts stay exact,
-            // a bad AAR release still spikes), then degrade on later launches.
-            // vc50326: 12 reports / 3 users = exactly this loop.
-            val nativeLoadFailure = generateSequence(t as Throwable?) { it.cause }
-                .take(10)
-                .any { it is UnsatisfiedLinkError || it is NoClassDefFoundError }
-            if (nativeLoadFailure) {
-                val prefs = getSharedPreferences("diagnostics", Context.MODE_PRIVATE)
-                val key = "native_load_failure_reported_${BuildConfig.VERSION_CODE}"
-                if (prefs.getBoolean(key, false)) {
-                    Log.e("Application", "Libbox unavailable (native lib load failed), skipping setup", t)
-                    return
-                }
-                // commit(), not apply(): we are on Dispatchers.IO and the throw
-                // below kills the process before an async write would land.
-                prefs.edit().putBoolean(key, true).commit()
+            // class erroneous → NoClassDefFoundError/UnsatisfiedLinkError on
+            // every libbox touch). Permanent for the install — DON'T crash.
+            // Mark broken so HomeScreen shows a reinstall-from-bell.a4e.ar
+            // banner (the direct universal APK carries both ABIs), and degrade.
+            if (NativeLib.isLoadFailure(t)) {
+                Log.e("Application", "Libbox native lib unavailable — install broken, degrading", t)
+                NativeLib.markBroken(this)
+                return
             }
             val rawMsg = t.message ?: t.javaClass.simpleName
             Log.e("Application", "Libbox.setup failed: $rawMsg", t)

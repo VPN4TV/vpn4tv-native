@@ -87,28 +87,38 @@ open class CommandClient(
     private val clientHandler = ClientHandler()
 
     fun connect() {
-        disconnect()
-        val options = CommandClientOptions()
-        connectionTypes.forEach { connectionType ->
-            val command =
-                when (connectionType) {
-                    ConnectionType.Status -> Libbox.CommandStatus
-                    ConnectionType.Groups -> Libbox.CommandGroup
-                    ConnectionType.Log -> Libbox.CommandLog
-                    ConnectionType.ClashMode -> Libbox.CommandClashMode
-                    ConnectionType.Connections -> Libbox.CommandConnections
-                }
-            options.addCommand(command)
-        }
-        options.statusInterval = 1 * 1000 * 1000 * 1000
-        val commandClient = CommandClient(clientHandler, options)
+        // Wrap the WHOLE body in catch(Throwable): on a broken native-lib
+        // install every libbox touch here (Libbox.CommandStatus, the
+        // CommandClient ctor, connect()) throws NoClassDefFoundError — an
+        // Error, which catch(Exception) wouldn't catch, so opening the Servers/
+        // Logs screen crashed. Recognise it, mark broken (HomeScreen guides
+        // reinstall), and no-op instead.
         try {
+            disconnect()
+            val options = CommandClientOptions()
+            connectionTypes.forEach { connectionType ->
+                val command =
+                    when (connectionType) {
+                        ConnectionType.Status -> Libbox.CommandStatus
+                        ConnectionType.Groups -> Libbox.CommandGroup
+                        ConnectionType.Log -> Libbox.CommandLog
+                        ConnectionType.ClashMode -> Libbox.CommandClashMode
+                        ConnectionType.Connections -> Libbox.CommandConnections
+                    }
+                options.addCommand(command)
+            }
+            options.statusInterval = 1 * 1000 * 1000 * 1000
+            val commandClient = CommandClient(clientHandler, options)
             commandClient.connect()
-        } catch (e: Exception) {
-            Log.d("CommandClient", "connect failed", e)
-            return
+            this.commandClient = commandClient
+        } catch (t: Throwable) {
+            if (NativeLib.isLoadFailure(t)) {
+                NativeLib.markBroken(com.vpn4tv.app.Application.application)
+                Log.e("CommandClient", "native lib unavailable — install broken", t)
+            } else {
+                Log.d("CommandClient", "connect failed", t)
+            }
         }
-        this.commandClient = commandClient
     }
 
     fun disconnect() {

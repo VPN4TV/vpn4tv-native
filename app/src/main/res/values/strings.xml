@@ -605,6 +605,9 @@
     <string name="icon_add">Add</string>
 
     <!-- VPN4TV UI strings -->
+    <string name="error_install_broken">App component failed to load — the install is damaged. Reinstall from bell.a4e.ar.</string>
+    <string name="install_broken_banner">⚠ The app didn\'t install correctly on this device (a component is missing). Uninstall it, then download and install from bell.a4e.ar.</string>
+    <string name="install_broken_button">Download from bell.a4e.ar</string>
     <string name="status_loading">Loading…</string>
     <string name="status_connected">Connected</string>
     <string name="status_connecting">Connecting…</string>
