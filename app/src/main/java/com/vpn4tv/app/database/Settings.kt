@@ -75,7 +75,17 @@ object Settings {
     // DNS-level blocking can't poison resolution. Disabled automatically
     // for outline/wireproxy-only profiles in ConfigGenerator (their UDP
     // path routes direct and fake IPs would leak unroutable).
-    var fakeDns by dataStore.boolean(SettingsKey.FAKE_DNS) { true }
+    //
+    // DEFAULT OFF as of 5.1.2 (51200): default-on FakeDNS hung sing-box's engine
+    // start (commandServer.startOrReloadService) for many users on 5.1.1 —
+    // the fakeip DNS graph / cache_file deadlocks during bootstrap on some
+    // networks/routers, leaving the UI stuck on "Подключение…". That hang is
+    // BEFORE Status.Started, so the post-connect health check can't catch it
+    // (it only arms after Started). Off-by-default reverts to the pre-5.1.0
+    // known-good DNS path (stripFakeDns removes the fakeip server, rules and
+    // cache_file). FakeDNS stays available as an opt-in until the engine-start
+    // deadlock is understood and fixed.
+    var fakeDns by dataStore.boolean(SettingsKey.FAKE_DNS) { false }
 
     var updateSource by dataStore.string(SettingsKey.UPDATE_SOURCE) { "github" }
     var checkUpdateEnabled by dataStore.boolean(SettingsKey.CHECK_UPDATE_ENABLED) { false }

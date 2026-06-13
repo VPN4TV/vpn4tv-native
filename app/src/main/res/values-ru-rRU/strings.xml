@@ -605,7 +605,7 @@
     <string name="setting_bypass_lan">Обход локальной сети</string>
     <string name="setting_bypass_lan_desc">Трафик в локальную сеть идёт напрямую — Chromecast, Plex/Jellyfin на NAS, админка роутера, принтеры продолжают работать при включённом VPN.</string>
     <string name="setting_fake_dns">Обход DNS-блокировок (FakeDNS)</string>
-    <string name="setting_fake_dns_desc">Домены резолвятся на VPN-сервере — провайдер не видит DNS-запросы и не может их блокировать или подменять. Выключите, если какое-то приложение не подключается.</string>
+    <string name="setting_fake_dns_desc">Резолвить домены на VPN-сервере, чтобы провайдер не мог блокировать или подменять DNS. Экспериментально — на некоторых ТВ/роутерах может мешать подключению; оставьте выключенным, если подключение зависает.</string>
     <string name="setting_lan_import_desc">Добавить ключ или подписку из браузера телефона по локальной сети</string>
     <string name="lan_import_title">Импорт по локальной сети</string>
     <string name="lan_import_step1">На телефоне откройте в любом браузере:</string>

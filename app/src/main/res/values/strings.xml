@@ -576,7 +576,7 @@
     <string name="setting_bypass_lan">Bypass LAN</string>
     <string name="setting_bypass_lan_desc">Local network traffic skips the tunnel — Chromecast, Plex/Jellyfin on NAS, router admin, printers keep working while VPN is on.</string>
     <string name="setting_fake_dns">DNS blocking bypass (FakeDNS)</string>
-    <string name="setting_fake_dns_desc">Domains are resolved on the VPN server — your ISP never sees DNS queries and can\'t block or spoof them. Turn off if some app can\'t connect.</string>
+    <string name="setting_fake_dns_desc">Resolve domains on the VPN server so your ISP can\'t block or spoof DNS. Experimental — on some TVs/routers it can stop the VPN from connecting; leave off if connection hangs.</string>
     <string name="setting_lan_import_desc">Add a key or subscription from your phone\'s browser over the local network</string>
     <string name="lan_import_title">Import over local network</string>
     <string name="lan_import_step1">On your phone, open in any browser:</string>
