@@ -28,7 +28,12 @@ object SettingsKey {
     const val ALLOW_BYPASS = "allow_bypass"
     const val BYPASS_LAN = "bypass_lan"
     const val SYSTEM_PROXY_ENABLED = "system_proxy_enabled"
-    const val FAKE_DNS = "fake_dns"
+    // Renamed from "fake_dns" in 5.1.3: 5.1.0/5.1.1 shipped FakeDNS default-ON
+    // and some users had it persisted as true (incl. accidental D-pad toggles),
+    // which survived the 5.1.2 default-flip and kept hanging connect. Renaming
+    // the key orphans the old persisted value — every install now reads the
+    // absent new key → default false. Re-enabling writes under the new name.
+    const val FAKE_DNS = "fake_dns_v2"
 
     const val PRIVILEGE_SETTINGS_ENABLED = "hide_settings_enabled"
     const val PRIVILEGE_SETTINGS_LIST = "hide_settings_list"
