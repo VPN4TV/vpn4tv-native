@@ -26,8 +26,10 @@ import kotlin.concurrent.thread
  * - Binds 0.0.0.0:<random high port>; alive only while the import screen is
  *   in the foreground (start() on ON_START, stop() on ON_STOP — see
  *   LanImportScreen) and never longer than AUTO_STOP_MS as a hard backstop.
- * - Every request path must equal "/<token>" where token is 16 random hex
- *   chars from SecureRandom (64 bits). A LAN neighbor can't guess it.
+ * - Every request path must equal "/<token>" where token is 4 SecureRandom
+ *   chars from an unambiguous alphabet (~20 bits). Short for phone typing;
+ *   safe given the LAN-only, ephemeral-port, screen-lifetime-bounded window
+ *   (see randomToken).
  * - Serves exactly one GET (the form) and one POST (the config). Anything
  *   else is 404. No filesystem access, no path-traversal surface.
  * - Each connection is handled on its own short-lived thread with read
@@ -307,11 +309,16 @@ class LanImportServer(
 
         private val secureRandom = SecureRandom()
 
-        private fun randomToken(): String {
-            val bytes = ByteArray(8) // 64 bits
-            secureRandom.nextBytes(bytes)
-            return bytes.joinToString("") { "%02x".format(it) }
-        }
+        // 4 chars from an unambiguous lowercase-alnum alphabet (no 0/1/l/o/i)
+        // so the URL stays short + quick to type on a phone:
+        // http://<ip>:<port>/a7k2. ~20 bits — adequate here: LAN-only, an
+        // ephemeral random port the attacker must also find, and the server
+        // lives only while the import screen is open (5-min hard cap), so
+        // brute-forcing within the window is impractical.
+        private const val TOKEN_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
+
+        private fun randomToken(): String =
+            (0 until 4).map { TOKEN_ALPHABET[secureRandom.nextInt(TOKEN_ALPHABET.length)] }.joinToString("")
 
         /**
          * First site-local IPv4 on a real LAN interface. Excludes the VPN tun

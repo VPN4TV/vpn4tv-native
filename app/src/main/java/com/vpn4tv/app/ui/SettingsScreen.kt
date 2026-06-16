@@ -2,9 +2,9 @@ package com.vpn4tv.app.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
@@ -26,7 +26,11 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}, onLanImpo
     var bypassLan by remember { mutableStateOf(Settings.bypassLan) }
     var fakeDns by remember { mutableStateOf(Settings.fakeDns) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
+    // verticalScroll: the settings list outgrew one screen once FakeDNS + LAN
+    // import were added — on short-height TVs (Mi Box) those last rows were
+    // pushed below the fold and unreachable by D-pad. Scrolling brings them
+    // back; Compose follows D-pad focus into view automatically.
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
@@ -69,34 +73,6 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}, onLanImpo
                 }
                 Text("›", fontSize = 20.sp, color = Color.Gray)
             }
-        }
-
-        // Proxy mode — exposes sing-box as a local SOCKS5 listener on
-        // 127.0.0.1:12334 instead of creating a VPN tunnel. For devices
-        // where the system VPN permission dialog is missing.
-        SettingsToggle(
-            title = stringResource(R.string.setting_proxy_mode),
-            subtitle = stringResource(R.string.setting_proxy_mode_desc),
-            checked = proxyMode,
-            onCheckedChange = {
-                proxyMode = it
-                Settings.serviceMode = if (it) ServiceMode.PROXY else ServiceMode.VPN
-            }
-        )
-
-        // LAN bypass only applies in VPN mode. In proxy mode sing-box never
-        // sees LAN traffic in the first place — apps route to 127.0.0.1:12334
-        // explicitly — so the toggle would be a no-op and just adds noise.
-        if (!proxyMode) {
-            SettingsToggle(
-                title = stringResource(R.string.setting_bypass_lan),
-                subtitle = stringResource(R.string.setting_bypass_lan_desc),
-                checked = bypassLan,
-                onCheckedChange = {
-                    bypassLan = it
-                    Settings.bypassLan = it
-                }
-            )
         }
 
         // Auto-connect on boot
@@ -143,6 +119,36 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}, onLanImpo
                 }
                 Text("›", fontSize = 20.sp, color = Color.Gray)
             }
+        }
+
+        // Advanced / niche — kept at the bottom below the everyday settings.
+
+        // Proxy mode — exposes sing-box as a local SOCKS5 listener on
+        // 127.0.0.1:12334 instead of creating a VPN tunnel. For devices
+        // where the system VPN permission dialog is missing.
+        SettingsToggle(
+            title = stringResource(R.string.setting_proxy_mode),
+            subtitle = stringResource(R.string.setting_proxy_mode_desc),
+            checked = proxyMode,
+            onCheckedChange = {
+                proxyMode = it
+                Settings.serviceMode = if (it) ServiceMode.PROXY else ServiceMode.VPN
+            }
+        )
+
+        // LAN bypass only applies in VPN mode. In proxy mode sing-box never
+        // sees LAN traffic in the first place — apps route to 127.0.0.1:12334
+        // explicitly — so the toggle would be a no-op and just adds noise.
+        if (!proxyMode) {
+            SettingsToggle(
+                title = stringResource(R.string.setting_bypass_lan),
+                subtitle = stringResource(R.string.setting_bypass_lan_desc),
+                checked = bypassLan,
+                onCheckedChange = {
+                    bypassLan = it
+                    Settings.bypassLan = it
+                }
+            )
         }
     }
 }
