@@ -88,6 +88,7 @@ class Application : Application() {
         // onCreate. Keep every first-touch of Libbox off the main thread.
         @Suppress("OPT_IN_USAGE")
         GlobalScope.launch(Dispatchers.IO) {
+          try {
             // libbox 1.14+ expects BCP-47 tags ("ru-RU"), not POSIX ("ru_RU").
             // Catch Throwable (not just Exception) — on Play-split misdelivery
             // (Xiaomi TV Stick 4K, vc50317) the library load throws
@@ -135,6 +136,12 @@ class Application : Application() {
             consumeCrashLog(tempDir)
             setupLibbox(baseDir, workingDir, tempDir)
             UpdateProfileWork.reconfigureUpdater()
+          } finally {
+            // Open BoxService's start gate once the Libbox first-touch + setup
+            // are done (or degraded). A degraded Libbox makes CommandServer.start
+            // throw — handled there — which beats hanging auto-connect for 60s.
+            markLibboxReady()
+          }
         }
 
         // Off main thread: registerReceiver is a synchronous binder call into
@@ -200,39 +207,8 @@ class Application : Application() {
         // Upload the full untruncated dump off-device — Play strips/truncates
         // the synthetic frames so the native tombstones are dead ends; the
         // SetCrashOutput dump (all goroutines + the real throw) is the only way
-        // to root-cause the residual heap corruption. Best-effort, off-thread,
-        // never throws. Receiver: bell.a4e.ar/crash (127.0.0.1:8770 behind nginx).
-        uploadCrashDump(content, bridges)
-    }
-
-    private fun uploadCrashDump(content: String, bridges: String) {
-        Thread {
-            var conn: java.net.HttpURLConnection? = null
-            try {
-                // Server caps at 2 MB; trim to stay safely under.
-                val body = (if (content.length > 1_500_000) content.take(1_500_000) else content)
-                    .toByteArray(Charsets.UTF_8)
-                conn = (java.net.URL("https://bell.a4e.ar/crash").openConnection()
-                    as java.net.HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 10000
-                    readTimeout = 10000
-                    doOutput = true
-                    setRequestProperty("X-VC", BuildConfig.VERSION_CODE.toString())
-                    setRequestProperty("X-Android", Build.VERSION.SDK_INT.toString())
-                    setRequestProperty("X-Device", "${Build.MANUFACTURER} ${Build.MODEL}".take(120))
-                    setRequestProperty("X-Bridges", bridges.take(120))
-                    setFixedLengthStreamingMode(body.size)
-                }
-                conn.outputStream.use { it.write(body) }
-                val code = conn.responseCode
-                Log.i("Application", "Crash dump uploaded: HTTP $code (${body.size} bytes)")
-            } catch (e: Exception) {
-                Log.w("Application", "Crash dump upload failed: ${e.message}")
-            } finally {
-                conn?.disconnect()
-            }
-        }.start()
+        // to root-cause the residual heap corruption. Best-effort, off-thread.
+        com.vpn4tv.app.utils.CrashUpload.upload(content, bridges, "crash")
     }
 
     private fun setupLibbox(baseDir: File, workingDir: File, tempDir: File) {
@@ -427,5 +403,21 @@ class Application : Application() {
         val notificationManager by lazy { application.getSystemService<NotificationManager>()!! }
         val wifiManager by lazy { application.getSystemService<WifiManager>()!! }
         val clipboard by lazy { application.getSystemService<ClipboardManager>()!! }
+
+        /**
+         * Released once onCreate has finished the Libbox first-touch
+         * (setLocale → boots the 70 MB .so + Go runtime) and Libbox.setup().
+         * BoxService awaits this before its own first Libbox call
+         * (CommandServer.start): at boot the onCreate setup coroutine and
+         * BootReceiver's auto-connect coroutine both first-touch Libbox
+         * concurrently, which deadlocks the gomobile/Go runtime boot on a
+         * minority of TVs — the "reinstall fixes / reboot brings it back"
+         * connect hang introduced in 50329 when both paths moved off the main
+         * thread. Serializing first-touch through onCreate removes the race.
+         */
+        private val libboxReady = java.util.concurrent.CountDownLatch(1)
+        fun markLibboxReady() = libboxReady.countDown()
+        fun awaitLibboxReady(timeoutMs: Long): Boolean =
+            libboxReady.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 }

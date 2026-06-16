@@ -664,6 +664,66 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         }
     }
 
+    /**
+     * Connect-hang backstop. The root cause of the boot-only connect hang was a
+     * Libbox first-touch race (onCreate's setup coroutine vs BootReceiver's
+     * auto-connect both booting the gomobile/Go runtime concurrently — a 50329
+     * regression), now fixed by the awaitLibboxReady() gate before
+     * startCommandServer. This watchdog stays as the safety net for ANY residual
+     * stall anywhere in the start sequence: armed in onStartCommand BEFORE the
+     * start coroutine, so it also covers startCommandServer (the earlier
+     * placement inside startService never could). If Status.Starting persists
+     * 45s, snapshot the Java/Kotlin thread stacks (always works, no root —
+     * pinpoints a Room/JNI/coroutine stall) AND the Go goroutines
+     * (Libbox.debugGoroutineDump — pinpoints a sing-box-internal stall), upload
+     * both (kind=hang-java / hang) so it's diagnosable from the field without
+     * device access, then hard-reset — a wedged runtime can't be cleanly
+     * reloaded, and a killed process beats an infinite spinner; next launch is
+     * clean.
+     */
+    private fun armConnectWatchdog() {
+        Thread {
+            try { Thread.sleep(45_000) } catch (_: InterruptedException) { return@Thread }
+            if (globalStatus.value != Status.Starting) return@Thread // reached Started/Stopped
+            Log.w(TAG, "Connect watchdog: stuck in Starting 45s — capturing stacks")
+            val sp = Application.application.getSharedPreferences("session", Context.MODE_PRIVATE)
+            val bridges = "xray=${if (sp.getBoolean("xray", false)) "Y" else "N"}" +
+                " outline=${if (sp.getBoolean("outline", false)) "Y" else "N"}" +
+                " wireproxy=${if (sp.getBoolean("wireproxy", false)) "Y" else "N"}"
+            // 1) Java/Kotlin thread stacks — needs no root, always succeeds, and
+            //    catches a hang in the Kotlin/JNI layer (Room write, the
+            //    CommandServer.start JNI call, coroutine starvation) that a Go
+            //    dump alone would miss. Upload it FIRST so it lands even if the
+            //    Go dump below stalls on a wedged runtime.
+            try {
+                val sb = StringBuilder()
+                for ((th, frames) in Thread.getAllStackTraces()) {
+                    sb.append('"').append(th.name).append("\" ").append(th.state).append('\n')
+                    for (f in frames) sb.append("\tat ").append(f).append('\n')
+                    sb.append('\n')
+                }
+                com.vpn4tv.app.utils.CrashUpload.upload(sb.toString(), bridges, "hang-java")
+            } catch (t: Throwable) {
+                Log.w(TAG, "java stack dump failed: ${t.message}")
+            }
+            // 2) Go goroutines — pinpoints a sing-box-internal stall; runs last
+            //    because runtime.Stack(all=true) can itself block if the Go
+            //    runtime is wedged.
+            try {
+                val dump = io.nekohasekai.libbox.Libbox.debugGoroutineDump().value
+                com.vpn4tv.app.utils.CrashUpload.upload(dump, bridges, "hang")
+            } catch (t: Throwable) {
+                Log.w(TAG, "goroutine dump failed: ${t.message}")
+            }
+            lastError.postValue("Не удалось подключиться (таймаут). Повторите.")
+            status.postValue(Status.Stopped)
+            // Give the UI + the upload thread a moment, then hard-reset the
+            // wedged Go runtime.
+            try { Thread.sleep(3000) } catch (_: InterruptedException) {}
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }.apply { name = "connect-watchdog" }.start()
+    }
+
     @OptIn(DelicateCoroutinesApi::class)
     @Suppress("SameReturnValue")
     internal fun onStartCommand(): Int {
@@ -709,8 +769,25 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             receiverRegistered = true
         }
 
+        // Arm the connect-hang watchdog HERE, before the async start runs — the
+        // hang has been observed inside startCommandServer() (libbox
+        // CommandServer.start), which executes before startService()/Box.Start,
+        // so arming it inside startService() (as before) could never catch it.
+        armConnectWatchdog()
+
         GlobalScope.launch(Dispatchers.IO) {
             Settings.startedByUser = true
+            // Gate the first Libbox touch (CommandServer.start) on Application's
+            // onCreate finishing its Libbox first-touch + setup. At boot both
+            // coroutines race and concurrently first-touching the gomobile/Go
+            // runtime deadlocks CommandServer.start on a minority of TVs — the
+            // boot-only connect hang (50329 regression). The watchdog armed
+            // above is the backstop if this ever times out.
+            if (!Application.awaitLibboxReady(60_000)) {
+                Log.e(TAG, "Libbox setup not ready after 60s — aborting start")
+                stopAndAlert(Alert.StartCommandServer, "Libbox init timeout")
+                return@launch
+            }
             try {
                 startCommandServer()
             } catch (t: Throwable) {
