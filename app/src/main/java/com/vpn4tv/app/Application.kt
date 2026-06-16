@@ -197,8 +197,42 @@ class Application : Application() {
             append(" fakeDnsAutoDisabled=").append(sessionPrefs.getBoolean("fakeDns_auto_disabled", false))
         }
         Log.e("Application", "Previous Go crash dump (${content.length} bytes, $bridges):\n$content")
-        // TODO: POST content + bridges + version/device to bell.a4e.ar for
-        // untruncated off-device analysis, then this logcat dump can go.
+        // Upload the full untruncated dump off-device — Play strips/truncates
+        // the synthetic frames so the native tombstones are dead ends; the
+        // SetCrashOutput dump (all goroutines + the real throw) is the only way
+        // to root-cause the residual heap corruption. Best-effort, off-thread,
+        // never throws. Receiver: bell.a4e.ar/crash (127.0.0.1:8770 behind nginx).
+        uploadCrashDump(content, bridges)
+    }
+
+    private fun uploadCrashDump(content: String, bridges: String) {
+        Thread {
+            var conn: java.net.HttpURLConnection? = null
+            try {
+                // Server caps at 2 MB; trim to stay safely under.
+                val body = (if (content.length > 1_500_000) content.take(1_500_000) else content)
+                    .toByteArray(Charsets.UTF_8)
+                conn = (java.net.URL("https://bell.a4e.ar/crash").openConnection()
+                    as java.net.HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 10000
+                    readTimeout = 10000
+                    doOutput = true
+                    setRequestProperty("X-VC", BuildConfig.VERSION_CODE.toString())
+                    setRequestProperty("X-Android", Build.VERSION.SDK_INT.toString())
+                    setRequestProperty("X-Device", "${Build.MANUFACTURER} ${Build.MODEL}".take(120))
+                    setRequestProperty("X-Bridges", bridges.take(120))
+                    setFixedLengthStreamingMode(body.size)
+                }
+                conn.outputStream.use { it.write(body) }
+                val code = conn.responseCode
+                Log.i("Application", "Crash dump uploaded: HTTP $code (${body.size} bytes)")
+            } catch (e: Exception) {
+                Log.w("Application", "Crash dump upload failed: ${e.message}")
+            } finally {
+                conn?.disconnect()
+            }
+        }.start()
     }
 
     private fun setupLibbox(baseDir: File, workingDir: File, tempDir: File) {
