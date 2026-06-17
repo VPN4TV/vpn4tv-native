@@ -117,6 +117,14 @@ dependencies {
     // libbox (sing-box JNI core with embedded xray-core for xhttp/splithttp)
     implementation(files("libs/libbox.aar"))
 
+    // TrustTunnel client (AdGuard, Apache-2.0) — built from source for arm64 +
+    // armeabi-v7a at minSdk 24 (see .scripts/build_trusttunnel.sh). Used in
+    // SOCKS5 bridge mode under sing-box. Vendored AAR like libbox. slf4j-api is
+    // its only hard transitive dep (via NativeLogger); we ship no binding so
+    // slf4j no-ops (logback-android is JitPack-only — skipped).
+    implementation(files("libs/trusttunnel-client.aar"))
+    implementation("org.slf4j:slf4j-api:1.7.25")
+
     // AndroidX Core
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.appcompat:appcompat:1.7.1")

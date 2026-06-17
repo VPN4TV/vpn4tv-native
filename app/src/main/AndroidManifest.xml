@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- TrustTunnel AAR declares minSdk 24; the app is 23. Allow the merge and
+         gate every TrustTunnel call on Build.VERSION.SDK_INT >= 24. -->
+    <uses-sdk tools:overrideLibrary="com.adguard.trusttunnel" />
+
     <uses-feature
         android:name="android.software.leanback"
         android:required="false" />
