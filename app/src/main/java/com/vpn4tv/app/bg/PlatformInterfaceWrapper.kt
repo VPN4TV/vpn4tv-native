@@ -23,9 +23,6 @@ import java.net.Inet6Address
 import java.net.InetSocketAddress
 import java.net.InterfaceAddress
 import java.net.NetworkInterface
-import java.security.KeyStore
-import kotlin.io.encoding.Base64
-import kotlin.io.encoding.ExperimentalEncodingApi
 import io.nekohasekai.libbox.NetworkInterface as LibboxNetworkInterface
 
 interface PlatformInterfaceWrapper : PlatformInterface {
@@ -163,21 +160,19 @@ interface PlatformInterfaceWrapper : PlatformInterface {
     override fun startNeighborMonitor(listener: io.nekohasekai.libbox.NeighborUpdateListener?) {}
     override fun closeNeighborMonitor(listener: io.nekohasekai.libbox.NeighborUpdateListener?) {}
 
-    @OptIn(ExperimentalEncodingApi::class)
     override fun systemCertificates(): StringIterator {
-        val certificates = mutableListOf<String>()
-        val keyStore = KeyStore.getInstance("AndroidCAStore")
-        if (keyStore != null) {
-            keyStore.load(null, null)
-            val aliases = keyStore.aliases()
-            while (aliases.hasMoreElements()) {
-                val cert = keyStore.getCertificate(aliases.nextElement())
-                certificates.add(
-                    "-----BEGIN CERTIFICATE-----\n" + Base64.encode(cert.encoded) + "\n-----END CERTIFICATE-----",
-                )
-            }
-        }
-        return StringArray(certificates.iterator())
+        // Return nothing on purpose. sing-box's certificate.NewStore falls back
+        // to Go's native x509.SystemCertPool() when the platform supplies no
+        // certs (store.go, !systemValid branch) — Go reads Android's system
+        // roots directly, in the Go runtime, without a per-cert conscrypt/JNI
+        // round-trip. Enumerating AndroidCAStore here (KeyStore.aliases() +
+        // getCertificate()) read and X509-parsed every CA TWICE through
+        // conscrypt and hung Box.New for 45s+ on slow-flash TVs — confirmed by a
+        // field goroutine+thread dump from a Skyworth SWTV-22AE-FHD (the store
+        // is built on every Box.New even though vless-reality never verifies
+        // against it). We only forgo user-installed CAs, which our
+        // reality + well-known-DoH setup does not rely on.
+        return StringArray(emptyList<String>().iterator())
     }
 
     private class InterfaceArray(private val iterator: Iterator<LibboxNetworkInterface>) : NetworkInterfaceIterator {
