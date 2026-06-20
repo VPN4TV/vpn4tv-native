@@ -794,6 +794,17 @@ object ProxyParser {
                     android.util.Log.i("ProxyParser", "Routing outbound '$tag' via xray bridge (transport=$network)")
                     val server = extractXrayServer(ob) ?: continue
                     val port = extractXrayPort(ob)
+                    // xray builds the request URL from server+port+path and crashes
+                    // (nil-deref in splithttp.FillStreamRequest) when http.NewRequest
+                    // rejects it — an upstream xray bug (the NewRequest error is
+                    // swallowed) triggered by a malformed URL from an imported
+                    // subscription. Field dumps showed 10× this crash. Reject the
+                    // proxy here instead of feeding xray a URL it can't parse.
+                    val xhttpPath = stream.optJSONObject("xhttpSettings")?.optString("path") ?: ""
+                    if (!isXrayUrlSafe(server, xhttpPath)) {
+                        android.util.Log.w("ProxyParser", "Skipping outbound '$tag': malformed xhttp URL (server='$server' path='$xhttpPath')")
+                        continue
+                    }
                     results.add(ProxyConfig(
                         tag = tag,
                         type = protocol,
@@ -961,6 +972,22 @@ object ProxyParser {
         settings.optJSONArray("vnext")?.optJSONObject(0)?.let { return it.optInt("port", 443) }
         settings.optJSONArray("servers")?.optJSONObject(0)?.let { return it.optInt("port", 443) }
         return 443
+    }
+
+    /**
+     * Guard against the xray splithttp/xhttp crash: xray-core's OpenStream
+     * ignores the error from http.NewRequestWithContext, so a server host or
+     * xhttp path that makes Go's url.Parse fail (control chars 0x00-0x1f/0x7f or
+     * whitespace in the URL) yields a nil *http.Request and a nil-deref in
+     * FillStreamRequest. Mirror what url.Parse rejects so we never hand xray an
+     * unparseable URL; require a non-blank host and an absolute path.
+     */
+    private fun isXrayUrlSafe(host: String, path: String): Boolean {
+        if (host.isBlank()) return false
+        val unsafe = { s: String -> s.any { it.isWhitespace() || it.code < 0x20 || it.code == 0x7f } }
+        if (unsafe(host) || unsafe(path)) return false
+        if (path.isNotEmpty() && !path.startsWith("/")) return false
+        return true
     }
 
     private fun putXrayTls(obj: JSONObject, stream: JSONObject) {
