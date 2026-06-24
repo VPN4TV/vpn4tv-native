@@ -183,15 +183,24 @@ class Application : Application() {
      */
     private fun consumeCrashLog(tempDir: File) {
         val crashFile = File(tempDir, "go_crash.log")
+        // go_crash.log is the SetCrashOutput (crashFD) file: it holds the
+        // post-throw traceback but NOT the pre-throw runtime diagnostics. The
+        // ".stderr" companion captures fd 2 (writeErrData write(2,...)), which
+        // receives the full stream INCLUDING the reportZombies/badPointer
+        // preamble that carries the span size class. Gate on go_crash.log
+        // (the reliable "a crash happened" signal), then prefer .stderr content.
         if (!crashFile.exists() || crashFile.length() == 0L) return
+        val stderrFile = File(tempDir, "go_crash.log.stderr")
         val content = try {
-            crashFile.readText()
+            if (stderrFile.exists() && stderrFile.length() > 0L) stderrFile.readText()
+            else crashFile.readText()
         } catch (e: Exception) {
             Log.e("Application", "consumeCrashLog read failed", e)
             return
         }
-        // One-shot: move aside so the next launch doesn't re-read it.
+        // One-shot: move both aside so the next launch doesn't re-read them.
         runCatching { crashFile.renameTo(File(tempDir, "go_crash_consumed.log")) }
+        runCatching { stderrFile.renameTo(File(tempDir, "go_crash_consumed.log.stderr")) }
 
         // Bridge subset that was active when sing-box ran (BoxService writes it),
         // plus whether the FakeDNS health check had auto-disabled — context for
