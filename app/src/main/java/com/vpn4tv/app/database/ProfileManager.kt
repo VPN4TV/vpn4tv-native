@@ -93,6 +93,8 @@ object ProfileManager {
 
     suspend fun list(): List<Profile> = instance.profileDao().list()
 
+    fun profileCountBlocking(): Int = instance.profileDao().list().size
+
     /**
      * Returns a profile display name guaranteed not to collide with any
      * existing profile. If [base] already exists, appends " 2", " 3", …

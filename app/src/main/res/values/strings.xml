@@ -640,4 +640,16 @@
     <string name="add_waiting_sub">Waiting for subscription…</string>
     <string name="error_no_subscription">No subscription configured</string>
     <string name="error_vpn_denied">VPN permission denied</string>
+
+    <!-- Widget -->
+    <string name="widget_description">Quick VPN toggle</string>
+    <string name="widget_vpn_connected">VPN connected. Tap to disconnect.</string>
+    <string name="widget_vpn_disconnected">VPN disconnected. Tap to connect.</string>
+    <string name="widget_no_connections">No connections configured. Tap to add.</string>
+
+    <!-- Shortcut -->
+    <string name="shortcut_connect">Connect VPN</string>
+    <string name="shortcut_connect_long">Connect to VPN</string>
+    <string name="shortcut_add_subscription">Add subscription</string>
+    <string name="shortcut_add_subscription_long">Add a subscription or key</string>
 </resources>

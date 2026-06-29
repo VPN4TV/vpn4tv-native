@@ -14,8 +14,10 @@ import androidx.compose.material3.*
 import androidx.lifecycle.MutableLiveData
 import com.vpn4tv.app.R
 import com.vpn4tv.app.bg.BoxService
+import com.vpn4tv.app.bg.VpnShortcutHelper
 import com.vpn4tv.app.converter.ConfigGenerator
 import com.vpn4tv.app.converter.ProxyParser
+import com.vpn4tv.app.constant.Action
 import com.vpn4tv.app.database.Profile
 import com.vpn4tv.app.database.ProfileManager
 import com.vpn4tv.app.database.Settings
@@ -53,9 +55,13 @@ class MainActivity : ComponentActivity() {
         // installs this is a no-op by design (see PlayUpdateChecker).
         com.vpn4tv.app.utils.PlayUpdateChecker.maybePromptImmediate(this)
 
+        // Shortcut from long-press launcher icon
+        handleLaunchToggleIntent(intent)
+
         // Load profiles in background
         GlobalScope.launch(Dispatchers.IO) {
             ensureDefaultProfile()
+            VpnShortcutHelper.updateShortcut(this@MainActivity)
             profileReady.postValue(true)
             handleImportIntent(intent)
         }
@@ -73,7 +79,26 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleLaunchToggleIntent(intent)
         GlobalScope.launch(Dispatchers.IO) { handleImportIntent(intent) }
+    }
+
+    private fun handleLaunchToggleIntent(intent: Intent?) {
+        if (intent?.action != Action.LAUNCH_TOGGLE) return
+        intent.action = null
+        if (profileReady.value == true) {
+            connect()
+        } else {
+            val observer = object : androidx.lifecycle.Observer<Boolean> {
+                override fun onChanged(ready: Boolean?) {
+                    if (ready == true) {
+                        profileReady.removeObserver(this)
+                        connect()
+                    }
+                }
+            }
+            profileReady.observeForever(observer)
+        }
     }
 
     // TV remotes double-fire BACK easily (contact bounce + key repeat).

@@ -113,6 +113,25 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".bg.VpnWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/vpn_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".bg.VpnWidgetReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.vpn4tv.app.WIDGET_TOGGLE" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.cache"
