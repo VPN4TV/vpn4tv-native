@@ -77,7 +77,7 @@
 
         <activity
             android:name=".bg.VpnToggleActivity"
-            android:exported="false"
+            android:exported="true"
             android:theme="@style/AppTheme.Translucent"
             android:noHistory="true"
             android:excludeFromRecents="true"

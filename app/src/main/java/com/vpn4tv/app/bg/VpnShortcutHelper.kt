@@ -41,7 +41,11 @@ object VpnShortcutHelper {
                     else R.drawable.ic_widget_vpn_off,
                 ),
             )
-            setIntent(Intent(context, VpnToggleActivity::class.java))
+            setIntent(
+                Intent(context, VpnToggleActivity::class.java).apply {
+                    action = Intent.ACTION_VIEW
+                },
+            )
         }.build()
         manager.dynamicShortcuts = listOf(shortcut)
     }
