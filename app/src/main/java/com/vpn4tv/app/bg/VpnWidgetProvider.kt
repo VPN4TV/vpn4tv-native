@@ -9,7 +9,6 @@ import android.widget.RemoteViews
 import com.vpn4tv.app.R
 import com.vpn4tv.app.constant.Action
 import com.vpn4tv.app.constant.Status
-import com.vpn4tv.app.database.ProfileManager
 import com.vpn4tv.app.ui.MainActivity
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
@@ -19,10 +18,7 @@ import kotlinx.coroutines.launch
 class VpnWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, manager: AppWidgetManager, appWidgetIds: IntArray) {
-        val profileCount = ProfileManager.profileCountBlocking()
-        for (appWidgetId in appWidgetIds) {
-            updateWidget(context, manager, appWidgetId, profileCount)
-        }
+        updateAllWidgets(context)
     }
 
     override fun onEnabled(context: Context) {
@@ -39,7 +35,7 @@ class VpnWidgetProvider : AppWidgetProvider() {
             if (ids.isEmpty()) return
             // Run DB query on IO to avoid blocking the calling thread (may be main)
             GlobalScope.launch(Dispatchers.IO) {
-                val profileCount = ProfileManager.profileCountBlocking()
+                val profileCount = if (VpnConnectHelper.hasProfilesBlocking()) 1 else 0
                 for (id in ids) {
                     updateWidget(context, manager, id, profileCount)
                 }

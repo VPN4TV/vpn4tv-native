@@ -95,6 +95,10 @@ object ProfileManager {
 
     fun profileCountBlocking(): Int = instance.profileDao().list().size
 
+    fun listBlocking(): List<Profile> = instance.profileDao().list()
+
+    fun getBlocking(id: Long): Profile? = instance.profileDao().get(id)
+
     /**
      * Returns a profile display name guaranteed not to collide with any
      * existing profile. If [base] already exists, appends " 2", " 3", …

@@ -10,14 +10,16 @@
         android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"
+      tools:ignore="ForegroundServicesPolicy" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"
+      tools:ignore="LeanbackUsesWifi" />
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
@@ -59,15 +61,14 @@
                 <data android:scheme="hysteria2" />
                 <data android:scheme="ss" />
             </intent-filter>
-            <!-- Import wg-quick / AmneziaWG .conf files from the filesystem.
-                 Used by adb (`am start -a VIEW -d file:///data/local/tmp/x.conf`)
-                 and by file-picker flows. -->
+            <!-- Import wg-quick / AmneziaWG .conf files via content URI
+                 (FileProvider, file-picker flows). -->
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="file" />
-                <data android:scheme="content" />
+                <data android:scheme="content"
+                  tools:ignore="AppLinkUrlError" />
                 <data android:mimeType="*/*" />
                 <data android:pathPattern=".*\\.conf" />
                 <data android:pathPattern=".*\\.wg" />
@@ -79,6 +80,8 @@
             android:name=".bg.VpnToggleActivity"
             android:exported="true"
             android:theme="@style/AppTheme.Translucent"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.vpn4tv.app.vpn_toggle"
             android:noHistory="true"
             android:excludeFromRecents="true"
             android:finishOnTaskLaunch="true" />
@@ -139,6 +142,17 @@
                 <action android:name="com.vpn4tv.app.WIDGET_TOGGLE" />
             </intent-filter>
         </receiver>
+
+        <service
+            android:name=".bg.VpnTileService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_widget_vpn_off"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"

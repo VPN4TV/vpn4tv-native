@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.*
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.lifecycleScope
 import com.vpn4tv.app.R
 import com.vpn4tv.app.bg.BoxService
 import com.vpn4tv.app.bg.VpnShortcutHelper
@@ -23,7 +24,6 @@ import com.vpn4tv.app.database.Settings
 import com.vpn4tv.app.database.TypedProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
         com.vpn4tv.app.utils.PlayUpdateChecker.maybePromptImmediate(this)
 
         // Load profiles in background
-        GlobalScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch(Dispatchers.IO) {
             ensureDefaultProfile()
             VpnShortcutHelper.updateShortcut(this@MainActivity)
             profileReady.postValue(true)
@@ -75,7 +75,12 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        GlobalScope.launch(Dispatchers.IO) { handleImportIntent(intent) }
+        lifecycleScope.launch(Dispatchers.IO) { handleImportIntent(intent) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        VpnShortcutHelper.updateShortcut(this)
     }
 
     // TV remotes double-fire BACK easily (contact bounce + key repeat).
@@ -202,7 +207,7 @@ class MainActivity : ComponentActivity() {
         val expired = cachedInfo?.expireEpochSec?.let { it > 0 && it * 1000 < System.currentTimeMillis() } == true
         if (expired) {
             Toast.makeText(this, getString(R.string.refreshing_expired_subscription), Toast.LENGTH_SHORT).show()
-            GlobalScope.launch(Dispatchers.IO) {
+            lifecycleScope.launch(Dispatchers.IO) {
                 val profile = ProfileManager.get(profileId) ?: return@launch
                 if (profile.typed.remoteURL.isNotEmpty()) {
                     try {

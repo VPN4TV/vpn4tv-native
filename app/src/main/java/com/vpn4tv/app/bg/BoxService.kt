@@ -338,7 +338,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             lastError.postValue(null)
             status.postValue(Status.Started)
             VpnWidgetProvider.updateAllWidgets(service)
-            VpnShortcutHelper.updateShortcut(service)
+            VpnShortcutHelper.updateShortcutBlocking(service, Status.Started)
 
             // Run URLTest immediately so delays are available in UI
             Thread {
@@ -622,8 +622,10 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             Settings.startedByUser = false
             withContext(Dispatchers.Main) {
                 status.value = Status.Stopped
+            }
+            VpnShortcutHelper.updateShortcutBlocking(service, Status.Stopped)
+            withContext(Dispatchers.Main) {
                 VpnWidgetProvider.updateAllWidgets(service)
-                VpnShortcutHelper.updateShortcut(service)
                 service.stopSelf()
             }
         }
@@ -665,7 +667,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
             status.value = Status.Stopped
             VpnWidgetProvider.updateAllWidgets(service)
-            VpnShortcutHelper.updateShortcut(service)
+        }
+        VpnShortcutHelper.updateShortcutBlocking(service, Status.Stopped)
+        withContext(Dispatchers.Main) {
             service.stopSelf()
         }
     }
@@ -757,7 +761,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             lastError.postValue("StartService: foreground start rejected by system")
             status.value = Status.Stopped
             VpnWidgetProvider.updateAllWidgets(service)
-            VpnShortcutHelper.updateShortcut(service)
+            VpnShortcutHelper.updateShortcut(service, Status.Stopped)
             service.stopSelf()
             return Service.START_NOT_STICKY
         }
@@ -828,6 +832,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         stopService()
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     internal fun sendNotification(notification: Notification) {
         val builder =
             NotificationCompat.Builder(service, notification.identifier).setShowWhen(false)
