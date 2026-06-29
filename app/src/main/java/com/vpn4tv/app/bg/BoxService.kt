@@ -338,6 +338,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             lastError.postValue(null)
             status.postValue(Status.Started)
             VpnWidgetProvider.updateAllWidgets(service)
+            VpnShortcutHelper.updateShortcut(service)
 
             // Run URLTest immediately so delays are available in UI
             Thread {
@@ -622,6 +623,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             withContext(Dispatchers.Main) {
                 status.value = Status.Stopped
                 VpnWidgetProvider.updateAllWidgets(service)
+                VpnShortcutHelper.updateShortcut(service)
                 service.stopSelf()
             }
         }
@@ -663,6 +665,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
             status.value = Status.Stopped
             VpnWidgetProvider.updateAllWidgets(service)
+            VpnShortcutHelper.updateShortcut(service)
             service.stopSelf()
         }
     }
@@ -754,6 +757,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             lastError.postValue("StartService: foreground start rejected by system")
             status.value = Status.Stopped
             VpnWidgetProvider.updateAllWidgets(service)
+            VpnShortcutHelper.updateShortcut(service)
             service.stopSelf()
             return Service.START_NOT_STICKY
         }

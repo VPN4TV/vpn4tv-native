@@ -15,3 +15,6 @@ local.properties
 app/libs/*.aar
 .ROADMAP.local.md
 /.scripts/
+
+# sing-box fork (external dependency, built locally)
+/sing-box-xhttp/

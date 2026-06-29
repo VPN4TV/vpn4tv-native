@@ -650,6 +650,8 @@
     <!-- Shortcut -->
     <string name="shortcut_connect">Connect VPN</string>
     <string name="shortcut_connect_long">Connect to VPN</string>
+    <string name="shortcut_disconnect">Disconnect VPN</string>
+    <string name="shortcut_disconnect_long">Disconnect from VPN</string>
     <string name="shortcut_add_subscription">Add subscription</string>
     <string name="shortcut_add_subscription_long">Add a subscription or key</string>
 </resources>

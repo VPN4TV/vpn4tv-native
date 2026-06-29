@@ -75,6 +75,14 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".bg.VpnToggleActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.Translucent"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:finishOnTaskLaunch="true" />
+
         <service
             android:name=".bg.VPNService"
             android:exported="false"
