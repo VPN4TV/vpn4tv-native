@@ -30,8 +30,8 @@ android {
         applicationId = "com.vpn4tv.hiddify"
         minSdk = 23
         targetSdk = 36
-        versionCode = 51702
-        versionName = "5.1.7"
+        versionCode = 51800
+        versionName = "5.1.8"
         base.archivesName.set("VPN4TV-Native-${versionName}")
 
         // libbox.aar ships only armeabi-v7a + arm64-v8a; x86 variants would
@@ -79,6 +79,24 @@ android {
             isUniversalApk = true
             reset()
             include("armeabi-v7a", "arm64-v8a")
+        }
+    }
+
+    // Distribution flavors. The Google Play build MUST NOT contain any
+    // self-update / install-from-outside-Play capability (Device & Network
+    // Abuse policy — the appcast+APK updater got the app rejected). The
+    // appcast self-updater therefore lives ONLY in the `direct` source set
+    // (src/direct); `play` (src/play) ships a no-op stub. Same applicationId.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("play") {
+            dimension = "distribution"
+            // Updates via Google Play only. No appcast, no APK download/install.
+        }
+        create("direct") {
+            dimension = "distribution"
+            // Sideload build (bell.a4e.ar) for users without Play — keeps the
+            // appcast self-updater so they still get auto-updates.
         }
     }
 

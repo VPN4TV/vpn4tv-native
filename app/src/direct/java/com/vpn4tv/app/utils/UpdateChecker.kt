@@ -12,13 +12,13 @@ import org.xmlpull.v1.XmlPullParserFactory
 import java.io.StringReader
 import java.net.URL
 
-data class UpdateInfo(
-    val versionName: String,
-    val versionCode: Int,
-    val downloadUrl: String,
-    val description: String,
-)
-
+/**
+ * Direct/sideload build (bell.a4e.ar) ONLY: sparkle-style appcast self-updater
+ * for users without Google Play. This code is deliberately EXCLUDED from the
+ * `play` flavor — Google Play's Device & Network Abuse policy forbids
+ * updating/installing from outside Play. UpdateInfo lives in the shared `main`
+ * source set; this checker (the actual capability) does not.
+ */
 object UpdateChecker {
     private const val TAG = "UpdateChecker"
     private const val APPCAST_URL = "https://bell.a4e.ar/vpn4tv-native-appcast.xml"
@@ -40,11 +40,8 @@ object UpdateChecker {
     }
 
     fun check(): UpdateInfo? {
-        // Play-installed copies receive updates via Play Core AppUpdateManager;
-        // the appcast channel is for direct-APK distribution (bell.a4e.ar).
-        // Running both paths on a Play install surfaces a download dialog that
-        // tries to open a URL the system can't handle on locked-down TVs
-        // (SecurityException in openDownload, vc50303 cluster).
+        // Defensive: even in the direct build, if the copy somehow came from
+        // Play, defer to Play's updater and skip the appcast.
         if (isPlayInstall()) {
             Log.d(TAG, "Play-installed copy — skipping appcast check")
             return null
