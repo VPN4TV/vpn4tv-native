@@ -169,38 +169,98 @@ object HwidService {
     /**
      * Open an HTTP connection with DNS fallback. If system DNS fails
      * (UnknownHostException — common when Russian ISPs block VPN-related
-     * domains), resolve the hostname via the DoH server that [DnsProber]
-     * found to work, then connect by IP with the Host header set manually.
+     * domains), resolve the hostname via the DoH chain and connect by IP
+     * with the Host header set manually. For OUR OWN infra hosts there is a
+     * final hardcoded anchor: if even the DoH chain is dead, connect to
+     * bell's static IP with SNI/Host pinned to bell.a4e.ar.
      */
     fun openConnectionWithDnsFallbackPublic(url: String): HttpURLConnection =
         openConnectionWithDnsFallback(url)
 
+    /** Last-resort anchor for OUR infrastructure. bell.a4e.ar mirrors
+     *  api.vpn4tv.com path-for-path (see [endpointsWithMirror]), so both
+     *  hosts can be served from bell's static IP with SNI bell.a4e.ar. */
+    private const val INFRA_IP = "152.53.207.6"
+    private const val INFRA_SNI = "bell.a4e.ar"
+    private val INFRA_HOSTS = setOf("api.vpn4tv.com", "bell.a4e.ar")
+
     private fun openConnectionWithDnsFallback(url: String): HttpURLConnection {
+        val host = URL(url).host
         return try {
+            // Force resolution NOW: openConnection() alone never resolves, so
+            // without this the UnknownHostException surfaced later at
+            // getInputStream() in the caller — and this whole fallback path
+            // never actually ran (the 2026-07 "subscription won't refresh"
+            // incident shipped over exactly that dead code).
+            java.net.InetAddress.getByName(host)
             URL(url).openConnection() as HttpURLConnection
         } catch (e: java.net.UnknownHostException) {
-            android.util.Log.w("HwidService", "System DNS failed for $url, trying DoH fallback")
-            val parsed = URL(url)
-            val host = parsed.host
+            android.util.Log.w("HwidService", "System DNS failed for $host, trying DoH chain")
             val ip = resolveViaDoH(host)
-                ?: throw java.net.UnknownHostException("DoH fallback also failed for $host")
-            // Replace hostname with resolved IP, set Host header manually
-            val directUrl = url.replace(host, ip)
-            val conn = URL(directUrl).openConnection() as HttpURLConnection
-            conn.setRequestProperty("Host", host)
-            // For HTTPS, SNI is derived from the URL host (which is now an IP).
-            // HttpsURLConnection uses Host header for SNI when the URL host
-            // is an IP — but some implementations don't. To be safe, set
-            // the hostname verifier to accept the cert for our original host.
-            if (conn is javax.net.ssl.HttpsURLConnection) {
-                conn.hostnameVerifier = javax.net.ssl.HostnameVerifier { hostname, session ->
-                    hostname == ip || hostname == host ||
-                        javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(host, session)
+            when {
+                ip != null -> {
+                    // Replace hostname with resolved IP, set Host header manually
+                    val conn = URL(url.replace(host, ip)).openConnection() as HttpURLConnection
+                    conn.setRequestProperty("Host", host)
+                    // For HTTPS, SNI is derived from the URL host (now an IP).
+                    // Accept the cert for the original hostname instead.
+                    if (conn is javax.net.ssl.HttpsURLConnection) {
+                        conn.hostnameVerifier = javax.net.ssl.HostnameVerifier { hostname, session ->
+                            hostname == ip || hostname == host ||
+                                javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(host, session)
+                        }
+                    }
+                    android.util.Log.i("HwidService", "DoH resolved $host → $ip, connecting directly")
+                    conn
                 }
+                host in INFRA_HOSTS -> {
+                    // Total DNS blackout (system + whole DoH chain). Our infra
+                    // has a stable address — pin it, with proper SNI so nginx
+                    // picks the right vhost/cert.
+                    android.util.Log.w("HwidService", "DoH chain dead too — pinning $host → $INFRA_IP (sni=$INFRA_SNI)")
+                    infraPinnedConnection(url)
+                }
+                else -> throw java.net.UnknownHostException("DoH fallback also failed for $host")
             }
-            android.util.Log.i("HwidService", "DoH resolved $host → $ip, connecting directly")
-            conn
         }
+    }
+
+    /** Connect to [INFRA_IP] serving the same path, TLS with SNI [INFRA_SNI]
+     *  and certificate checked against [INFRA_SNI] (not the raw IP). */
+    private fun infraPinnedConnection(originalUrl: String): HttpURLConnection {
+        val parsed = URL(originalUrl)
+        val conn = URL("https://$INFRA_IP${parsed.file}").openConnection() as HttpURLConnection
+        conn.setRequestProperty("Host", INFRA_SNI)
+        if (conn is javax.net.ssl.HttpsURLConnection) {
+            conn.sslSocketFactory = SniSocketFactory(INFRA_SNI)
+            conn.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, session ->
+                javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(INFRA_SNI, session)
+            }
+        }
+        return conn
+    }
+
+    /**
+     * SSLSocketFactory that pins the TLS SNI (and certificate identity) to a
+     * fixed hostname regardless of the URL host. Android's conscrypt derives
+     * SNI from the `host` argument of createSocket(socket, host, port, _) —
+     * when the URL host is a raw IP, overriding that argument is the only way
+     * to still present a proper server_name in the ClientHello.
+     */
+    private class SniSocketFactory(private val sni: String) : javax.net.ssl.SSLSocketFactory() {
+        private val d = javax.net.ssl.HttpsURLConnection.getDefaultSSLSocketFactory()
+        override fun getDefaultCipherSuites(): Array<String> = d.defaultCipherSuites
+        override fun getSupportedCipherSuites(): Array<String> = d.supportedCipherSuites
+        override fun createSocket(s: java.net.Socket, host: String, port: Int, autoClose: Boolean): java.net.Socket =
+            d.createSocket(s, sni, port, autoClose)  // ← the host arg drives SNI
+        override fun createSocket(host: String, port: Int): java.net.Socket =
+            d.createSocket(host, port)
+        override fun createSocket(host: String, port: Int, localHost: java.net.InetAddress, localPort: Int): java.net.Socket =
+            d.createSocket(host, port, localHost, localPort)
+        override fun createSocket(host: java.net.InetAddress, port: Int): java.net.Socket =
+            d.createSocket(host, port)
+        override fun createSocket(address: java.net.InetAddress, port: Int, localAddress: java.net.InetAddress, localPort: Int): java.net.Socket =
+            d.createSocket(address, port, localAddress, localPort)
     }
 
     /** In-app DoH resolution chain. The endpoint list lives in

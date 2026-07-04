@@ -47,7 +47,15 @@ object UpdateChecker {
             return null
         }
         return try {
-            val xml = URL(APPCAST_URL).readText()
+            // DNS-fallback-aware fetch: system DNS → DoH chain → pinned infra
+            // IP (bell's static address, SNI bell.a4e.ar). Without this, a
+            // DNS blackout kills the self-updater exactly when users need
+            // the fixed build most (2026-07 RKN purge).
+            val conn = com.vpn4tv.app.converter.HwidService
+                .openConnectionWithDnsFallbackPublic(APPCAST_URL)
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
+            val xml = conn.inputStream.bufferedReader().readText()
             val update = parseAppcast(xml) ?: return null
 
             if (update.versionCode > BuildConfig.VERSION_CODE) {
