@@ -224,12 +224,36 @@ class MainActivity : ComponentActivity() {
             BoxService.start()
             return
         }
-        val intent = VpnService.prepare(this)
+        val intent = try {
+            VpnService.prepare(this)
+        } catch (e: Exception) {
+            // Some vendor TV ROMs (TCL G08, SberBox-class) return a prepare
+            // intent but ship no com.android.vpndialogs — prepare() itself
+            // can also throw on the broken ones. Treat as "no VPN dialog".
+            Log.w(TAG, "VpnService.prepare failed: ${e.message}")
+            onNoVpnDialog()
+            return
+        }
         if (intent != null) {
-            vpnPermissionLauncher.launch(intent)
+            try {
+                vpnPermissionLauncher.launch(intent)
+            } catch (e: android.content.ActivityNotFoundException) {
+                // The consent activity (com.android.vpndialogs) is absent on
+                // this ROM — launching the intent crashes. Guide the user to
+                // Proxy mode instead of dying (Vitals: MainActivity.doConnect
+                // ActivityNotFoundException, TCL G08 / Android 12).
+                Log.w(TAG, "VPN consent dialog missing: ${e.message}")
+                onNoVpnDialog()
+            }
         } else {
             BoxService.start()
         }
+    }
+
+    /** Device has no system VPN-permission dialog: can't bind VpnService.
+     *  Point the user at Proxy mode (SOCKS5), which needs no consent. */
+    private fun onNoVpnDialog() {
+        Toast.makeText(this, getString(R.string.error_no_vpn_dialog), Toast.LENGTH_LONG).show()
     }
 
     private suspend fun ensureDefaultProfile() {

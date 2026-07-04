@@ -594,6 +594,7 @@
     <string name="add_waiting_sub">Ожидание подписки…</string>
     <string name="error_no_subscription">Подписка не настроена</string>
     <string name="error_vpn_denied">VPN разрешение отклонено</string>
+    <string name="error_no_vpn_dialog">На этом устройстве нет системного окна VPN. Включите режим прокси (SOCKS5) в настройках, чтобы подключиться.</string>
     <string name="title_logs">Логи</string>
     <string name="title_about">О программе</string>
     <string name="logs_empty">Подключите VPN, чтобы видеть логи</string>
