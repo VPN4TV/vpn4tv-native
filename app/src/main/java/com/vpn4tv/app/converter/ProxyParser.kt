@@ -42,11 +42,12 @@ data class ProxyConfig(
 
 /** DNS extracted from subscription (if any) */
 data class SubscriptionDns(
-    // Default to Google DNS — Cloudflare 1.1.1.1 is aggressively MITM'd
-    // by Russian ISPs/TSPU on both UDP (port 53) and DoT (port 853),
-    // causing x509 certificate errors. Google 8.8.8.8 is less targeted.
+    // remoteDns detours THROUGH the tunnel (exits abroad), so Google DoH
+    // stays fine there. directDns resolves outside the tunnel and must be
+    // a survivor of the latest RKN purge — it comes from the DnsProviders
+    // registry (single source of truth, 2026-07: Quad9 leads).
     val remoteDns: String = "https://8.8.8.8/dns-query",
-    val directDns: String = "8.8.8.8",
+    val directDns: String = com.vpn4tv.app.utils.DnsProviders.udpCandidates.first(),
 )
 
 object ProxyParser {
@@ -552,8 +553,8 @@ object ProxyParser {
             inflater.end()
             val payload = out.copyOf(produced)
             val root = JSONObject(String(payload, Charsets.UTF_8))
-            val dns1 = root.optString("dns1", "8.8.8.8")
-            val dns2 = root.optString("dns2", "1.0.0.1")
+            val dns1 = root.optString("dns1", com.vpn4tv.app.utils.DnsProviders.udpCandidates[0])
+            val dns2 = root.optString("dns2", com.vpn4tv.app.utils.DnsProviders.udpCandidates[1])
             val description = root.optString("description", root.optString("hostName", "AmneziaVPN"))
             val containers = root.optJSONArray("containers") ?: return emptyList()
             if (containers.length() == 0) return emptyList()
@@ -750,8 +751,9 @@ object ProxyParser {
         if (dnsConfig != null) {
             val servers = dnsConfig.optJSONArray("servers")
             if (servers != null && servers.length() > 0) {
-                var remoteDns = "https://8.8.8.8/dns-query"
-                var directDns = "8.8.8.8"
+                var remoteDns = "https://8.8.8.8/dns-query"  // via tunnel — Google OK abroad
+                // outside tunnel — registry's top survivor (2026-07: Quad9)
+                var directDns = com.vpn4tv.app.utils.DnsProviders.udpCandidates.first()
                 for (i in 0 until servers.length()) {
                     val server = servers.optString(i, "")
                     if (server.startsWith("https://") || server.startsWith("https+local://")) {

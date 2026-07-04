@@ -32,22 +32,10 @@ object DnsProber {
         val dohWorks: Boolean,
     )
 
-    /** Ordered by preference: least-blocked first, most-obvious last. */
-    private val DOH_CANDIDATES = listOf(
-        "https://dns.adguard-dns.com/dns-query",    // AdGuard — popular in RU, rarely blocked
-        "https://dns.google/dns-query",              // Google DoH
-        "https://1.0.0.1/dns-query",                 // Cloudflare secondary (less targeted than 1.1.1.1)
-        "https://8.8.8.8/dns-query",                 // Google DoH by IP
-        "https://1.1.1.1/dns-query",                 // Cloudflare primary (most blocked)
-        "https://dns.yandex.net/dns-query",             // Yandex DoH — never blocked in RU, but slower/less private
-    )
-
-    private val UDP_CANDIDATES = listOf(
-        "8.8.8.8",
-        "8.8.4.4",
-        "77.88.8.8",     // Yandex DNS
-        "1.1.1.1",
-    )
+    /** Candidate lists live in [DnsProviders] — the single registry shared
+     *  with HwidService's resolution chain. Add/reorder providers THERE. */
+    private val DOH_CANDIDATES get() = DnsProviders.dohProbeCandidates
+    private val UDP_CANDIDATES get() = DnsProviders.udpCandidates
 
     @Volatile
     var result: DnsResult? = null
@@ -144,14 +132,16 @@ object DnsProber {
      * must be addressed by IP. Google and Cloudflare both ship DoH on
      * their anycast IPs; Yandex does not (only dns.yandex.net).
      */
-    private val DOH_CAPABLE_IPS = setOf("8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1")
-
     fun dohCapableIp(): String? {
         val r = result ?: return null
         if (!r.dohWorks) return null
         val host = r.dohUrl.removePrefix("https://").substringBefore("/")
         if (host.matches(Regex("^[0-9.]+$"))) return host
-        if (r.udpServer in DOH_CAPABLE_IPS) return r.udpServer
-        return "1.1.1.1"
+        if (r.udpServer in DnsProviders.dohCapableIps) return r.udpServer
+        // Last resort comes from the registry's first IP-cert provider, NOT a
+        // hardcoded Google/CF IP: the old "1.1.1.1" fallback meant every
+        // non-IP DoH winner (AdGuard, Yandex) still pointed dns-direct at a
+        // dead Cloudflare IP during the 2026-07 purge.
+        return DnsProviders.preferredDohIp
     }
 }

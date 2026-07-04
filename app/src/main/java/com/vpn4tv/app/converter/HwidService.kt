@@ -203,27 +203,30 @@ object HwidService {
         }
     }
 
-    /** DoH endpoints for hostname resolution fallback (JSON API).
-     *  Tried in order; each wrapped in try/catch so failures just skip.
-     *  Yandex is excluded — only supports RFC 8484 wireformat, no JSON. */
-    private val JSON_DOH_ENDPOINTS = listOf(
-        "https://dns.adguard-dns.com/resolve",     // AdGuard — JSON API at /resolve
-        "https://dns.google/resolve",              // Google — JSON API at /resolve
-        "https://1.0.0.1/dns-query",               // Cloudflare secondary — JSON via Accept header
-        "https://8.8.8.8/dns-query",               // Google by IP — JSON via Accept header
-        "https://one.one.one.one/dns-query",       // Cloudflare alt hostname
-        "https://1.1.1.1/dns-query",               // Cloudflare primary
-    )
+    /** In-app DoH resolution chain. The endpoint list lives in
+     *  [com.vpn4tv.app.utils.DnsProviders] — the single registry shared with
+     *  DnsProber — so a provider added/reordered there propagates everywhere.
+     *  2026-07: RKN killed Google AND Cloudflare DoH the same day; Quad9
+     *  survived. Quad9 has no JSON API on :443, hence wireformat (RFC 8484)
+     *  support: `wire = true` entries query with ?dns=<base64url> and parse
+     *  the binary answer, which every DoH server speaks. Yandex is excluded
+     *  by the registry's lastResort flag — resolving circumvention domains
+     *  through a RU-jurisdiction resolver leaks exactly the wrong queries. */
 
-    private fun resolveViaDoH(hostname: String): String? {
-        for (dohUrl in JSON_DOH_ENDPOINTS) {
-            val result = tryResolveDoH(dohUrl, hostname)
-            if (result != null) return result
+    /** All A records from the first DoH endpoint in the chain that answers. */
+    fun resolveAllViaDoH(hostname: String): List<String> {
+        for (ep in com.vpn4tv.app.utils.DnsProviders.resolutionEndpoints) {
+            val ips = if (ep.wire) tryResolveDoHWire(ep.url, hostname)
+                      else tryResolveDoHJson(ep.url, hostname)
+            if (ips.isNotEmpty()) return ips
         }
-        return null
+        return emptyList()
     }
 
-    private fun tryResolveDoH(dohUrl: String, hostname: String): String? {
+    private fun resolveViaDoH(hostname: String): String? =
+        resolveAllViaDoH(hostname).firstOrNull()
+
+    private fun tryResolveDoHJson(dohUrl: String, hostname: String): List<String> {
         return try {
             val queryUrl = "$dohUrl?name=$hostname&type=A"
             val conn = URL(queryUrl).openConnection() as HttpURLConnection
@@ -232,20 +235,166 @@ object HwidService {
             conn.readTimeout = 5000
             val body = conn.inputStream.bufferedReader().readText()
             conn.disconnect()
-            // Parse DNS-over-HTTPS JSON response (RFC 8484 / Google JSON API)
+            // Parse DNS-over-HTTPS JSON response (Google JSON API shape)
             val json = org.json.JSONObject(body)
-            val answers = json.optJSONArray("Answer") ?: return null
+            val answers = json.optJSONArray("Answer") ?: return emptyList()
+            val ips = mutableListOf<String>()
             for (i in 0 until answers.length()) {
                 val answer = answers.getJSONObject(i)
                 if (answer.optInt("type") == 1) { // A record
-                    return answer.optString("data")
+                    val ip = answer.optString("data")
+                    if (ip.isNotBlank()) ips.add(ip)
                 }
             }
-            null
+            ips
         } catch (e: Exception) {
-            android.util.Log.w("HwidService", "DoH resolve failed for $hostname: ${e.message}")
-            null
+            android.util.Log.w("HwidService", "DoH(json) $dohUrl failed for $hostname: ${e.message}")
+            emptyList()
         }
+    }
+
+    /** RFC 8484 wireformat query: GET ?dns=<base64url(query)>. */
+    private fun tryResolveDoHWire(dohUrl: String, hostname: String): List<String> {
+        return try {
+            val q = Base64.encodeToString(
+                buildDnsQuery(hostname),
+                Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP,
+            )
+            val conn = URL("$dohUrl?dns=$q").openConnection() as HttpURLConnection
+            conn.setRequestProperty("Accept", "application/dns-message")
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            val body = conn.inputStream.readBytes()
+            conn.disconnect()
+            parseDnsAnswers(body)
+        } catch (e: Exception) {
+            android.util.Log.w("HwidService", "DoH(wire) $dohUrl failed for $hostname: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Minimal DNS query packet: one A question, RD set. */
+    private fun buildDnsQuery(hostname: String): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val id = (Math.random() * 0xFFFF).toInt()
+        out.write(id shr 8); out.write(id and 0xFF)
+        out.write(0x01); out.write(0x00)   // flags: RD
+        out.write(0x00); out.write(0x01)   // QDCOUNT = 1
+        repeat(6) { out.write(0x00) }      // ANCOUNT/NSCOUNT/ARCOUNT = 0
+        for (label in hostname.trimEnd('.').split('.')) {
+            val bytes = label.toByteArray(Charsets.US_ASCII)
+            out.write(bytes.size)
+            out.write(bytes, 0, bytes.size)
+        }
+        out.write(0x00)                    // root label
+        out.write(0x00); out.write(0x01)   // QTYPE = A
+        out.write(0x00); out.write(0x01)   // QCLASS = IN
+        return out.toByteArray()
+    }
+
+    /** Extract all A-record IPs from a DNS wireformat response. */
+    private fun parseDnsAnswers(msg: ByteArray): List<String> {
+        val ips = mutableListOf<String>()
+        try {
+            if (msg.size < 12) return ips
+            val qdCount = ((msg[4].toInt() and 0xFF) shl 8) or (msg[5].toInt() and 0xFF)
+            val anCount = ((msg[6].toInt() and 0xFF) shl 8) or (msg[7].toInt() and 0xFF)
+            var p = 12
+            fun skipName() {
+                while (p < msg.size) {
+                    val b = msg[p].toInt() and 0xFF
+                    when {
+                        b == 0 -> { p += 1; return }
+                        b >= 0xC0 -> { p += 2; return }  // compression pointer
+                        else -> p += 1 + b
+                    }
+                }
+            }
+            repeat(qdCount) { skipName(); p += 4 }       // QTYPE + QCLASS
+            repeat(anCount) {
+                skipName()
+                if (p + 10 > msg.size) return ips
+                val type = ((msg[p].toInt() and 0xFF) shl 8) or (msg[p + 1].toInt() and 0xFF)
+                val rdLen = ((msg[p + 8].toInt() and 0xFF) shl 8) or (msg[p + 9].toInt() and 0xFF)
+                p += 10
+                if (type == 1 && rdLen == 4 && p + 4 <= msg.size) {
+                    ips.add((0..3).joinToString(".") { i -> (msg[p + i].toInt() and 0xFF).toString() })
+                }
+                p += rdLen
+            }
+        } catch (_: Exception) { /* truncated/malformed — return what we have */ }
+        return ips
+    }
+
+    // ---------------------------------------------------------------------
+    // Bulk pre-resolution of proxy hostnames (the urltest bootstrap fix).
+    // sing-box has NO failover between DNS servers — a query goes to the one
+    // server picked by rules, and if that server is blocked the resolution
+    // just fails. So the fallback CHAIN lives here at the app level:
+    // BoxService pre-resolves every outbound hostname through DOH_ENDPOINTS
+    // and injects the answers into the config as a `hosts` DNS server, making
+    // urltest independent of any single resolver's liveness.
+    // System DNS is deliberately NOT used here: RKN poisons plaintext DNS,
+    // and a poisoned IP baked into `hosts` would be worse than no answer.
+    // ---------------------------------------------------------------------
+
+    private const val DNS_CACHE_PREFS = "dns_prefetch"
+    private const val DNS_FRESH_MS = 6L * 3600 * 1000  // 6h: skips re-resolving on every reconnect
+
+    /**
+     * Resolve [hosts] via the DoH chain, in parallel, within [budgetMs].
+     * Fresh cache hits skip the network; failures fall back to the last
+     * known-good answer regardless of age (a stale server IP usually still
+     * works — VPN server IPs rarely move — while a blocked resolver returns
+     * nothing at all). Never throws; returns whatever subset resolved.
+     */
+    fun preResolveHosts(context: Context, hosts: List<String>, budgetMs: Long = 6000): Map<String, List<String>> {
+        val unique = hosts.distinct()
+        if (unique.isEmpty()) return emptyMap()
+        val prefs = context.getSharedPreferences(DNS_CACHE_PREFS, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val result = HashMap<String, List<String>>()
+
+        fun cached(host: String): Pair<List<String>, Long>? {
+            val raw = prefs.getString(host, null) ?: return null
+            val ips = raw.substringBefore('|').split(',').filter { it.isNotBlank() }
+            val ts = raw.substringAfter('|', "0").toLongOrNull() ?: 0L
+            return if (ips.isEmpty()) null else ips to ts
+        }
+
+        val toResolve = mutableListOf<String>()
+        for (host in unique) {
+            val c = cached(host)
+            if (c != null && now - c.second < DNS_FRESH_MS) result[host] = c.first
+            else toResolve.add(host)
+        }
+        if (toResolve.isEmpty()) return result
+
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(4, toResolve.size))
+        try {
+            val futures = toResolve.map { host ->
+                host to pool.submit<List<String>> { resolveAllViaDoH(host) }
+            }
+            val deadline = now + budgetMs
+            for ((host, future) in futures) {
+                val left = deadline - System.currentTimeMillis()
+                try {
+                    val ips = future.get(maxOf(left, 100), java.util.concurrent.TimeUnit.MILLISECONDS)
+                    if (ips.isNotEmpty()) {
+                        result[host] = ips
+                        prefs.edit().putString(host, ips.joinToString(",") + "|" + now).apply()
+                    }
+                } catch (_: Exception) { /* timeout — stale fallback below */ }
+            }
+        } finally {
+            pool.shutdownNow()
+        }
+        // Stale fallback for anything the chain could not resolve in budget.
+        for (host in toResolve) {
+            if (host !in result) cached(host)?.let { result[host] = it.first }
+        }
+        android.util.Log.i("HwidService", "preResolveHosts: ${result.size}/${unique.size} resolved (${toResolve.size} queried)")
+        return result
     }
 
     private const val SUB_INFO_PREFS = "sub_userinfo"

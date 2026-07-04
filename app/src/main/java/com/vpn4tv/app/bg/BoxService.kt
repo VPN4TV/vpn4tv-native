@@ -922,6 +922,17 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         } catch (e: Exception) {
             Log.w(TAG, "DNS injection failed, using config defaults: ${e.message}")
         }
+        // Pre-resolved hosts: resolve every outbound hostname through the
+        // app-level DoH fallback chain (Quad9→AdGuard→Google→CF) and pin the
+        // answers into the config, so urltest/connect never depend on any
+        // single runtime resolver being unblocked (2026-07: RKN killed
+        // Google+CF DoH the same day — dns-direct alone is a single point
+        // of failure). sing-box itself has no DNS-server failover.
+        try {
+            content = injectResolvedHosts(content)
+        } catch (e: Exception) {
+            Log.w(TAG, "Hosts pre-resolution failed, keeping config as-is: ${e.message}")
+        }
         // FakeDNS off-switch: user toggle off, proxy mode (no TUN to map fake
         // IPs back), or the post-connect health check auto-disabled it because
         // the fakeip path is broken on this network.
@@ -1135,6 +1146,69 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
         }
 
+        return root.toString()
+    }
+
+    /**
+     * Pre-resolve every outbound server hostname through the app-level DoH
+     * fallback chain ([HwidService.preResolveHosts]: Quad9 → AdGuard → Google
+     * → Cloudflare, wireformat+JSON, cached 6h with stale fallback) and pin
+     * the answers into the config as a sing-box `hosts` DNS server:
+     *
+     *   servers += {type: "hosts", tag: "dns-hosts", predefined: {host: [ips]}}
+     *   rules   =  [{domain: [hosts...], server: "dns-hosts"}] + old rules
+     *
+     * The rule is scoped to exactly the resolved names and inserted FIRST, so
+     * it wins over the `outbound: any → dns-direct` rule for those names while
+     * everything else keeps today's path. If nothing resolves (total DoH
+     * blackout, first run offline), the config is returned unchanged — the
+     * runtime dns-direct path still applies.
+     *
+     * Runs on the service-start thread (network is fine here — the inline
+     * subscription recovery above does HTTP on the same path).
+     */
+    private fun injectResolvedHosts(jsonText: String): String {
+        val root = org.json.JSONObject(jsonText)
+        val dns = root.optJSONObject("dns") ?: return jsonText
+        val outbounds = root.optJSONArray("outbounds") ?: return jsonText
+
+        val ipRe = Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$")
+        val hosts = mutableListOf<String>()
+        for (i in 0 until outbounds.length()) {
+            val server = outbounds.getJSONObject(i).optString("server", "")
+            if (server.isBlank() || server.contains(':') || server.matches(ipRe)) continue
+            if (server == "localhost") continue
+            hosts.add(server)
+        }
+        if (hosts.isEmpty()) return jsonText
+
+        val resolved = com.vpn4tv.app.converter.HwidService.preResolveHosts(
+            com.vpn4tv.app.Application.application, hosts,
+        )
+        if (resolved.isEmpty()) {
+            Log.w(TAG, "DNS: no outbound hostnames resolved via DoH chain, keeping config as-is")
+            return jsonText
+        }
+
+        dns.optJSONArray("servers")?.put(org.json.JSONObject().apply {
+            put("type", "hosts")
+            put("tag", "dns-hosts")
+            put("predefined", org.json.JSONObject().apply {
+                resolved.forEach { (host, ips) -> put(host, org.json.JSONArray(ips)) }
+            })
+        }) ?: return jsonText
+
+        val hostsRule = org.json.JSONObject().apply {
+            put("domain", org.json.JSONArray(resolved.keys.toList()))
+            put("server", "dns-hosts")
+        }
+        // org.json has no insert-at-index — rebuild with the hosts rule first.
+        val oldRules = dns.optJSONArray("rules") ?: org.json.JSONArray()
+        val newRules = org.json.JSONArray().put(hostsRule)
+        for (i in 0 until oldRules.length()) newRules.put(oldRules.get(i))
+        dns.put("rules", newRules)
+
+        Log.i(TAG, "DNS: pinned ${resolved.size}/${hosts.distinct().size} outbound hostnames via DoH chain")
         return root.toString()
     }
 }
