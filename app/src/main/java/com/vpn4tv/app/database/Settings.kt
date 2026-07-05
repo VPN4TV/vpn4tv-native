@@ -76,16 +76,18 @@ object Settings {
     // for outline/wireproxy-only profiles in ConfigGenerator (their UDP
     // path routes direct and fake IPs would leak unroutable).
     //
-    // DEFAULT OFF as of 5.1.2 (51200): default-on FakeDNS hung sing-box's engine
-    // start (commandServer.startOrReloadService) for many users on 5.1.1 —
-    // the fakeip DNS graph / cache_file deadlocks during bootstrap on some
-    // networks/routers, leaving the UI stuck on "Подключение…". That hang is
-    // BEFORE Status.Started, so the post-connect health check can't catch it
-    // (it only arms after Started). Off-by-default reverts to the pre-5.1.0
-    // known-good DNS path (stripFakeDns removes the fakeip server, rules and
-    // cache_file). FakeDNS stays available as an opt-in until the engine-start
-    // deadlock is understood and fixed.
-    var fakeDns by dataStore.boolean(SettingsKey.FAKE_DNS) { false }
+    // DEFAULT ON again as of 5.1.9 (key fake_dns_v3 re-defaults every install).
+    // FakeDNS resolves the sniffed domain REMOTELY through the proxy, so the
+    // ISP/TSPU never sees the DNS query — the strongest bypass for the 2026-07
+    // RKN DNS purge, complementing the direct-resolver fallback chain.
+    // 5.1.2 flipped this OFF because default-on FakeDNS was CORRELATED with a
+    // connect hang before Status.Started (the fakeip graph / cache_file
+    // bootstrap). That hang was later addressed by the 5.1.5 awaitLibboxReady
+    // latch + 5.1.6 systemCertificates fix; and fakeDnsAutoDisabled (the
+    // post-connect health check) turns FakeDNS off on nets where the fakeip
+    // path is broken. Residual risk: a hang strictly BEFORE Status.Started
+    // still can't be auto-caught — acceptable given the bypass value.
+    var fakeDns by dataStore.boolean(SettingsKey.FAKE_DNS) { true }
 
     var updateSource by dataStore.string(SettingsKey.UPDATE_SOURCE) { "github" }
     var checkUpdateEnabled by dataStore.boolean(SettingsKey.CHECK_UPDATE_ENABLED) { false }
