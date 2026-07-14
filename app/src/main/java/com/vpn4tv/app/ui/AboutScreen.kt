@@ -155,7 +155,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 fontSize = 16.sp,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
-                    .clickable { openUrl("https://t.me/VPN4TV") }
+                    .clickable { openUrl("https://telegram.me/VPN4TV") }
                     .focusable()
             )
 

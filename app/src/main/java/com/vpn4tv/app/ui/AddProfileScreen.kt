@@ -197,7 +197,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit, onLanImport
         // TV SoCs (Xiaomi MiTV ANR, vc50307). Generate off-thread.
         val qrBitmap by produceState<Bitmap?>(initialValue = null, uuid) {
             value = withContext(Dispatchers.Default) {
-                generateQrBitmap("https://t.me/VPN4TV_Bot?start=$uuid", 200)
+                generateQrBitmap("https://telegram.me/VPN4TV_Bot?start=$uuid", 200)
             }
         }
 
@@ -251,7 +251,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit, onLanImport
                 Button(
                     onClick = {
                         val intent = android.content.Intent(android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://t.me/VPN4TV_Bot?start=$uuid"))
+                            android.net.Uri.parse("https://telegram.me/VPN4TV_Bot?start=$uuid"))
                         context.startActivity(intent)
                     },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp)
