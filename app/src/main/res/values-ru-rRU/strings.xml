@@ -214,7 +214,6 @@
     <string name="auto_redirect">Автоматическое перенаправление</string>
     <string name="auto_redirect_description">Требуются права ROOT</string>
     <string name="system_http_proxy">Системный HTTP-прокси</string>
-    <string name="update_settings">Настройки обновлений</string>
 
     <!-- Per-App Proxy -->
     <string name="per_app_proxy">Прокси для отдельных приложений</string>
@@ -267,49 +266,13 @@
     <string name="root_access_denied">Доступ ROOT запрещен</string>
 
     <!-- Updates -->
-    <string name="check_update">Проверить обновления</string>
-    <string name="check_update_automatic">Автоматическая проверка обновлений</string>
-    <string name="check_update_prompt_play">Включить автоматическую проверку обновлений через **Google Play**?</string>
-    <string name="check_update_prompt_github">Включить автоматическую проверку обновлений через **GitHub**?</string>
-    <string name="update_track">Канал обновлений</string>
-    <string name="update_track_stable">Стабильный</string>
-    <string name="update_track_beta">Бета</string>
-    <string name="update_track_not_supported">Этот канал пока не поддерживает проверку обновлений</string>
     <string name="view_release">Посмотреть релиз</string>
     <string name="downloading">Загрузка...</string>
     <string name="exporting">Экспорт...</string>
     <string name="no_updates_available">Обновлений нет</string>
     <string name="new_version_available">Доступна новая версия: %s</string>
-    <string name="auto_update">Автообновление</string>
-    <string name="auto_update_description">Автоматически загружать и устанавливать обновления в фоне</string>
-    <string name="update_source">Источник обновлений</string>
-    <string name="update_source_github">GitHub</string>
-    <string name="update_source_fdroid">F-Droid</string>
-    <string name="fdroid_mirror">Зеркало F-Droid</string>
-    <string name="fdroid_mirror_test_all">Автовыбор по задержке</string>
-    <string name="fdroid_mirror_testing">Тестирование…</string>
-    <string name="fdroid_mirror_latency">%d мс</string>
-    <string name="fdroid_mirror_failed">Ошибка</string>
-    <string name="fdroid_mirror_untested">—</string>
-    <string name="fdroid_mirror_add">Добавить зеркало</string>
-    <string name="fdroid_mirror_name_hint">Имя</string>
-    <string name="fdroid_mirror_url_hint">URL</string>
-    <string name="fdroid_mirror_custom">Пользовательское</string>
-    <string name="fdroid_mirror_invalid_url">Недопустимый URL</string>
-    <string name="fdroid_mirror_add_action">Добавить</string>
-    <string name="fdroid_mirror_delete">Удалить</string>
 
     <!-- Silent Install -->
-    <string name="silent_install">Тихая установка</string>
-    <string name="silent_install_description">Устанавливать обновления без Вашего участия</string>
-    <string name="silent_install_method">Метод установки</string>
-    <string name="silent_install_verify_failed">%s недоступен или доступ запрещен</string>
-    <string name="install_method_package_installer">PackageInstaller</string>
-    <string name="install_method_shizuku">Shizuku</string>
-    <string name="install_method_root">ROOT</string>
-    <string name="package_installer_not_available">Разрешение на установку не предоставлено</string>
-    <string name="grant_install_permission">Предоставить разрешение на установку</string>
-    <string name="grant_install_permission_description">Разрешить установку приложений из этого источника</string>
     
     <!-- Shizuku -->
     <string name="shizuku_not_available">Shizuku не установлен или не запущен</string>
@@ -559,9 +522,9 @@
     <string name="privilege_module_restart_channel">Модуль LSPosed</string>
 
     <!-- VPN4TV UI strings -->
-    <string name="error_install_broken">Компонент приложения не загрузился — установка повреждена. Переустановите с bell.a4e.ar.</string>
-    <string name="install_broken_banner">⚠ Приложение установилось некорректно (отсутствует компонент). Удалите его, затем скачайте и установите с bell.a4e.ar.</string>
-    <string name="install_broken_button">Скачать с bell.a4e.ar</string>
+    <string name="error_install_broken">Компонент приложения не загрузился — установка повреждена. Переустановите из Google Play.</string>
+    <string name="install_broken_banner">⚠ Приложение установилось некорректно (отсутствует компонент). Переустановите его из Google Play.</string>
+    <string name="install_broken_button">Переустановить из Google Play</string>
     <string name="status_loading">Загрузка…</string>
     <string name="status_connected">Подключено</string>
     <string name="status_connecting">Подключение…</string>
@@ -621,7 +584,6 @@
     <string name="add_lan_fallback_button">Добавить по локальной сети</string>
     <string name="proxy_mode_card_title">Прокси запущен</string>
     <string name="proxy_mode_card_hint">В SmartTube или другом приложении укажите SOCKS5-прокси: 127.0.0.1 порт 12334</string>
-    <string name="update_available">Доступно обновление</string>
     <string name="session_traffic">Сессия</string>
     <string name="title_per_app_proxy">Прокси по приложениям</string>
     <string name="setting_per_app_enabled">Включить прокси по приложениям</string>

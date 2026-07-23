@@ -9,26 +9,19 @@ import com.google.android.play.core.install.model.UpdateAvailability
 /**
  * Play Store in-app update checker with graceful no-Play fallback.
  *
- * Two update paths exist in VPN4TV:
+ * This is the ONLY update mechanism in VPN4TV. It talks to Google Play via
+ * [com.google.android.play.core.appupdate.AppUpdateManager] — the sanctioned
+ * in-app-update API. When a Play release ships with `inAppUpdatePriority >= 4`
+ * and the user's installed version is older, we surface the IMMEDIATE update
+ * flow — a full-screen blocking UI that refuses to let the user dismiss it
+ * until the update installs. Intended for hotfixes we don't want to wait out
+ * the normal auto-update window for (~24 h).
  *
- *  1. [UpdateChecker] — polls our own sparkle-style appcast on
- *     `bell.a4e.ar` for direct-APK installs. Shows a banner on the
- *     HomeScreen, user taps to download.
- *
- *  2. [PlayUpdateChecker] (this class) — talks to Google Play via
- *     [com.google.android.play.core.appupdate.AppUpdateManager]. When a
- *     Play Store release ships with `inAppUpdatePriority >= 4` and the
- *     user's installed version is older, we surface the IMMEDIATE
- *     update flow — a full-screen blocking UI that refuses to let the
- *     user dismiss it until the update installs. Intended for hotfixes
- *     we don't want to wait out the normal auto-update window for
- *     (~24 h).
- *
- * Both paths coexist: Play users get (2) for critical releases, direct
- * users get (1) as an opt-in banner. Only one of them can fire on any
- * given install because a user who installed from Play Store is not
- * tracked by our appcast URL, and a user from `bell.a4e.ar` is not
- * registered with Play.
+ * The former appcast/APK self-updater (polled `bell.a4e.ar`, downloaded an
+ * APK, offered silent install) was REMOVED entirely: it violated the Device &
+ * Network Abuse policy (a Play app may not update/install itself from outside
+ * Play) and got the app suspended. The bell.a4e.ar sideload build no longer
+ * auto-updates — those users redownload manually.
  *
  * **Important — safety on devices without Google Play Services**: a
  * significant fraction of our TV installs run on vendor boxes where

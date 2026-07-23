@@ -214,7 +214,6 @@
     <string name="auto_redirect">Auto Redirect</string>
     <string name="auto_redirect_description">ROOT permission required</string>
     <string name="system_http_proxy">System HTTP Proxy</string>
-    <string name="update_settings">Update Settings</string>
 
     <!-- Per-App Proxy -->
     <string name="per_app_proxy">Per-App Proxy</string>
@@ -267,49 +266,13 @@
     <string name="root_access_denied">Root access denied</string>
 
     <!-- Updates -->
-    <string name="check_update">Check Update</string>
-    <string name="check_update_automatic">Automatic Update Check</string>
-    <string name="check_update_prompt_play">Would you like to enable automatic update checking from **Play Store**?</string>
-    <string name="check_update_prompt_github">Would you like to enable automatic update checking from **GitHub**?</string>
-    <string name="update_source">Update Source</string>
-    <string name="update_source_github">GitHub</string>
-    <string name="update_source_fdroid">F-Droid</string>
-    <string name="update_track">Update Track</string>
-    <string name="update_track_stable">Stable</string>
-    <string name="update_track_beta">Beta</string>
-    <string name="update_track_not_supported">Current track does not support update checking yet</string>
     <string name="view_release">View Release</string>
     <string name="downloading">Downloading…</string>
     <string name="exporting">Exporting…</string>
     <string name="no_updates_available">No updates available</string>
     <string name="new_version_available">New version available: %s</string>
-    <string name="auto_update">Auto Update</string>
-    <string name="auto_update_description">Automatically download and install updates in background</string>
-    <string name="fdroid_mirror">F-Droid Mirror</string>
-    <string name="fdroid_mirror_test_all">Auto Select by Latency</string>
-    <string name="fdroid_mirror_testing">Testing…</string>
-    <string name="fdroid_mirror_latency">%d ms</string>
-    <string name="fdroid_mirror_failed">Failed</string>
-    <string name="fdroid_mirror_untested">—</string>
-    <string name="fdroid_mirror_add">Add Mirror</string>
-    <string name="fdroid_mirror_name_hint">Name</string>
-    <string name="fdroid_mirror_url_hint">URL</string>
-    <string name="fdroid_mirror_custom">Custom</string>
-    <string name="fdroid_mirror_invalid_url">Invalid URL</string>
-    <string name="fdroid_mirror_add_action">Add</string>
-    <string name="fdroid_mirror_delete">Delete</string>
 
     <!-- Silent Install -->
-    <string name="silent_install">Silent Install</string>
-    <string name="silent_install_description">Install updates without interaction</string>
-    <string name="silent_install_method">Install Method</string>
-    <string name="silent_install_verify_failed">%s is not available or permission denied</string>
-    <string name="install_method_package_installer">PackageInstaller</string>
-    <string name="install_method_shizuku">Shizuku</string>
-    <string name="install_method_root">ROOT</string>
-    <string name="package_installer_not_available">Install permission not granted</string>
-    <string name="grant_install_permission">Grant Install Permission</string>
-    <string name="grant_install_permission_description">Allow installing apps from this source</string>
 
     <!-- Shizuku -->
     <string name="shizuku_not_available">Shizuku is not installed or not running</string>
@@ -589,7 +552,6 @@
     <string name="add_lan_fallback_button">Add over local network</string>
     <string name="proxy_mode_card_title">Proxy running</string>
     <string name="proxy_mode_card_hint">Configure SmartTube or another app to use SOCKS5 proxy at 127.0.0.1:12334</string>
-    <string name="update_available">Update available</string>
     <string name="session_traffic">Session</string>
     <string name="title_per_app_proxy">Per-app proxy</string>
     <string name="setting_per_app_enabled">Enable per-app proxy</string>
@@ -606,9 +568,9 @@
     <string name="icon_add">Add</string>
 
     <!-- VPN4TV UI strings -->
-    <string name="error_install_broken">App component failed to load — the install is damaged. Reinstall from bell.a4e.ar.</string>
-    <string name="install_broken_banner">⚠ The app didn\'t install correctly on this device (a component is missing). Uninstall it, then download and install from bell.a4e.ar.</string>
-    <string name="install_broken_button">Download from bell.a4e.ar</string>
+    <string name="error_install_broken">App component failed to load — the install is damaged. Reinstall from Google Play.</string>
+    <string name="install_broken_banner">⚠ The app didn\'t install correctly on this device (a component is missing). Reinstall it from Google Play.</string>
+    <string name="install_broken_button">Reinstall from Google Play</string>
     <string name="status_loading">Loading…</string>
     <string name="status_connected">Connected</string>
     <string name="status_connecting">Connecting…</string>

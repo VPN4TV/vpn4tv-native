@@ -30,7 +30,7 @@ android {
         applicationId = "com.vpn4tv.hiddify"
         minSdk = 23
         targetSdk = 36
-        versionCode = 51905
+        versionCode = 51906
         versionName = "5.1.9"
         base.archivesName.set("VPN4TV-Native-${versionName}")
 
@@ -82,21 +82,18 @@ android {
         }
     }
 
-    // Distribution flavors. The Google Play build MUST NOT contain any
-    // self-update / install-from-outside-Play capability (Device & Network
-    // Abuse policy — the appcast+APK updater got the app rejected). The
-    // appcast self-updater therefore lives ONLY in the `direct` source set
-    // (src/direct); `play` (src/play) ships a no-op stub. Same applicationId.
+    // Single distribution flavor. ALL self-update / install-from-outside-Play
+    // capability has been removed from the codebase entirely (Device & Network
+    // Abuse policy — the appcast+APK self-updater got the app suspended). There
+    // is no `direct` flavor anymore: the risky second variant was the vector.
+    // The bell.a4e.ar sideload build is produced from this same flavor's
+    // universal APK — it simply does not auto-update (users redownload manually).
+    // Updates for Play users come only via Google Play (see PlayUpdateChecker,
+    // the sanctioned in-app-update API).
     flavorDimensions += "distribution"
     productFlavors {
         create("play") {
             dimension = "distribution"
-            // Updates via Google Play only. No appcast, no APK download/install.
-        }
-        create("direct") {
-            dimension = "distribution"
-            // Sideload build (bell.a4e.ar) for users without Play — keeps the
-            // appcast self-updater so they still get auto-updates.
         }
     }
 

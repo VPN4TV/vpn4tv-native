@@ -214,7 +214,6 @@
     <string name="auto_redirect">自动重定向</string>
     <string name="auto_redirect_description">需要 ROOT 权限</string>
     <string name="system_http_proxy">系统 HTTP 代理</string>
-    <string name="update_settings">更新设置</string>
 
     <!-- Per-App Proxy -->
     <string name="per_app_proxy">分应用代理</string>
@@ -267,49 +266,13 @@
     <string name="root_access_denied">Root 权限被拒绝</string>
 
     <!-- Updates -->
-    <string name="check_update">检查更新</string>
-    <string name="check_update_automatic">自动检查更新</string>
-    <string name="check_update_prompt_play">是否启用从 **Play Store** 自动检查更新？</string>
-    <string name="check_update_prompt_github">是否启用从 **GitHub** 自动检查更新？</string>
-    <string name="update_track">更新轨道</string>
-    <string name="update_track_stable">稳定版</string>
-    <string name="update_track_beta">测试版</string>
-    <string name="update_track_not_supported">当前轨道尚不支持检查更新</string>
     <string name="view_release">查看发布</string>
     <string name="downloading">下载中…</string>
     <string name="exporting">导出中…</string>
     <string name="no_updates_available">没有可用的更新</string>
     <string name="new_version_available">有新版本可用：%s</string>
-    <string name="auto_update">自动更新</string>
-    <string name="auto_update_description">在后台自动下载和安装更新</string>
-    <string name="update_source">更新来源</string>
-    <string name="update_source_github">GitHub</string>
-    <string name="update_source_fdroid">F-Droid</string>
-    <string name="fdroid_mirror">F-Droid 镜像</string>
-    <string name="fdroid_mirror_test_all">根据延迟自动选择</string>
-    <string name="fdroid_mirror_testing">测试中…</string>
-    <string name="fdroid_mirror_latency">%d ms</string>
-    <string name="fdroid_mirror_failed">失败</string>
-    <string name="fdroid_mirror_untested">—</string>
-    <string name="fdroid_mirror_add">添加镜像</string>
-    <string name="fdroid_mirror_name_hint">名称</string>
-    <string name="fdroid_mirror_url_hint">URL</string>
-    <string name="fdroid_mirror_custom">自定义</string>
-    <string name="fdroid_mirror_invalid_url">无效的 URL</string>
-    <string name="fdroid_mirror_add_action">添加</string>
-    <string name="fdroid_mirror_delete">删除</string>
 
     <!-- Silent Install -->
-    <string name="silent_install">静默安装</string>
-    <string name="silent_install_description">无需交互即可安装更新</string>
-    <string name="silent_install_method">安装方式</string>
-    <string name="silent_install_verify_failed">%s 不可用或权限被拒绝</string>
-    <string name="install_method_package_installer">PackageInstaller</string>
-    <string name="install_method_shizuku">Shizuku</string>
-    <string name="install_method_root">ROOT</string>
-    <string name="package_installer_not_available">未授予安装权限</string>
-    <string name="grant_install_permission">授予安装权限</string>
-    <string name="grant_install_permission_description">允许从此来源安装应用</string>
 
     <!-- Shizuku -->
     <string name="shizuku_not_available">Shizuku 未安装或未运行</string>

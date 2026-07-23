@@ -55,14 +55,6 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    // Update check
-    var updateAvailable by remember { mutableStateOf<com.vpn4tv.app.utils.UpdateInfo?>(null) }
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            updateAvailable = com.vpn4tv.app.utils.UpdateChecker.check()
-        }
-    }
-
     // Track active server and traffic from CommandClient
     var activeServer by remember { mutableStateOf<String?>(null) }
     var activeDelay by remember { mutableStateOf(0) }
@@ -180,13 +172,27 @@ fun HomeScreen(
                     )
                     Button(
                         onClick = {
+                            // Reinstall via Google Play (the app's own listing) —
+                            // per-ABI split misdelivery only affects Play installs,
+                            // and Play is the sanctioned update channel. Web fallback
+                            // for devices where the Play app can't resolve market://.
+                            val pkg = context.packageName
                             runCatching {
                                 context.startActivity(
                                     android.content.Intent(
                                         android.content.Intent.ACTION_VIEW,
-                                        android.net.Uri.parse("https://bell.a4e.ar/vpn4tv-latest.apk"),
+                                        android.net.Uri.parse("market://details?id=$pkg"),
                                     ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
                                 )
+                            }.onFailure {
+                                runCatching {
+                                    context.startActivity(
+                                        android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse("https://play.google.com/store/apps/details?id=$pkg"),
+                                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                                    )
+                                }
                             }
                         },
                         modifier = Modifier.padding(top = 10.dp),
@@ -368,33 +374,6 @@ fun HomeScreen(
                 }
                 IconButton(onClick = onNavigateAbout) {
                     Icon(Icons.Default.Info, stringResource(R.string.title_about), tint = Color.White, modifier = Modifier.size(iconSize))
-                }
-            }
-        }
-
-        // Update banner
-        if (updateAvailable != null) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-                    .clickable {
-                        com.vpn4tv.app.utils.UpdateChecker.openDownload(context, updateAvailable!!)
-                    }
-                    .focusable(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "${stringResource(R.string.update_available)}: ${updateAvailable!!.versionName}",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text("→", fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
