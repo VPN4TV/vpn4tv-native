@@ -38,7 +38,6 @@ Transports: TCP, WebSocket, gRPC, HTTP/2, xHTTP, splitHTTP, HTTPUpgrade.
 ## Download
 
 - **Play Store**: [com.vpn4tv.hiddify](https://play.google.com/store/apps/details?id=com.vpn4tv.hiddify)
-- **Direct APK**: [bell.a4e.ar/vpn4tv-native-alpha.apk](https://bell.a4e.ar/vpn4tv-native-alpha.apk)
 
 ## Building
 

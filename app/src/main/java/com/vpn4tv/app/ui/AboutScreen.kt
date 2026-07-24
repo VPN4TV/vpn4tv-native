@@ -121,13 +121,14 @@ fun AboutScreen(onBack: () -> Unit) {
                 color = Color.Gray
             )
             Spacer(modifier = Modifier.height(8.dp))
+            // Plain text, NOT a link. Source attribution only. We must not
+            // provide an in-app path to any off-Play APK download — the repo's
+            // README offers a direct APK, so a clickable link here would be a
+            // transitive "link to a noncompliant APK" (Device & Network Abuse).
             Text(
                 "github.com/VPN4TV/vpn4tv-native",
                 fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clickable { openUrl("https://github.com/VPN4TV/vpn4tv-native") }
-                    .focusable()
+                color = Color.Gray
             )
 
             Spacer(modifier = Modifier.height(24.dp))
