@@ -31,6 +31,12 @@ data class ProxyConfig(
      */
     val outlineUrl: String? = null,
     /**
+     * If non-null, this is an Outline *dynamic* access key (ssconf://). The
+     * provider rotates servers behind it, so it is never resolved at import —
+     * the client fetches it before every connect. Holds the https:// form.
+     */
+    val outlineDynamicUrl: String? = null,
+    /**
      * If non-null, this proxy is an AmneziaWG (awg 2.0) endpoint that sing-box
      * cannot handle natively. The value is a wg-quick INI string that the
      * wireproxy-awg bridge parses and runs as a userspace amneziawg-go device.
@@ -64,10 +70,37 @@ object ProxyParser {
             trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") -> parseHysteria2(trimmed)
             trimmed.startsWith("trojan://") -> parseTrojan(trimmed)
             trimmed.startsWith("ss://") -> parseShadowsocks(trimmed)
+            trimmed.startsWith("ssconf://") -> parseOutlineDynamicKey(trimmed)
             trimmed.startsWith("naive+https://") || trimmed.startsWith("naive+quic://") -> parseNaive(trimmed)
             trimmed.startsWith("wg://") -> parseWgUri(trimmed)
             else -> null
         }
+    }
+
+    /**
+     * Outline dynamic access key. Nothing is fetched here: the URL travels into
+     * the profile and is resolved before every connect, which is what makes a
+     * rotated server reach the user.
+     */
+    private fun parseOutlineDynamicKey(uri: String): ProxyConfig? {
+        val withoutFragment = uri.substringBefore('#')
+        val httpsUrl = "https://" + withoutFragment.removePrefix("ssconf://")
+        val host = try {
+            java.net.URI(httpsUrl).host
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        val tag = uri.substringAfter('#', "").let {
+            if (it.isEmpty()) host else java.net.URLDecoder.decode(it, "UTF-8")
+        }
+        return ProxyConfig(
+            tag = tag,
+            type = "shadowsocks",
+            server = host,
+            serverPort = 0,
+            outbound = JSONObject(),
+            outlineDynamicUrl = httpsUrl,
+        )
     }
 
     fun parseSubscription(content: String): List<ProxyConfig> {

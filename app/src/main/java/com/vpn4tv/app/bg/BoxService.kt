@@ -250,7 +250,11 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             if (outlineSidecar.exists()) {
                 try {
                     Log.d(TAG, "Starting outline bridge from ${outlineSidecar.name}")
-                    com.vpn4tv.app.outline.OutlineBridge.start(outlineSidecar.readText())
+                    // Dynamic keys (ssconf://) are fetched now, not at import:
+                    // the provider rotates servers behind them.
+                    val outlineConfig =
+                        com.vpn4tv.app.outline.OutlineDynamicKeys.resolveAndPersist(outlineSidecar)
+                    com.vpn4tv.app.outline.OutlineBridge.start(outlineConfig)
                 } catch (e: Exception) {
                     Log.e(TAG, "outline bridge failed to start: ${e.message}", e)
                     com.vpn4tv.app.xray.XrayBridge.stop()

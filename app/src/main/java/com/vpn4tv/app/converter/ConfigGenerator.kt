@@ -90,9 +90,10 @@ object ConfigGenerator {
         val outlinePortBase = portBase +
             com.vpn4tv.app.outline.OutlineConfigGenerator.OUTLINE_PORT_OFFSET
         for (proxy in proxies) {
-            val url = proxy.outlineUrl ?: continue
+            // A dynamic key has no URL yet — it is fetched before connecting.
+            val url = proxy.outlineUrl ?: proxy.outlineDynamicUrl?.let { "" } ?: continue
             val port = outlinePortBase + outlineUrls.size
-            outlineUrls.add(url)
+            outlineUrls.add(if (proxy.outlineDynamicUrl != null) "dynamic:" + proxy.outlineDynamicUrl else url)
             proxy.outbound.apply {
                 put("type", "socks")
                 put("tag", proxy.tag)

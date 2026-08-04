@@ -18,6 +18,9 @@ object OutlineConfigGenerator {
     /** Offset added to xrayPortBase to avoid colliding with xray inbounds. */
     const val OUTLINE_PORT_OFFSET = 1000
 
+    /** Marks an entry that still has to be fetched from a dynamic key. */
+    const val DYNAMIC_PREFIX = "dynamic:"
+
     /**
      * @param outlineUrls list of original `ss://...` URLs, in the same order as
      *                    the corresponding ProxyConfig entries
@@ -28,7 +31,14 @@ object OutlineConfigGenerator {
         val endpoints = JSONArray()
         outlineUrls.forEachIndexed { i, url ->
             endpoints.put(JSONObject().apply {
-                put("url", url)
+                // "dynamic:<https url>" marks an Outline dynamic key (ssconf://).
+                // It carries no server yet — OutlineDynamicKeys fills "url" in
+                // before the bridge starts, and keeps the last one that worked.
+                if (url.startsWith(DYNAMIC_PREFIX)) {
+                    put("dynamicUrl", url.removePrefix(DYNAMIC_PREFIX))
+                } else {
+                    put("url", url)
+                }
                 put("port", firstPort + i)
             })
         }
