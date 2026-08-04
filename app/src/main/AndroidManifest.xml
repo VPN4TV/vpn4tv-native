@@ -51,6 +51,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="vpn" />
+                <data android:scheme="vpn4tv" />
                 <data android:scheme="wg" />
                 <data android:scheme="vless" />
                 <data android:scheme="vmess" />

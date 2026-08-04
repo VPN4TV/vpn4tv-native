@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.*
+import android.net.Uri
 import androidx.lifecycle.MutableLiveData
 import com.vpn4tv.app.R
 import com.vpn4tv.app.bg.BoxService
@@ -142,8 +143,21 @@ class MainActivity : ComponentActivity() {
             }
             else -> uri.toString()
         }
+        // vpn4tv:// wraps whatever the user would otherwise paste. Unwrap before
+        // deciding: a subscription URL inside must stay updatable, not become a
+        // one-off snapshot.
+        val unwrapped = ProxyParser.decodeVpn4tvLink(data) ?: data
+        if (unwrapped.trim().matches(Regex("^https?://\\S+$"))) {
+            try {
+                createProfile(Uri.parse(unwrapped.trim()).host ?: "VPN4TV", unwrapped.trim())
+                Toast.makeText(this, getString(R.string.profile_imported), Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to import subscription from link", e)
+            }
+            return
+        }
         try {
-            val proxies = ProxyParser.parseSubscription(data)
+            val proxies = ProxyParser.parseSubscription(unwrapped)
             if (proxies.isEmpty()) {
                 Log.w(TAG, "Intent URL parsed to zero proxies: ${data.take(40)}...")
                 return

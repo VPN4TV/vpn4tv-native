@@ -135,6 +135,7 @@
     <string name="scan_qr_code_description">Scan a configuration QR code</string>
     <string name="create_new_profile_description">Create a new profile from scratch</string>
     <string name="icloud_profile_unsupported">iCloud profile is not support on current platform</string>
+    <string name="profile_imported">Subscription added</string>
     <string name="profile_name">Name</string>
     <string name="profile_type">Type</string>
     <string name="profile_source">Source</string>

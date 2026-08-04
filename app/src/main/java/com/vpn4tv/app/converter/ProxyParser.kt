@@ -103,8 +103,36 @@ object ProxyParser {
         )
     }
 
-    fun parseSubscription(content: String): List<ProxyConfig> {
+    /**
+     * Our own link: vpn4tv://<base64url>, optionally with a #name. The payload is
+     * whatever the user would otherwise paste — a subscription URL, server links
+     * or a config. Returns null when this is not our link or the payload decodes
+     * to noise, so callers fall through to the normal handling.
+     */
+    fun decodeVpn4tvLink(content: String): String? {
         val trimmed = content.trim()
+        if (!trimmed.startsWith("vpn4tv://", ignoreCase = true)) return null
+        val payload = trimmed.removePrefix("vpn4tv://").substringBefore('#').trim()
+        if (payload.isEmpty()) return null
+        val decoded = try {
+            String(
+                android.util.Base64.decode(
+                    payload,
+                    android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP,
+                ),
+                Charsets.UTF_8,
+            ).trim()
+        } catch (_: Exception) {
+            return null
+        }
+        // Base64 never fails loudly, so check the result is something usable.
+        return if (decoded.contains("://") || decoded.startsWith("{")) decoded else null
+    }
+
+    fun parseSubscription(content: String): List<ProxyConfig> {
+        // Our own link carries the real payload; everything below works on that.
+        val source = decodeVpn4tvLink(content) ?: content
+        val trimmed = source.trim()
 
         // AmneziaVPN "vpn://..." format: base64url(4-byte header + zlib(JSON))
         // with nested containers[].awg.last_config carrying the real INI.
@@ -153,7 +181,7 @@ object ProxyParser {
         }
 
         // Try base64 decode first (some subs are base64-encoded)
-        val decoded = tryBase64Decode(content) ?: content
+        val decoded = tryBase64Decode(source) ?: source
         return decoded.lines()
             .mapNotNull { parse(it) }
     }
