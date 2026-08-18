@@ -582,9 +582,9 @@
     <string name="label_server">Server: </string>
     <string name="nav_servers">Servers</string>
     <string name="nav_profiles">Profiles</string>
-    <string name="action_update_subscription">Update subscription</string>
+    <string name="action_update_subscription">Update key</string>
     <string name="link_servers">Servers →</string>
-    <string name="link_add_telegram">Add subscription via Telegram →</string>
+    <string name="link_add_telegram">Add key via Telegram →</string>
     <string name="title_servers">Servers</string>
     <string name="servers_empty">Connect VPN first to see servers</string>
     <string name="action_test_all">Test All</string>

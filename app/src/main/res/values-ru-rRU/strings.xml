@@ -535,9 +535,9 @@
     <string name="label_server">Сервер: </string>
     <string name="nav_servers">Серверы</string>
     <string name="nav_profiles">Подписки</string>
-    <string name="action_update_subscription">Обновить подписку</string>
+    <string name="action_update_subscription">Обновить ключ</string>
     <string name="link_servers">Серверы →</string>
-    <string name="link_add_telegram">Добавить подписку через Telegram →</string>
+    <string name="link_add_telegram">Добавить ключ через Telegram →</string>
     <string name="title_servers">Серверы</string>
     <string name="servers_empty">Подключите VPN, чтобы увидеть серверы</string>
     <string name="action_test_all">Проверить все</string>
