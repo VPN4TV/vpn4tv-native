@@ -227,6 +227,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit, onLanImport
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(stringResource(R.string.add_scan_qr), fontSize = 14.sp, color = Color.Gray)
+                    Text(stringResource(R.string.add_enter_on_web), fontSize = 14.sp, color = Color.Gray)
                 }
             }
         } else {
@@ -263,6 +264,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit, onLanImport
 
                 qrBitmap?.let { bmp ->
                     Text(stringResource(R.string.add_scan_qr), fontSize = 14.sp, color = Color.Gray)
+                    Text(stringResource(R.string.add_enter_on_web), fontSize = 14.sp, color = Color.Gray)
                     Spacer(modifier = Modifier.height(8.dp))
                     Image(bitmap = bmp.asImageBitmap(), contentDescription = "QR Code", modifier = Modifier.size(150.dp))
                 }

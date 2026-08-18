@@ -546,6 +546,7 @@
     <string name="title_add_subscription">Добавить подписку</string>
     <string name="add_send_code">Отправьте этот код боту</string>
     <string name="add_scan_qr">или отсканируйте QR телефоном</string>
+    <string name="add_enter_on_web">либо введите его на api.vpn4tv.com</string>
     <string name="open_telegram_bot">Открыть @VPN4TV_Bot</string>
     <string name="add_waiting">Ожидание Telegram-бота…</string>
     <string name="add_adding">Добавление подписки…</string>
