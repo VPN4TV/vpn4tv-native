@@ -384,6 +384,12 @@ object ConfigGenerator {
             // Always route via the "select" group; ConfigGenerator builds it
             // for both single- and multi-proxy profiles.
             put("final", "select")
+            // An outbound whose server is a hostname needs a resolver, or the
+            // core refuses to start the whole profile with "missing domain
+            // resolver for domain server address". The Apple and desktop
+            // generators have always set this; Android did not, and it surfaced
+            // as soon as a subscription contained a server addressed by name.
+            put("default_domain_resolver", JSONObject().apply { put("server", "dns-direct") })
         }
     }
 }
