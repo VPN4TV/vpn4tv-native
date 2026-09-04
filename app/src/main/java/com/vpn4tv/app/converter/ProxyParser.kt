@@ -1006,6 +1006,18 @@ object ProxyParser {
                         params["path"]?.let { put("path", it) }
                         params["host"]?.let { put("host", it) }
                         params["mode"]?.let { put("mode", it) }
+                        // `extra` carries the rest of the transport settings — xmux
+                        // above all, which decides how many connections the client
+                        // multiplexes over. xray-core unmarshals it into the
+                        // transport config itself and re-applies host/path/mode, so
+                        // it is passed through as an object. Dropping it, as we used
+                        // to, silently ignored the provider's tuning.
+                        params["extra"]?.let { raw ->
+                            try { put("extra", JSONObject(raw)) }
+                            catch (_: Exception) {
+                                android.util.Log.w("ProxyParser", "xhttp: ignoring malformed extra")
+                            }
+                        }
                     })
                 }
             }
