@@ -3,6 +3,7 @@ package com.vpn4tv.app.converter
 import android.content.Context
 import android.os.Build
 import android.util.Base64
+import com.vpn4tv.app.BuildConfig
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -119,7 +120,15 @@ object HwidService {
         conn.setRequestProperty("x-hwid", getHwid(context))
         conn.setRequestProperty("x-device-os", "Android")
         conn.setRequestProperty("x-ver-os", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-        conn.setRequestProperty("User-Agent", "VPN4TV-Native/0.1.0")
+        // The app version decides what the backend may serve: naive needs a
+        // client that sets route.default_domain_resolver (5.2.4+), xhttp needs
+        // one that passes the transport's extra through (5.2.5+). Until now the
+        // version went nowhere — the user agent was hardcoded to 0.1.0 and
+        // x-ver-os carries the Android version — so the backend had to gate by
+        // platform and a hand-maintained allowlist.
+        conn.setRequestProperty("x-app-ver", BuildConfig.VERSION_NAME)
+        conn.setRequestProperty("x-app-build", BuildConfig.VERSION_CODE.toString())
+        conn.setRequestProperty("User-Agent", "VPN4TV-Native/${BuildConfig.VERSION_NAME}")
         conn.connectTimeout = 30000
         conn.readTimeout = 30000
         // Cap body at 2 MB — a real subscription is at most a few hundred
