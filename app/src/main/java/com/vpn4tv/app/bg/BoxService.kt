@@ -574,6 +574,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         }
     }
 
+    // No SSH agent on Android; same answer as upstream SFA.
+    override fun connectSSHAgent(): Int = -1
+
     override fun getSystemProxyStatus(): SystemProxyStatus? {
         val status = SystemProxyStatus()
         if (service is VPNService) {

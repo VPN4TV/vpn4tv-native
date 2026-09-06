@@ -160,20 +160,33 @@ interface PlatformInterfaceWrapper : PlatformInterface {
     override fun startNeighborMonitor(listener: io.nekohasekai.libbox.NeighborUpdateListener?) {}
     override fun closeNeighborMonitor(listener: io.nekohasekai.libbox.NeighborUpdateListener?) {}
 
-    override fun systemCertificates(): StringIterator {
-        // Return nothing on purpose. sing-box's certificate.NewStore falls back
-        // to Go's native x509.SystemCertPool() when the platform supplies no
-        // certs (store.go, !systemValid branch) — Go reads Android's system
-        // roots directly, in the Go runtime, without a per-cert conscrypt/JNI
-        // round-trip. Enumerating AndroidCAStore here (KeyStore.aliases() +
-        // getCertificate()) read and X509-parsed every CA TWICE through
-        // conscrypt and hung Box.New for 45s+ on slow-flash TVs — confirmed by a
-        // field goroutine+thread dump from a Skyworth SWTV-22AE-FHD (the store
-        // is built on every Box.New even though vless-reality never verifies
-        // against it). We only forgo user-installed CAs, which our
-        // reality + well-known-DoH setup does not rely on.
-        return StringArray(emptyList<String>().iterator())
-    }
+    // libbox 1.14 grew a root-shell, SFTP and bridge surface for sing-box's
+    // own SSH/Tailscale features. VPN4TV has no root client and none of those
+    // features; answer like the core's own stub does (config.go), so the core
+    // never tries to use them.
+    override fun usePlatformShell(): Boolean = false
+    override fun checkPlatformShell() {}
+    override fun openShellSession(
+        user: io.nekohasekai.libbox.PlatformUser?,
+        command: String?,
+        environ: StringIterator?,
+        term: String?,
+        rows: Int,
+        cols: Int,
+    ): io.nekohasekai.libbox.ShellSession = throw UnsupportedOperationException("platform shell is not available")
+    override fun lookupUser(username: String?): io.nekohasekai.libbox.PlatformUser =
+        throw UnsupportedOperationException("user lookup is not available")
+    override fun lookupSFTPServer(): String = throw UnsupportedOperationException("SFTP server is not available")
+    override fun readSystemSSHHostKey(): String = throw UnsupportedOperationException("SSH host key is not available")
+    override fun tailscaleHostname(): String = ""
+    override fun usePlatformBridge(): Boolean = false
+    override fun createBridge(options: io.nekohasekai.libbox.BridgeOptions?): io.nekohasekai.libbox.BridgeSession =
+        throw UnsupportedOperationException("platform bridge is not available")
+
+    // systemCertificates() is gone from the interface: the core now reads the
+    // system roots itself through Go's x509.SystemCertPool, which is exactly
+    // what our empty override used to force (enumerating AndroidCAStore hung
+    // Box.New for 45 s on slow-flash TVs).
 
     private class InterfaceArray(private val iterator: Iterator<LibboxNetworkInterface>) : NetworkInterfaceIterator {
         override fun hasNext(): Boolean = iterator.hasNext()
