@@ -225,12 +225,14 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             val xraySidecar = File(com.vpn4tv.app.converter.ConfigGenerator.xraySidecarPath(profile.typed.path))
             val outlineSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.outlineSidecarPath(profile.typed.path))
             val wgSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.wgSidecarPath(profile.typed.path))
+            val olcrtcSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.olcrtcSidecarPath(profile.typed.path))
             Application.application
                 .getSharedPreferences("session", android.content.Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean("xray", xraySidecar.exists())
                 .putBoolean("outline", outlineSidecar.exists())
                 .putBoolean("wireproxy", wgSidecar.exists())
+                .putBoolean("olcrtc", olcrtcSidecar.exists())
                 .putLong("started_at", System.currentTimeMillis())
                 .apply()
 
@@ -275,6 +277,26 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     com.vpn4tv.app.outline.OutlineBridge.stop()
                     com.vpn4tv.app.wireproxy.WgBridge.stop()
                     stopAndAlert(Alert.CreateService, "wireproxy: ${e.message}")
+                    return
+                }
+            }
+
+            // Start the olcrtc bridge if the profile has olcrtc:// links. Not in
+            // the 32-bit libbox: say so, rather than a bare start error.
+            if (olcrtcSidecar.exists()) {
+                try {
+                    if (!com.vpn4tv.app.olcrtc.OlcrtcBridge.isAvailable()) {
+                        throw IllegalStateException("olcRTC is not available on this device (32-bit build)")
+                    }
+                    Log.d(TAG, "Starting olcrtc bridge from ${olcrtcSidecar.name}")
+                    com.vpn4tv.app.olcrtc.OlcrtcBridge.start(olcrtcSidecar.readText())
+                } catch (e: Exception) {
+                    Log.e(TAG, "olcrtc bridge failed to start: ${e.message}", e)
+                    com.vpn4tv.app.xray.XrayBridge.stop()
+                    com.vpn4tv.app.outline.OutlineBridge.stop()
+                    com.vpn4tv.app.wireproxy.WgBridge.stop()
+                    com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
+                    stopAndAlert(Alert.CreateService, "olcrtc: ${e.message}")
                     return
                 }
             }
@@ -624,6 +646,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             com.vpn4tv.app.xray.XrayBridge.stop()
             com.vpn4tv.app.outline.OutlineBridge.stop()
             com.vpn4tv.app.wireproxy.WgBridge.stop()
+            com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
             Settings.startedByUser = false
             withContext(Dispatchers.Main) {
                 status.value = Status.Stopped
@@ -657,6 +680,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         com.vpn4tv.app.xray.XrayBridge.stop()
         com.vpn4tv.app.outline.OutlineBridge.stop()
         com.vpn4tv.app.wireproxy.WgBridge.stop()
+        com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
         withContext(Dispatchers.Main) {
             if (receiverRegistered) {
                 service.unregisterReceiver(receiver)

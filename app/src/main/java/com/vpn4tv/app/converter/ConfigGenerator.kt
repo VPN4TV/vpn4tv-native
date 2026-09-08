@@ -18,6 +18,7 @@ object ConfigGenerator {
         val xrayJson: String?,
         val outlineJson: String?,
         val wgJson: String?,
+        val olcrtcJson: String? = null,
     )
 
     /** Produce just the sing-box JSON string (backwards-compat shortcut). */
@@ -32,6 +33,9 @@ object ConfigGenerator {
     /** Sidecar wireproxy-awg config path for a given sing-box config file. */
     fun wgSidecarPath(singboxConfigPath: String): String = "$singboxConfigPath.wg.json"
 
+    /** Sidecar olcrtc config path for a given sing-box config file. */
+    fun olcrtcSidecarPath(singboxConfigPath: String): String = "$singboxConfigPath.olcrtc.json"
+
     /**
      * Convenience helper: writes [singboxJson] to [configPath], plus every
      * sidecar next to it, deleting any stale sidecars when the new result
@@ -42,6 +46,7 @@ object ConfigGenerator {
         writeOrDelete(xraySidecarPath(configPath), result.xrayJson)
         writeOrDelete(outlineSidecarPath(configPath), result.outlineJson)
         writeOrDelete(wgSidecarPath(configPath), result.wgJson)
+        writeOrDelete(olcrtcSidecarPath(configPath), result.olcrtcJson)
     }
 
     private fun writeOrDelete(path: String, content: String?) {
@@ -131,6 +136,28 @@ object ConfigGenerator {
             }
         }
 
+        // olcRTC: TCP over a WebRTC "call" on a whitelisted meeting service. The
+        // link goes to the bridge whole; ipv4_only so the CONNECT names an IP —
+        // the far end dials exactly what it is asked for.
+        val olcrtcUrls = mutableListOf<String>()
+        val olcrtcPortBase = portBase +
+            com.vpn4tv.app.olcrtc.OlcrtcConfigGenerator.OLCRTC_PORT_OFFSET
+        for (proxy in proxies) {
+            val url = proxy.olcrtcUrl ?: continue
+            val port = olcrtcPortBase + olcrtcUrls.size
+            olcrtcUrls.add(url)
+            proxy.outbound.apply {
+                put("type", "socks")
+                put("tag", proxy.tag)
+                put("server", host)
+                put("server_port", port)
+                put("version", "5")
+                put("network", "tcp")
+                put("bind_interface", "lo")
+                put("domain_strategy", "ipv4_only")
+            }
+        }
+
         // Deduplicate tags — sing-box requires unique outbound tags
         val seenTags = mutableSetOf<String>()
         for (proxy in proxies) {
@@ -203,7 +230,11 @@ object ConfigGenerator {
             com.vpn4tv.app.wireproxy.WgConfigGenerator.build(wgInis, wgPortBase)
         } else null
 
-        return Result(config.toString(2), xrayJson, outlineJson, wgJson)
+        val olcrtcJson = if (olcrtcUrls.isNotEmpty()) {
+            com.vpn4tv.app.olcrtc.OlcrtcConfigGenerator.build(olcrtcUrls, olcrtcPortBase)
+        } else null
+
+        return Result(config.toString(2), xrayJson, outlineJson, wgJson, olcrtcJson)
     }
 
     private fun buildDns(proxies: List<ProxyConfig>): JSONObject {
@@ -212,7 +243,7 @@ object ConfigGenerator {
         // through a TCP-only socks bridge (outline or wireproxy), drop the
         // detour entirely so DNS just resolves locally — otherwise sing-box
         // errors with "UDP is not supported by outbound: select".
-        val allTcpBridged = proxies.all { it.outlineUrl != null || it.awgIni != null }
+        val allTcpBridged = proxies.all { it.outlineUrl != null || it.awgIni != null || it.olcrtcUrl != null }
         val proxyTag: String? = if (allTcpBridged) null else "select"
         val dns = ProxyParser.lastDns
 
@@ -308,7 +339,7 @@ object ConfigGenerator {
      * effect until the next subscription refresh regenerates this file.
      */
     private fun fakeDnsEnabled(proxies: List<ProxyConfig>): Boolean {
-        return !proxies.all { it.outlineUrl != null || it.awgIni != null }
+        return !proxies.all { it.outlineUrl != null || it.awgIni != null || it.olcrtcUrl != null }
     }
 
     private fun buildOutbounds(proxies: List<ProxyConfig>): JSONArray {
@@ -361,7 +392,7 @@ object ConfigGenerator {
         // outbound: select" errors. Bypass that by routing UDP through
         // "direct" instead — privacy is weaker but the alternative is a
         // broken connection.
-        val allTcpBridged = proxies.all { it.outlineUrl != null || it.awgIni != null }
+        val allTcpBridged = proxies.all { it.outlineUrl != null || it.awgIni != null || it.olcrtcUrl != null }
         return JSONObject().apply {
             put("rules", JSONArray().apply {
                 // sing-box 1.13+: sniff via rule action

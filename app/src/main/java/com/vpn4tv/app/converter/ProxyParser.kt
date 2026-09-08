@@ -44,6 +44,13 @@ data class ProxyConfig(
      * pointing at the wireproxy bridge on a unique port.
      */
     val awgIni: String? = null,
+    /**
+     * If non-null, this is an olcRTC link (olcrtc://): TCP over a WebRTC
+     * "video call" on a whitelisted meeting service. The core parses the link
+     * itself; the app only carries it to the bridge and points a socks
+     * outbound at it.
+     */
+    val olcrtcUrl: String? = null,
 )
 
 /** DNS extracted from subscription (if any) */
@@ -73,8 +80,50 @@ object ProxyParser {
             trimmed.startsWith("ssconf://") -> parseOutlineDynamicKey(trimmed)
             trimmed.startsWith("naive+https://") || trimmed.startsWith("naive+quic://") -> parseNaive(trimmed)
             trimmed.startsWith("wg://") -> parseWgUri(trimmed)
+            trimmed.startsWith("olcrtc://") -> parseOlcrtc(trimmed)
             else -> null
         }
+    }
+
+    /**
+     * olcrtc://<provider>?<transport>[<params>]@<room>#<key>$<comment>
+     *
+     * Only the comment is needed here, for the tag; the link goes to the
+     * bridge whole. The room is a URL for Jitsi, so this is not a real URI and
+     * the generic parser must stay away from it.
+     */
+    private fun parseOlcrtc(uri: String): ProxyConfig? {
+        val body = uri.removePrefix("olcrtc://")
+        val dollar = body.lastIndexOf('$')
+        val comment = if (dollar >= 0) safeDecode(body.substring(dollar + 1)).trim() else ""
+        val withoutComment = if (dollar >= 0) body.substring(0, dollar) else body
+        val hash = withoutComment.lastIndexOf('#')
+        val question = withoutComment.indexOf('?')
+        val at = withoutComment.indexOf('@')
+        if (question <= 0 || at < question || hash < at) return null
+        val provider = withoutComment.substring(0, question).lowercase()
+        val room = withoutComment.substring(at + 1, hash)
+        val key = withoutComment.substring(hash + 1)
+        if (room.isEmpty() || !Regex("^[0-9a-fA-F]{64}$").matches(key)) return null
+        val server = try {
+            java.net.URI(room).host ?: room
+        } catch (_: Exception) {
+            room
+        }
+        return ProxyConfig(
+            tag = comment.ifEmpty { "olcRTC $provider" },
+            type = "olcrtc",
+            server = server,
+            serverPort = 0,
+            outbound = JSONObject(),
+            olcrtcUrl = uri,
+        )
+    }
+
+    private fun safeDecode(value: String): String = try {
+        java.net.URLDecoder.decode(value.replace("+", "%2B"), "UTF-8")
+    } catch (_: Exception) {
+        value
     }
 
     /**
