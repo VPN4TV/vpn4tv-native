@@ -19,3 +19,10 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# TrustTunnel (vendored AAR). VpnServiceConfig parses TOML with ktoml — that
+# is the TUN-mode helper we never call (the bridge feeds VpnClient a raw
+# string), so the library is not shipped. slf4j has no binding on purpose:
+# its LoggerFactory falls back to a no-op logger.
+-dontwarn com.akuleshov7.ktoml.**
+-dontwarn org.slf4j.impl.**
