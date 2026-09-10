@@ -226,6 +226,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             val outlineSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.outlineSidecarPath(profile.typed.path))
             val wgSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.wgSidecarPath(profile.typed.path))
             val olcrtcSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.olcrtcSidecarPath(profile.typed.path))
+            val ttSidecar = File(com.vpn4tv.app.converter.ConfigGenerator.ttSidecarPath(profile.typed.path))
             Application.application
                 .getSharedPreferences("session", android.content.Context.MODE_PRIVATE)
                 .edit()
@@ -233,6 +234,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 .putBoolean("outline", outlineSidecar.exists())
                 .putBoolean("wireproxy", wgSidecar.exists())
                 .putBoolean("olcrtc", olcrtcSidecar.exists())
+                .putBoolean("trusttunnel", ttSidecar.exists())
                 .putLong("started_at", System.currentTimeMillis())
                 .apply()
 
@@ -296,7 +298,30 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     com.vpn4tv.app.outline.OutlineBridge.stop()
                     com.vpn4tv.app.wireproxy.WgBridge.stop()
                     com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
+                    com.vpn4tv.app.trusttunnel.TrustTunnelBridge.stop()
                     stopAndAlert(Alert.CreateService, "olcrtc: ${e.message}")
+                    return
+                }
+            }
+
+            // Start the TrustTunnel bridge if the profile has tt:// links. Its
+            // upstream sockets go through VpnService.protect; in proxy mode
+            // there is no VPN and nothing to protect against.
+            if (ttSidecar.exists()) {
+                try {
+                    Log.d(TAG, "Starting trusttunnel bridge from ${ttSidecar.name}")
+                    val vpn = service as? android.net.VpnService
+                    com.vpn4tv.app.trusttunnel.TrustTunnelBridge.start(ttSidecar.readText()) { fd ->
+                        vpn?.protect(fd) ?: true
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "trusttunnel bridge failed to start: ${e.message}", e)
+                    com.vpn4tv.app.xray.XrayBridge.stop()
+                    com.vpn4tv.app.outline.OutlineBridge.stop()
+                    com.vpn4tv.app.wireproxy.WgBridge.stop()
+                    com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
+                    com.vpn4tv.app.trusttunnel.TrustTunnelBridge.stop()
+                    stopAndAlert(Alert.CreateService, "trusttunnel: ${e.message}")
                     return
                 }
             }
@@ -647,6 +672,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             com.vpn4tv.app.outline.OutlineBridge.stop()
             com.vpn4tv.app.wireproxy.WgBridge.stop()
             com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
+            com.vpn4tv.app.trusttunnel.TrustTunnelBridge.stop()
             Settings.startedByUser = false
             withContext(Dispatchers.Main) {
                 status.value = Status.Stopped
@@ -681,6 +707,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         com.vpn4tv.app.outline.OutlineBridge.stop()
         com.vpn4tv.app.wireproxy.WgBridge.stop()
         com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
+        com.vpn4tv.app.trusttunnel.TrustTunnelBridge.stop()
         withContext(Dispatchers.Main) {
             if (receiverRegistered) {
                 service.unregisterReceiver(receiver)

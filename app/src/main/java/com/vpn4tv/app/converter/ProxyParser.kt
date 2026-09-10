@@ -51,6 +51,12 @@ data class ProxyConfig(
      * outbound at it.
      */
     val olcrtcUrl: String? = null,
+    /**
+     * If non-null, this is a TrustTunnel link (tt://): AdGuard's HTTP/2 +
+     * HTTP/3 VPN protocol, run by the vendored TrustTunnel library as a local
+     * SOCKS5 under sing-box. The library decodes the link itself.
+     */
+    val ttUrl: String? = null,
 )
 
 /** DNS extracted from subscription (if any) */
@@ -81,6 +87,7 @@ object ProxyParser {
             trimmed.startsWith("naive+https://") || trimmed.startsWith("naive+quic://") -> parseNaive(trimmed)
             trimmed.startsWith("wg://") -> parseWgUri(trimmed)
             trimmed.startsWith("olcrtc://") -> parseOlcrtc(trimmed)
+            trimmed.startsWith("tt://") -> parseTrustTunnel(trimmed)
             else -> null
         }
     }
@@ -117,6 +124,27 @@ object ProxyParser {
             serverPort = 0,
             outbound = JSONObject(),
             olcrtcUrl = uri,
+        )
+    }
+
+    /**
+     * tt://?<base64url payload>. The payload is a binary structure only the
+     * TrustTunnel library reads (DeepLink.decode); here we just keep the link
+     * and give it a tag. The display name lives inside the payload, so the tag
+     * is generic until the bridge decodes it.
+     */
+    private fun parseTrustTunnel(uri: String): ProxyConfig? {
+        val payload = uri.removePrefix("tt://").removePrefix("?")
+        if (payload.isEmpty() || !Regex("^[A-Za-z0-9_=-]+$").matches(payload)) return null
+        // A short fingerprint keeps several TrustTunnel keys apart in the list.
+        val fingerprint = payload.takeLast(6)
+        return ProxyConfig(
+            tag = "TrustTunnel $fingerprint",
+            type = "trusttunnel",
+            server = "",
+            serverPort = 0,
+            outbound = JSONObject(),
+            ttUrl = uri,
         )
     }
 
