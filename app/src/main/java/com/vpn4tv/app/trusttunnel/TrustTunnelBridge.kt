@@ -68,8 +68,10 @@ object TrustTunnelBridge {
                     override fun onStateChanged(state: Int) {
                         Log.i(TAG, "endpoint $i: ${VpnState.getByCode(state)}")
                     }
+                    // One line per tunnelled connection — debug only, or it
+                    // drowns everything else in logcat.
                     override fun onConnectionInfo(info: String) {
-                        Log.i(TAG, "endpoint $i: $info")
+                        Log.d(TAG, "endpoint $i: $info")
                     }
                 })
                 // null TUN → SOCKS-only (our JNI patch).
