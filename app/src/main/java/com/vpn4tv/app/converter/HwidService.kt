@@ -193,6 +193,124 @@ object HwidService {
     private const val INFRA_SNI = "bell.a4e.ar"
     private val INFRA_HOSTS = setOf("api.vpn4tv.com", "bell.a4e.ar")
 
+
+    /**
+     * TLS trust for our own hosts on old TVs. Android before 7.1 has no
+     * ISRG Root X1 in its store, so every Let's Encrypt certificate — bell's
+     * included, and bell is the last-resort mirror of api.vpn4tv.com — is
+     * "Unacceptable certificate: CN=YR2, O=Let's Encrypt" there. Verification
+     * stays: without it whoever intercepts DNS or the address hands the user
+     * a subscription with their own servers. The two ISRG roots are simply
+     * trusted alongside the system store. Fingerprints (SHA-256):
+     *   X1 96:BC:EC:06:26:49:76:F3:74:60:77:9A:CF:28:C5:A7:CF:E8:A3:C0:AA:E1:1A:8F:FC:EE:05:C0:BD:DF:08:C6
+     *   X2 69:72:9B:8E:15:A8:6E:FC:17:7A:57:AF:B7:17:1D:FC:64:AD:D2:8C:2F:CA:8C:F1:50:7E:34:45:3C:CB:14:70
+     */
+    object TrustedRoots {
+        private const val ISRG_ROOT_X1 = """
+-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
+TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
+cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
+WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
+ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
+MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
+h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
+0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
+A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
+T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
+B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
+B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
+KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
+OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
+jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
+qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
+rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
+HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
+hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
+ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
+3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
+NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
+ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
+TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
+jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
+oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
+4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
+mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
+emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
+-----END CERTIFICATE-----
+"""
+        private const val ISRG_ROOT_X2 = """
+-----BEGIN CERTIFICATE-----
+MIICGzCCAaGgAwIBAgIQQdKd0XLq7qeAwSxs6S+HUjAKBggqhkjOPQQDAzBPMQsw
+CQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJuZXQgU2VjdXJpdHkgUmVzZWFyY2gg
+R3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBYMjAeFw0yMDA5MDQwMDAwMDBaFw00
+MDA5MTcxNjAwMDBaME8xCzAJBgNVBAYTAlVTMSkwJwYDVQQKEyBJbnRlcm5ldCBT
+ZWN1cml0eSBSZXNlYXJjaCBHcm91cDEVMBMGA1UEAxMMSVNSRyBSb290IFgyMHYw
+EAYHKoZIzj0CAQYFK4EEACIDYgAEzZvVn4CDCuwJSvMWSj5cz3es3mcFDR0HttwW
++1qLFNvicWDEukWVEYmO6gbf9yoWHKS5xcUy4APgHoIYOIvXRdgKam7mAHf7AlF9
+ItgKbppbd9/w+kHsOdx1ymgHDB/qo0IwQDAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0T
+AQH/BAUwAwEB/zAdBgNVHQ4EFgQUfEKWrt5LSDv6kviejM9ti6lyN5UwCgYIKoZI
+zj0EAwMDaAAwZQIwe3lORlCEwkSHRhtFcP9Ymd70/aTSVaYgLXTWNLxBo1BfASdW
+tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1
+/q4AaOeMSQ+2b1tbFfLn
+-----END CERTIFICATE-----
+"""
+
+        private fun systemTrustManager(): javax.net.ssl.X509TrustManager {
+            val factory = javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm())
+            factory.init(null as java.security.KeyStore?)
+            return factory.trustManagers.filterIsInstance<javax.net.ssl.X509TrustManager>().first()
+        }
+
+        private fun bundledTrustManager(): javax.net.ssl.X509TrustManager {
+            val certificates = java.security.cert.CertificateFactory.getInstance("X.509")
+            val store = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType())
+            store.load(null, null)
+            listOf(ISRG_ROOT_X1, ISRG_ROOT_X2).forEachIndexed { index, pem ->
+                store.setCertificateEntry("isrg-$index", certificates.generateCertificate(pem.trim().byteInputStream()))
+            }
+            val factory = javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm())
+            factory.init(store)
+            return factory.trustManagers.filterIsInstance<javax.net.ssl.X509TrustManager>().first()
+        }
+
+        /** System store first; the bundled roots only when the system says no. */
+        val trustManager: javax.net.ssl.X509TrustManager by lazy {
+            val system = systemTrustManager()
+            val bundled = bundledTrustManager()
+            object : javax.net.ssl.X509TrustManager {
+                override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) =
+                    system.checkClientTrusted(chain, authType)
+                override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {
+                    try {
+                        system.checkServerTrusted(chain, authType)
+                    } catch (systemRefused: java.security.cert.CertificateException) {
+                        try {
+                            bundled.checkServerTrusted(chain, authType)
+                        } catch (_: java.security.cert.CertificateException) {
+                            throw systemRefused
+                        }
+                    }
+                }
+                override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> =
+                    system.acceptedIssuers + bundled.acceptedIssuers
+            }
+        }
+
+        val socketFactory: javax.net.ssl.SSLSocketFactory by lazy {
+            val context = javax.net.ssl.SSLContext.getInstance("TLS")
+            context.init(null, arrayOf(trustManager), null)
+            context.socketFactory
+        }
+
+        fun apply(connection: HttpURLConnection): HttpURLConnection {
+            if (connection is javax.net.ssl.HttpsURLConnection) {
+                connection.sslSocketFactory = socketFactory
+            }
+            return connection
+        }
+    }
+
     private fun openConnectionWithDnsFallback(url: String): HttpURLConnection {
         val host = URL(url).host
         return try {
@@ -202,14 +320,14 @@ object HwidService {
             // never actually ran (the 2026-07 "subscription won't refresh"
             // incident shipped over exactly that dead code).
             java.net.InetAddress.getByName(host)
-            URL(url).openConnection() as HttpURLConnection
+            TrustedRoots.apply(URL(url).openConnection() as HttpURLConnection)
         } catch (e: java.net.UnknownHostException) {
             android.util.Log.w("HwidService", "System DNS failed for $host, trying DoH chain")
             val ip = resolveViaDoH(host)
             when {
                 ip != null -> {
                     // Replace hostname with resolved IP, set Host header manually
-                    val conn = URL(url.replace(host, ip)).openConnection() as HttpURLConnection
+                    val conn = TrustedRoots.apply(URL(url.replace(host, ip)).openConnection() as HttpURLConnection)
                     conn.setRequestProperty("Host", host)
                     // For HTTPS, SNI is derived from the URL host (now an IP).
                     // Accept the cert for the original hostname instead.
@@ -257,7 +375,7 @@ object HwidService {
      * to still present a proper server_name in the ClientHello.
      */
     private class SniSocketFactory(private val sni: String) : javax.net.ssl.SSLSocketFactory() {
-        private val d = javax.net.ssl.HttpsURLConnection.getDefaultSSLSocketFactory()
+        private val d = TrustedRoots.socketFactory
         override fun getDefaultCipherSuites(): Array<String> = d.defaultCipherSuites
         override fun getSupportedCipherSuites(): Array<String> = d.supportedCipherSuites
         override fun createSocket(s: java.net.Socket, host: String, port: Int, autoClose: Boolean): java.net.Socket =
