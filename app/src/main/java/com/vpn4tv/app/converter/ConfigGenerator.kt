@@ -11,6 +11,10 @@ import java.io.File
  */
 object ConfigGenerator {
 
+    /** Address ranges the FakeDNS server hands out (fc00::/18 lies inside the ULA block). */
+    const val FAKEIP_INET4_RANGE = "198.18.0.0/15"
+    const val FAKEIP_INET6_RANGE = "fc00::/18"
+
     /** Result of [generate]. The sing-box JSON is always present; bridge
      *  sidecar JSONs are non-null only when that bridge is needed. */
     data class Result(
@@ -316,8 +320,8 @@ object ConfigGenerator {
                     put(JSONObject().apply {
                         put("type", "fakeip")
                         put("tag", "dns-fakeip")
-                        put("inet4_range", "198.18.0.0/15")
-                        put("inet6_range", "fc00::/18")
+                        put("inet4_range", FAKEIP_INET4_RANGE)
+                        put("inet6_range", FAKEIP_INET6_RANGE)
                     })
                 }
             })

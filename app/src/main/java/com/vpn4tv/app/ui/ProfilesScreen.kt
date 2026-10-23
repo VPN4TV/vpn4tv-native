@@ -25,8 +25,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
-import com.vpn4tv.app.converter.ConfigGenerator
-import com.vpn4tv.app.converter.ProxyParser
 import com.vpn4tv.app.database.Profile
 import com.vpn4tv.app.database.ProfileManager
 import com.vpn4tv.app.database.Settings
@@ -219,29 +217,14 @@ private fun ProfileItem(
 /** Returns null on success, error message on failure. */
 private fun updateProfile(profile: Profile): String? {
     return try {
-        val sub = com.vpn4tv.app.converter.HwidService.fetchSubscription(
-            com.vpn4tv.app.Application.application, profile.typed.remoteURL,
-        )
-        val proxies = ProxyParser.parseSubscription(sub.body)
-        if (proxies.isEmpty()) return "подписка пуста"
-        val result = ConfigGenerator.generateFull(proxies)
-        ConfigGenerator.writeAll(profile.typed.path, result)
-        profile.typed.lastUpdated = java.util.Date()
-        // Keep the displayed name in sync with whatever the provider advertises
-        // via profile-title. The user can still rename locally later; if we
-        // ever add that, switch this to only update when the user hasn't set
-        // a custom name.
-        if (!sub.title.isNullOrBlank() && sub.title != profile.name) {
-            profile.name = sub.title
+        val outcome = kotlinx.coroutines.runBlocking {
+            com.vpn4tv.app.converter.SubscriptionUpdater.update(
+                com.vpn4tv.app.Application.application, profile,
+            )
         }
-        sub.updateIntervalHours?.let { hours ->
-            profile.typed.autoUpdateInterval = (hours.coerceAtLeast(1) * 60)
-        }
-        kotlinx.coroutines.runBlocking { ProfileManager.update(profile) }
-        com.vpn4tv.app.converter.HwidService.saveUserInfo(
-            com.vpn4tv.app.Application.application, profile.id, sub.userInfo,
-        )
-        Log.d("Profiles", "Updated ${profile.name}: ${proxies.size} proxies")
+        // The profile the tunnel runs: its new keys go live now.
+        com.vpn4tv.app.converter.SubscriptionUpdater.applyToRunningService(profile, outcome)
+        Log.d("Profiles", "Updated ${profile.name}: config=${outcome.configChanged} bridges=${outcome.bridgesChanged}")
         null
     } catch (e: Exception) {
         Log.e("Profiles", "Update failed: ${e.message}", e)

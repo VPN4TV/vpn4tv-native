@@ -198,6 +198,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // (The auto-disable reload goes through serviceReload, not
             // startService, so it does not clear the flag it just set.)
             fakeDnsAutoDisabled = false
+            OutsideVpnGuard.ownerLookupBroken = false
 
             content = try {
                 applyConfigTransforms(content)
@@ -238,96 +239,16 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 .putLong("started_at", System.currentTimeMillis())
                 .apply()
 
-            // Start xray bridge if the profile needs it (xhttp/splithttp outbounds)
-            if (xraySidecar.exists()) {
-                try {
-                    Log.d(TAG, "Starting xray bridge from ${xraySidecar.name}")
-                    com.vpn4tv.app.xray.XrayBridge.start(service.applicationContext, xraySidecar.readText())
-                } catch (e: Exception) {
-                    Log.e(TAG, "xray bridge failed to start: ${e.message}", e)
-                    stopAndAlert(Alert.CreateService, "xray: ${e.message}")
-                    return
-                }
-            }
-
-            // Start outline bridge if the profile has Outline-prefix Shadowsocks endpoints
-            if (outlineSidecar.exists()) {
-                try {
-                    Log.d(TAG, "Starting outline bridge from ${outlineSidecar.name}")
-                    // Dynamic keys (ssconf://) are fetched now, not at import:
-                    // the provider rotates servers behind them.
-                    val outlineConfig =
-                        com.vpn4tv.app.outline.OutlineDynamicKeys.resolveAndPersist(outlineSidecar)
-                    com.vpn4tv.app.outline.OutlineBridge.start(outlineConfig)
-                } catch (e: Exception) {
-                    Log.e(TAG, "outline bridge failed to start: ${e.message}", e)
-                    com.vpn4tv.app.xray.XrayBridge.stop()
-                    com.vpn4tv.app.outline.OutlineBridge.stop()
-                    stopAndAlert(Alert.CreateService, "outline: ${e.message}")
-                    return
-                }
-            }
-
-            // Start wireproxy bridge if the profile has AmneziaWG endpoints
-            if (wgSidecar.exists()) {
-                try {
-                    Log.d(TAG, "Starting wireproxy bridge from ${wgSidecar.name}")
-                    com.vpn4tv.app.wireproxy.WgBridge.start(wgSidecar.readText())
-                } catch (e: Exception) {
-                    Log.e(TAG, "wireproxy bridge failed to start: ${e.message}", e)
-                    com.vpn4tv.app.xray.XrayBridge.stop()
-                    com.vpn4tv.app.outline.OutlineBridge.stop()
-                    com.vpn4tv.app.wireproxy.WgBridge.stop()
-                    stopAndAlert(Alert.CreateService, "wireproxy: ${e.message}")
-                    return
-                }
-            }
-
-            // Start the olcrtc bridge if the profile has olcrtc:// links. Not in
-            // the 32-bit libbox: say so, rather than a bare start error.
-            if (olcrtcSidecar.exists()) {
-                try {
-                    if (!com.vpn4tv.app.olcrtc.OlcrtcBridge.isAvailable()) {
-                        throw IllegalStateException("olcRTC is not available on this device (32-bit build)")
-                    }
-                    Log.d(TAG, "Starting olcrtc bridge from ${olcrtcSidecar.name}")
-                    com.vpn4tv.app.olcrtc.OlcrtcBridge.start(olcrtcSidecar.readText())
-                } catch (e: Exception) {
-                    Log.e(TAG, "olcrtc bridge failed to start: ${e.message}", e)
-                    com.vpn4tv.app.xray.XrayBridge.stop()
-                    com.vpn4tv.app.outline.OutlineBridge.stop()
-                    com.vpn4tv.app.wireproxy.WgBridge.stop()
-                    com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
-                    com.vpn4tv.app.trusttunnel.TrustTunnelBridge.stop()
-                    stopAndAlert(Alert.CreateService, "olcrtc: ${e.message}")
-                    return
-                }
-            }
-
-            // Start the TrustTunnel bridge if the profile has tt:// links. Its
-            // upstream sockets go through VpnService.protect; in proxy mode
-            // there is no VPN and nothing to protect against.
-            if (ttSidecar.exists()) {
-                try {
-                    Log.d(TAG, "Starting trusttunnel bridge from ${ttSidecar.name}")
-                    val vpn = service as? android.net.VpnService
-                    com.vpn4tv.app.trusttunnel.TrustTunnelBridge.start(ttSidecar.readText()) { fd ->
-                        vpn?.protect(fd) ?: true
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "trusttunnel bridge failed to start: ${e.message}", e)
-                    com.vpn4tv.app.xray.XrayBridge.stop()
-                    com.vpn4tv.app.outline.OutlineBridge.stop()
-                    com.vpn4tv.app.wireproxy.WgBridge.stop()
-                    com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
-                    com.vpn4tv.app.trusttunnel.TrustTunnelBridge.stop()
-                    stopAndAlert(Alert.CreateService, "trusttunnel: ${e.message}")
-                    return
-                }
+            // A fresh start brings every bridge up from scratch, as before: the
+            // record of what runs is cleared, so syncBridges starts them all.
+            synchronized(bridgeLock) { runningBridgeSidecars.clear() }
+            syncBridges(profile.typed.path)?.let { error ->
+                stopAndAlert(Alert.CreateService, error)
+                return
             }
 
             Log.d(TAG, "Starting sing-box with config ${content.length} bytes...")
-            content.chunked(3000).forEachIndexed { idx, chunk ->
+            BridgeAuth.redact(content).chunked(3000).forEachIndexed { idx, chunk ->
                 Log.d(TAG, "singbox config[$idx]: $chunk")
             }
             try {
@@ -417,6 +338,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             if (fakeDnsInConfig && !fakeDnsAutoDisabled) {
                 Thread { runFakeDnsHealthCheck() }.start()
             }
+            // The tun guard rejects connections the system won't name an owner
+            // for; make sure it names ours, or drop the rule for the session.
+            if (OutsideVpnGuard.inConfig(content)) OutsideVpnGuard.verifyAfterStart()
         } catch (e: Exception) {
             stopAndAlert(Alert.StartService, e.message)
             return
@@ -587,6 +511,12 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             return
         }
         lastProfileName = profile.name
+        // Bridges first: the new config may aim at a bridge the old one did not
+        // have, or at one whose link changed. Unchanged bridges keep running.
+        syncBridges(profile.typed.path)?.let { error ->
+            stopAndAlert(Alert.CreateService, error)
+            return
+        }
         try {
             commandServer.startOrReloadService(
                 content,
@@ -668,11 +598,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 close()
 //                Seq.destroyRef(refnum)
             }
-            com.vpn4tv.app.xray.XrayBridge.stop()
-            com.vpn4tv.app.outline.OutlineBridge.stop()
-            com.vpn4tv.app.wireproxy.WgBridge.stop()
-            com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
-            com.vpn4tv.app.trusttunnel.TrustTunnelBridge.stop()
+            stopAllBridges()
             Settings.startedByUser = false
             withContext(Dispatchers.Main) {
                 status.value = Status.Stopped
@@ -703,11 +629,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             closeService()
             commandServer.close()
         }
-        com.vpn4tv.app.xray.XrayBridge.stop()
-        com.vpn4tv.app.outline.OutlineBridge.stop()
-        com.vpn4tv.app.wireproxy.WgBridge.stop()
-        com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
-        com.vpn4tv.app.trusttunnel.TrustTunnelBridge.stop()
+        stopAllBridges()
         withContext(Dispatchers.Main) {
             if (receiverRegistered) {
                 service.unregisterReceiver(receiver)
@@ -971,6 +893,116 @@ class BoxService(private val service: Service, private val platformInterface: Pl
      * then proxy-mode rewrite OR bypass-LAN. Throws only on a fatal proxy-mode
      * rewrite failure; the caller stopAndAlerts.
      */
+    // ── Bridges ────────────────────────────────────────────────────────────
+
+    private val bridgeLock = Any()
+
+    /**
+     * The sidecar each running bridge was started from, by kind, as it reads
+     * on disk (outline: after its dynamic keys were resolved and written back).
+     * Lets a reload restart only the bridges whose sidecar changed.
+     */
+    private val runningBridgeSidecars = mutableMapOf<String, String>()
+
+    private fun bridgeSidecars(profilePath: String) = listOf(
+        "xray" to File(com.vpn4tv.app.converter.ConfigGenerator.xraySidecarPath(profilePath)),
+        "outline" to File(com.vpn4tv.app.converter.ConfigGenerator.outlineSidecarPath(profilePath)),
+        "wireproxy" to File(com.vpn4tv.app.converter.ConfigGenerator.wgSidecarPath(profilePath)),
+        "olcrtc" to File(com.vpn4tv.app.converter.ConfigGenerator.olcrtcSidecarPath(profilePath)),
+        "trusttunnel" to File(com.vpn4tv.app.converter.ConfigGenerator.ttSidecarPath(profilePath)),
+    )
+
+    /**
+     * Bring the bridges in line with the profile's sidecars: start the new
+     * ones, restart the changed ones, stop the ones the profile no longer has.
+     * A bridge whose sidecar did not change keeps running — its connections,
+     * and olcRTC's slow WebRTC session, survive a reload that is not about it.
+     *
+     * Returns null on success. On a failure every bridge is stopped and the
+     * result is "kind: message", for the alert.
+     */
+    private fun syncBridges(profilePath: String): String? = synchronized(bridgeLock) {
+        for ((kind, file) in bridgeSidecars(profilePath)) {
+            val text = if (file.exists()) file.readText() else null
+            if (text == runningBridgeSidecars[kind]) continue
+            try {
+                if (text == null) {
+                    Log.d(TAG, "Stopping the $kind bridge: the profile no longer has it")
+                    stopBridge(kind)
+                    runningBridgeSidecars.remove(kind)
+                } else {
+                    Log.d(TAG, "Starting the $kind bridge from ${file.name}")
+                    runningBridgeSidecars[kind] = startBridge(kind, file, text)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "$kind bridge failed to start: ${e.message}", e)
+                stopAllBridgesLocked()
+                return "$kind: ${e.message}"
+            }
+        }
+        null
+    }
+
+    /** Start one bridge (a start replaces a running one). Returns the sidecar text to remember. */
+    private fun startBridge(kind: String, file: File, text: String): String = when (kind) {
+        "xray" -> {
+            com.vpn4tv.app.xray.XrayBridge.start(service.applicationContext, BridgeAuth.applyToXray(text))
+            text
+        }
+        "outline" -> {
+            // Dynamic keys (ssconf://) are fetched now, not at import: the
+            // provider rotates servers behind them.
+            val resolved = com.vpn4tv.app.outline.OutlineDynamicKeys.resolveAndPersist(file)
+            // Credentials in memory only — resolveAndPersist writes the sidecar
+            // back, and the pair must never land on disk.
+            com.vpn4tv.app.outline.OutlineBridge.start(BridgeAuth.applyToEndpoints(resolved))
+            resolved
+        }
+        "wireproxy" -> {
+            com.vpn4tv.app.wireproxy.WgBridge.start(BridgeAuth.applyToEndpoints(text))
+            text
+        }
+        "olcrtc" -> {
+            // Not in the 32-bit libbox: say so, rather than a bare start error.
+            if (!com.vpn4tv.app.olcrtc.OlcrtcBridge.isAvailable()) {
+                throw IllegalStateException("olcRTC is not available on this device (32-bit build)")
+            }
+            com.vpn4tv.app.olcrtc.OlcrtcBridge.start(BridgeAuth.applyToEndpoints(text))
+            text
+        }
+        "trusttunnel" -> {
+            // Upstream sockets go through VpnService.protect; in proxy mode
+            // there is no VPN and nothing to protect against.
+            val vpn = service as? android.net.VpnService
+            com.vpn4tv.app.trusttunnel.TrustTunnelBridge.start(BridgeAuth.applyToEndpoints(text)) { fd ->
+                vpn?.protect(fd) ?: true
+            }
+            text
+        }
+        else -> throw IllegalArgumentException("unknown bridge $kind")
+    }
+
+    private fun stopBridge(kind: String) {
+        when (kind) {
+            "xray" -> com.vpn4tv.app.xray.XrayBridge.stop()
+            "outline" -> com.vpn4tv.app.outline.OutlineBridge.stop()
+            "wireproxy" -> com.vpn4tv.app.wireproxy.WgBridge.stop()
+            "olcrtc" -> com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
+            "trusttunnel" -> com.vpn4tv.app.trusttunnel.TrustTunnelBridge.stop()
+        }
+    }
+
+    private fun stopAllBridges() = synchronized(bridgeLock) { stopAllBridgesLocked() }
+
+    private fun stopAllBridgesLocked() {
+        com.vpn4tv.app.xray.XrayBridge.stop()
+        com.vpn4tv.app.outline.OutlineBridge.stop()
+        com.vpn4tv.app.wireproxy.WgBridge.stop()
+        com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
+        com.vpn4tv.app.trusttunnel.TrustTunnelBridge.stop()
+        runningBridgeSidecars.clear()
+    }
+
     private fun applyConfigTransforms(raw: String): String {
         var content = raw
         // Probed DNS: the generated config has ConfigGenerator's defaults, but
@@ -1004,13 +1036,21 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         if (Settings.isProxyMode) {
             // Swap TUN for a SOCKS5 listener; may throw → fatal (caller alerts).
             content = rewriteConfigForProxyMode(content)
-        } else if (Settings.bypassLan) {
-            try {
-                content = injectBypassLanRule(content)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to inject bypass-lan rule: ${e.message}")
+        } else {
+            if (Settings.bypassLan) {
+                try {
+                    content = injectBypassLanRule(content)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to inject bypass-lan rule: ${e.message}")
+                }
             }
+            // Apps outside the VPN must not get in through the tun; the rule
+            // goes first, ahead of the sniff/hijack-dns prelude.
+            content = OutsideVpnGuard.applyToSingbox(content)
         }
+        // Bridge inbounds want a password now (see BridgeAuth). Both the start
+        // and the reload path come through here, with the same per-process pair.
+        content = BridgeAuth.applyToSingbox(content)
         return content
     }
 
@@ -1056,13 +1096,18 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     }
 
     /**
-     * Insert `{ip_is_private: true, outbound: "direct"}` into the route rules
-     * so that LAN traffic (RFC1918, link-local, ULA, multicast) stays on the
-     * underlying network. The rule is placed *after* the leading sniff and
-     * hijack-dns rules so DNS still goes through the tunnel, but *before*
-     * any fallback UDP-direct rule so LAN UDP is handled here explicitly.
-     * Idempotent: checks for an existing ip_is_private rule and returns the
-     * config unchanged if one is already present.
+     * Insert a route rule sending private destinations (RFC1918, link-local,
+     * ULA, multicast) to "direct", so LAN traffic stays on the underlying
+     * network. The FakeDNS ranges are carved out: fc00::/18 lies inside ULA,
+     * and an app may still hold a fake address from an earlier session after
+     * FakeDNS was turned off and nothing maps it back. Sent direct it can
+     * only fail on the LAN ("network is unreachable"); through the proxy the
+     * server recovers the domain from the request.
+     * The rule is placed *after* the leading sniff and hijack-dns rules so
+     * DNS still goes through the tunnel, but *before* any fallback UDP-direct
+     * rule so LAN UDP is handled here explicitly.
+     * Idempotent: checks for an existing ip_is_private rule (plain or inside
+     * a logical rule) and returns the config unchanged if one is present.
      */
     private fun injectBypassLanRule(jsonText: String): String {
         val root = org.json.JSONObject(jsonText)
@@ -1070,14 +1115,24 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         val oldRules = route.optJSONArray("rules") ?: return jsonText
 
         // Already there? No-op.
+        fun isPrivateRule(rule: org.json.JSONObject?): Boolean = rule != null &&
+            (rule.optBoolean("ip_is_private", false) ||
+                rule.optJSONArray("rules")?.let { sub -> (0 until sub.length()).any { isPrivateRule(sub.optJSONObject(it)) } } == true)
         for (i in 0 until oldRules.length()) {
-            if (oldRules.getJSONObject(i).optBoolean("ip_is_private", false)) {
-                return jsonText
-            }
+            if (isPrivateRule(oldRules.getJSONObject(i))) return jsonText
         }
 
+        val fakeRanges = org.json.JSONArray()
+            .put(com.vpn4tv.app.converter.ConfigGenerator.FAKEIP_INET4_RANGE)
+            .put(com.vpn4tv.app.converter.ConfigGenerator.FAKEIP_INET6_RANGE)
         val bypassRule = org.json.JSONObject().apply {
-            put("ip_is_private", true)
+            put("type", "logical")
+            put("mode", "and")
+            put("rules", org.json.JSONArray().apply {
+                put(org.json.JSONObject().put("ip_is_private", true))
+                put(org.json.JSONObject().put("ip_cidr", fakeRanges).put("invert", true))
+            })
+            put("action", "route")
             put("outbound", "direct")
         }
 

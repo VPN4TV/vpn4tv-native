@@ -52,7 +52,9 @@ interface PlatformInterfaceWrapper : PlatformInterface {
                     InetSocketAddress(sourceAddress, sourcePort),
                     InetSocketAddress(destinationAddress, destinationPort),
                 )
-            if (uid == Process.INVALID_UID) error("android: connection owner not found")
+            // The system names only owners this VPN applies to: anything else
+            // got into the tun by binding to it (see OutsideVpnGuard).
+            if (uid == Process.INVALID_UID) return OutsideVpnGuard.outsideOwner()
             val packages = Application.packageManager.getPackagesForUid(uid)
             val owner = ConnectionOwner()
             owner.userId = uid

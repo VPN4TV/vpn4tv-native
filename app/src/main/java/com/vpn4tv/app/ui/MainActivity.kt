@@ -327,32 +327,12 @@ class MainActivity : ComponentActivity() {
 
     private fun updateProfileConfig(profile: Profile) {
         try {
-            val sub = com.vpn4tv.app.converter.HwidService.fetchSubscription(
-                applicationContext, profile.typed.remoteURL,
-            )
-            val proxies = ProxyParser.parseSubscription(sub.body)
-            if (proxies.isEmpty()) {
-                Log.w(TAG, "No proxies in subscription")
-                return
+            val outcome = kotlinx.coroutines.runBlocking {
+                com.vpn4tv.app.converter.SubscriptionUpdater.update(applicationContext, profile)
             }
-            val result = ConfigGenerator.generateFull(proxies)
-            ConfigGenerator.writeAll(profile.typed.path, result)
-            var nameChanged = false
-            if (!sub.title.isNullOrBlank() && sub.title != profile.name) {
-                profile.name = sub.title
-                nameChanged = true
-            }
-            sub.updateIntervalHours?.let { hours ->
-                profile.typed.autoUpdateInterval = (hours.coerceAtLeast(1) * 60)
-                nameChanged = true
-            }
-            if (nameChanged) {
-                kotlinx.coroutines.runBlocking { ProfileManager.update(profile) }
-            }
-            com.vpn4tv.app.converter.HwidService.saveUserInfo(
-                applicationContext, profile.id, sub.userInfo,
-            )
-            Log.d(TAG, "Config updated: ${proxies.size} proxies, xray=${result.xrayJson != null}, outline=${result.outlineJson != null}")
+            Log.d(TAG, "Config updated: config=${outcome.configChanged} bridges=${outcome.bridgesChanged}")
+            // Opening the app while connected: new keys go live now.
+            com.vpn4tv.app.converter.SubscriptionUpdater.applyToRunningService(profile, outcome)
         } catch (e: Exception) {
             Log.e(TAG, "Config update failed: ${e.message}")
         }

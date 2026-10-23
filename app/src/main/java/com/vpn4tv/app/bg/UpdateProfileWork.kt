@@ -10,14 +10,10 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequest
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import io.nekohasekai.libbox.Libbox
 import com.vpn4tv.app.Application
 import com.vpn4tv.app.database.ProfileManager
-import com.vpn4tv.app.database.Settings
 import com.vpn4tv.app.database.TypedProfile
-import com.vpn4tv.app.converter.HwidService
-import java.io.File
-import java.util.Date
+import com.vpn4tv.app.converter.SubscriptionUpdater
 import java.util.concurrent.TimeUnit
 
 class UpdateProfileWork {
@@ -38,6 +34,7 @@ class UpdateProfileWork {
                 ProfileManager.list()
                     .filter { it.typed.type == TypedProfile.Type.Remote && it.typed.autoUpdate }
             if (remoteProfiles.isEmpty()) {
+                Log.i(TAG, "auto-update: no subscription profiles, cancelled")
                 WorkManager.getInstance(Application.application).cancelUniqueWork(WORK_NAME)
                 return
             }
@@ -48,6 +45,9 @@ class UpdateProfileWork {
             val minInitDelay =
                 remoteProfiles.minOf { (it.typed.autoUpdateInterval * 60) - (nowSeconds - (it.typed.lastUpdated.time / 1000L)) }
             if (minDelay < 15) minDelay = 15
+            // The initial delay only applies when the work is new; an existing
+            // periodic work keeps its schedule (WorkManager UPDATE policy).
+            Log.i(TAG, "auto-update: ${remoteProfiles.size} profile(s), every $minDelay min")
             WorkManager.getInstance(Application.application).enqueueUniquePeriodicWork(
                 WORK_NAME,
                 ExistingPeriodicWorkPolicy.UPDATE,
@@ -79,13 +79,11 @@ class UpdateProfileWork {
 
     class UpdateTask(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
         override suspend fun doWork(): Result {
-            var selectedProfileUpdated = false
             val remoteProfiles =
                 ProfileManager.list()
                     .filter { it.typed.type == TypedProfile.Type.Remote && it.typed.autoUpdate }
             if (remoteProfiles.isEmpty()) return Result.success()
             var success = true
-            val selectedProfile = Settings.selectedProfile
             for (profile in remoteProfiles) {
                 val lastSeconds =
                     (System.currentTimeMillis() - profile.typed.lastUpdated.time) / 1000L
@@ -93,31 +91,16 @@ class UpdateProfileWork {
                     continue
                 }
                 try {
-                    // Go through HwidService.fetchSubscription — it carries
-                    // DNS fallback + 10-attempt retry + bell.a4e.ar mirror.
-                    // Silent WorkManager updates previously used Libbox's
-                    // HTTPClient which has no such fallback, so users whose
-                    // ISP blocks api.vpn4tv.com never got a fresh config in
-                    // the background.
-                    val content = HwidService.fetchSubscription(applicationContext, profile.typed.remoteURL).body
-                    Libbox.checkConfig(content)
-                    val file = File(profile.typed.path)
-                    if (file.readText() != content) {
-                        File(profile.typed.path).writeText(content)
-                        if (profile.id == selectedProfile) {
-                            selectedProfileUpdated = true
-                        }
-                    }
-                    profile.typed.lastUpdated = Date()
-                    ProfileManager.update(profile)
+                    // Same steps as the refresh buttons: fetch, parse, regenerate
+                    // the config and its bridge sidecars. HwidService carries the
+                    // DNS fallback, retries and the bell.a4e.ar mirror.
+                    val outcome = SubscriptionUpdater.update(applicationContext, profile)
+                    Log.i(TAG, "updated ${profile.name}: config=${outcome.configChanged} bridges=${outcome.bridgesChanged}")
+                    // The reload re-syncs the bridges, so a changed link applies too.
+                    SubscriptionUpdater.applyToRunningService(profile, outcome)
                 } catch (e: Exception) {
                     Log.e(TAG, "update profile ${profile.name}", e)
                     success = false
-                }
-            }
-            if (selectedProfileUpdated) {
-                runCatching {
-                    Libbox.newStandaloneCommandClient().serviceReload()
                 }
             }
             return if (success) {

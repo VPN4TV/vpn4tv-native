@@ -248,10 +248,17 @@ fun HomeScreen(
                 Text("VPN4TV", fontSize = titleSize, fontWeight = FontWeight.Bold, color = Color.White)
                 if (activeProfile != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // The name yields, the refresh button does not: on a phone
+                        // the five icons on the right leave this column ~100 dp,
+                        // and an unweighted name took all of it — the button was
+                        // measured at zero width and simply was not there.
                         Text(
                             activeProfile?.name ?: "",
                             fontSize = 14.sp,
-                            color = Color.Gray
+                            color = Color.Gray,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         IconButton(
@@ -263,29 +270,13 @@ fun HomeScreen(
                                         try {
                                             val p = activeProfile!!
                                             if (p.typed.remoteURL.isNotEmpty()) {
-                                                val sub = com.vpn4tv.app.converter.HwidService.fetchSubscription(
-                                                    com.vpn4tv.app.Application.application, p.typed.remoteURL,
+                                                val outcome = com.vpn4tv.app.converter.SubscriptionUpdater.update(
+                                                    com.vpn4tv.app.Application.application, p,
                                                 )
-                                                val proxies = com.vpn4tv.app.converter.ProxyParser.parseSubscription(sub.body)
-                                                if (proxies.isEmpty()) {
-                                                    errorMsg = "подписка пуста"
-                                                } else {
-                                                    val result = com.vpn4tv.app.converter.ConfigGenerator.generateFull(proxies)
-                                                    com.vpn4tv.app.converter.ConfigGenerator.writeAll(p.typed.path, result)
-                                                    p.typed.lastUpdated = java.util.Date()
-                                                    if (!sub.title.isNullOrBlank() && sub.title != p.name) {
-                                                        p.name = sub.title
-                                                    }
-                                                    sub.updateIntervalHours?.let { hours ->
-                                                        p.typed.autoUpdateInterval = (hours.coerceAtLeast(1) * 60)
-                                                    }
-                                                    com.vpn4tv.app.database.ProfileManager.update(p)
-                                                    activeProfile = p
-                                                    subscriptionInfo = sub.userInfo
-                                                    com.vpn4tv.app.converter.HwidService.saveUserInfo(
-                                                        com.vpn4tv.app.Application.application, p.id, sub.userInfo,
-                                                    )
-                                                }
+                                                activeProfile = p
+                                                subscriptionInfo = outcome.userInfo
+                                                // New keys go live now, not at the next connect.
+                                                com.vpn4tv.app.converter.SubscriptionUpdater.applyToRunningService(p, outcome)
                                             }
                                         } catch (e: Exception) {
                                             errorMsg = e.message ?: e.javaClass.simpleName

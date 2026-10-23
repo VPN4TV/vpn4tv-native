@@ -54,7 +54,7 @@ object XrayBridge {
             stop()
         }
         // Log in 3000-char chunks so logcat doesn't truncate a large config
-        configJson.chunked(3000).forEachIndexed { idx, chunk ->
+        com.vpn4tv.app.bg.BridgeAuth.redact(configJson).chunked(3000).forEachIndexed { idx, chunk ->
             Log.d(TAG, "xray config[$idx]: $chunk")
         }
         try {

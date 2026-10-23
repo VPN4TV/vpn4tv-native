@@ -181,6 +181,10 @@ class VPNService :
 
         val pfd =
             builder.establish() ?: error("android: the application is not prepared or is revoked")
+        // A reload establishes a new tun. libbox works on its own dup, so the
+        // previous descriptor is only ours and would keep the old interface
+        // alive until GC.
+        service.fileDescriptor?.close()
         service.fileDescriptor = pfd
         return pfd.fd
     }

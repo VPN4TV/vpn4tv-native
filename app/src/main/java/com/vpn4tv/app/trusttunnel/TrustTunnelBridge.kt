@@ -60,7 +60,7 @@ object TrustTunnelBridge {
             for (i in 0 until endpoints.length()) {
                 val entry = endpoints.getJSONObject(i)
                 val port = entry.getInt("port")
-                val toml = buildToml(entry.getString("url"), port)
+                val toml = buildToml(entry.getString("url"), port, entry.optString("username"), entry.optString("password"))
                 val client = VpnClient(toml, object : VpnClientListener {
                     override fun protectSocket(fd: Int): Boolean = protect(fd)
                     override fun verifyCertificate(certificate: ByteArray?, rawChain: List<ByteArray?>?): Boolean =
@@ -95,7 +95,7 @@ object TrustTunnelBridge {
      * feature and must stay off here or the listener blocks traffic when the
      * endpoint drops instead of letting sing-box fail over.
      */
-    private fun buildToml(link: String, port: Int): String {
+    private fun buildToml(link: String, port: Int, username: String, password: String): String {
         val endpointToml = DeepLink.decode(link)
         return buildString {
             append("vpn_mode = \"general\"\n")
@@ -103,8 +103,17 @@ object TrustTunnelBridge {
             append(endpointToml.trimEnd()).append('\n')
             append("\n[listener.socks]\n")
             append("address = \"").append(SOCKS_HOST).append(':').append(port).append("\"\n")
+            // The loopback is shared by every app on the device; see BridgeAuth.
+            // The library's SOCKS listener then accepts username/password only.
+            if (username.isNotEmpty()) {
+                append("username = ").append(tomlString(username)).append('\n')
+                append("password = ").append(tomlString(password)).append('\n')
+            }
         }
     }
+
+    private fun tomlString(value: String): String =
+        "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
     @Synchronized
     fun stop() {
