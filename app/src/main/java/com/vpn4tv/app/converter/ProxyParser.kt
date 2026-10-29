@@ -133,19 +133,34 @@ object ProxyParser {
      * and give it a tag. The display name lives inside the payload, so the tag
      * is generic until the bridge decodes it.
      */
+    /**
+     * tt://?<base64url TLV>[#<label>] — the '?' is optional. The subscription
+     * server may write a human label after '#'; only the part before it is the
+     * key. Without a usable label a short fingerprint keeps several TrustTunnel
+     * keys apart in the list.
+     */
     private fun parseTrustTunnel(uri: String): ProxyConfig? {
-        val payload = uri.removePrefix("tt://").removePrefix("?")
+        val body = uri.removePrefix("tt://").removePrefix("?")
+        val hash = body.indexOf('#')
+        val payload = if (hash >= 0) body.substring(0, hash) else body
         if (payload.isEmpty() || !Regex("^[A-Za-z0-9_=-]+$").matches(payload)) return null
-        // A short fingerprint keeps several TrustTunnel keys apart in the list.
-        val fingerprint = payload.takeLast(6)
+        val label = if (hash >= 0) decodeLabel(body.substring(hash + 1)) else ""
         return ProxyConfig(
-            tag = "TrustTunnel $fingerprint",
+            tag = label.ifEmpty { "TrustTunnel ${payload.takeLast(6)}" },
             type = "trusttunnel",
             server = "",
             serverPort = 0,
             outbound = JSONObject(),
-            ttUrl = uri,
+            // The bridge's decoder wants the bare TLV link, without the label.
+            ttUrl = "tt://?$payload",
         )
+    }
+
+    /** A URL-encoded label, or "" if it is empty or does not decode. */
+    private fun decodeLabel(fragment: String): String = try {
+        java.net.URLDecoder.decode(fragment.replace("+", "%2B"), "UTF-8").trim()
+    } catch (_: Exception) {
+        ""
     }
 
     private fun safeDecode(value: String): String = try {

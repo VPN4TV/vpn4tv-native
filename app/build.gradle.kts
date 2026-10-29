@@ -23,6 +23,11 @@ fun getProps(propName: String): String {
 }
 
 android {
+    // JVM unit tests: android.jar is stubs only, so calls like android.util.Log
+    // return defaults instead of throwing; org.json comes from the real library.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
     namespace = "com.vpn4tv.app"
     compileSdk = 36
 
@@ -30,8 +35,8 @@ android {
         applicationId = "com.vpn4tv.hiddify"
         minSdk = 23
         targetSdk = 36
-        versionCode = 53001
-        versionName = "5.3.0"
+        versionCode = 53100
+        versionName = "5.3.1"
         base.archivesName.set("VPN4TV-Native-${versionName}")
 
         // libbox.aar ships only armeabi-v7a + arm64-v8a; x86 variants would
@@ -129,6 +134,8 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     // libbox (sing-box JNI core with embedded xray-core for xhttp/splithttp)
     implementation(files("libs/libbox.aar"))
 
