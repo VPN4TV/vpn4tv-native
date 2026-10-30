@@ -6,13 +6,14 @@ import com.vpn4tv.app.BuildConfig
 
 /**
  * Best-effort off-device upload of diagnostic dumps to bell.a4e.ar/crash.
- * Shared by the Go-crash surfacer (consumeCrashLog, kind="crash") and the
- * connect-watchdog (kind="hang") — Play strips/truncates the in-app frames and
+ * Shared by the Go-crash surfacer (consumeCrashLog, kind="crash"), the Java crash
+ * reporter (JavaCrashReport, kind="java-crash") and the connect-watchdog (kind="hang") — Play strips/truncates the in-app frames and
  * field hangs never reach Vitals at all, so the receiver is the only way to see
  * full goroutine stacks. Off-thread, never throws.
  */
 object CrashUpload {
-    fun upload(content: String, bridges: String, kind: String) {
+    /** Returns the upload thread, already started; callers that must not lose the report can join it. */
+    fun upload(content: String, bridges: String, kind: String): Thread =
         Thread {
             var conn: java.net.HttpURLConnection? = null
             try {
@@ -38,6 +39,5 @@ object CrashUpload {
             } finally {
                 conn?.disconnect()
             }
-        }.apply { name = "crash-upload" }.start()
-    }
+        }.apply { name = "crash-upload"; start() }
 }

@@ -35,6 +35,10 @@ class Application : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // First thing: catch Java crashes from here on, and send the one from the previous launch (if any)
+        // before the code that may crash again runs.
+        com.vpn4tv.app.utils.JavaCrashReport.install(this)
+        com.vpn4tv.app.utils.JavaCrashReport.uploadPrevious(this)
         AppLifecycleObserver.register(this)
 
         // MUST run before any Room or Settings access: on first v5 boot we

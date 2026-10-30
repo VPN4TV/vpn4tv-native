@@ -297,10 +297,22 @@ tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1
             }
         }
 
+        /**
+         * The system store plus the bundled roots, or the system factory alone if building that fails.
+         * Cheap TV boxes ship odd security providers: any throw here (KeyStoreException, a provider
+         * RuntimeException) used to escape the API call that touched it first — the pairing screen on a
+         * fresh install — and take the whole app down at launch. Without the extra roots only the
+         * old-Android Let's Encrypt fallback is lost; the system store keeps working.
+         */
         val socketFactory: javax.net.ssl.SSLSocketFactory by lazy {
-            val context = javax.net.ssl.SSLContext.getInstance("TLS")
-            context.init(null, arrayOf(trustManager), null)
-            context.socketFactory
+            try {
+                val context = javax.net.ssl.SSLContext.getInstance("TLS")
+                context.init(null, arrayOf(trustManager), null)
+                context.socketFactory
+            } catch (t: Throwable) {
+                android.util.Log.w("HwidService", "bundled roots unavailable, system store only", t)
+                javax.net.ssl.HttpsURLConnection.getDefaultSSLSocketFactory()
+            }
         }
 
         fun apply(connection: HttpURLConnection): HttpURLConnection {
