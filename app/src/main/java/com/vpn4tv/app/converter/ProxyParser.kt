@@ -274,8 +274,15 @@ object ProxyParser {
 
         // Try base64 decode first (some subs are base64-encoded)
         val decoded = tryBase64Decode(source) ?: source
-        return decoded.lines()
-            .mapNotNull { parse(it) }
+        // One unparsable line must not cost the whole subscription.
+        return decoded.lines().mapNotNull { line ->
+            try {
+                parse(line)
+            } catch (e: Exception) {
+                android.util.Log.w("ProxyParser", "Skipping an unparsable line: ${e.message}")
+                null
+            }
+        }
     }
 
     private fun tryBase64Decode(input: String): String? {
@@ -368,12 +375,19 @@ object ProxyParser {
     private fun parseHysteria2(uri: String): ProxyConfig? {
         // hysteria2://AUTH@HOST:PORT?params#NAME
         // hy2://AUTH@HOST:PORT?params#NAME
+        // PORT may be a port-hopping list: HOST:8443,9443,20000-40000/?params
         val normalized = uri.replace("hy2://", "hysteria2://")
         val parsed = Uri.parse(normalized)
         val password = parsed.userInfo ?: return null
-        val host = parsed.host ?: return null
-        val port = parsed.port.takeIf { it > 0 } ?: 443
-        val name = URLDecoder.decode(parsed.fragment ?: host, "UTF-8")
+        val endpoint = parseHysteria2Endpoint(normalized) ?: return null
+        val host = endpoint.host
+        val name = (parsed.fragment ?: host).let { raw ->
+            try {
+                URLDecoder.decode(raw, "UTF-8")
+            } catch (_: IllegalArgumentException) {
+                raw // a broken %-escape keeps the text as it is
+            }
+        }
         val params = parseQueryParams(parsed)
 
         val sni = params["sni"] ?: host
@@ -385,7 +399,7 @@ object ProxyParser {
             put("type", "hysteria2")
             put("tag", name)
             put("server", host)
-            put("server_port", port)
+            putHysteria2Ports(this, endpoint)
             put("password", password)
 
             put("tls", JSONObject().apply {
@@ -402,7 +416,84 @@ object ProxyParser {
             }
         }
 
-        return ProxyConfig(tag = name, type = "hysteria2", server = host, serverPort = port, outbound = outbound)
+        return ProxyConfig(tag = name, type = "hysteria2", server = host, serverPort = endpoint.port, outbound = outbound)
+    }
+
+    /**
+     * Host and port(s) of a hysteria2 link. [serverPorts] is set when the link
+     * hops ports, in sing-box form ("20000:40000"); [port] is then the first
+     * hop port, kept for ProxyConfig only.
+     */
+    internal data class Hysteria2Endpoint(
+        val host: String,
+        val port: Int,
+        val serverPorts: List<String>? = null,
+    )
+
+    /**
+     * HOST[:PORTS] of a hysteria2 link, read without android.net.Uri. Our
+     * backend writes hy2-only keys with a port-hopping list
+     * (host:8443,9443,20000-40000/?sni=…), which Uri cannot read: getPort()
+     * is -1 and getHost() returns the list along with the host, so those keys
+     * used to dial port 443, where nothing listens.
+     *
+     * PORTS is ENTRY[,ENTRY…], ENTRY a port or FIRST-LAST. One plain port stays
+     * a single port; several entries or any range become server_ports, in link
+     * order. No PORTS, or a broken one (empty entry, non-digit, FIRST > LAST,
+     * outside 1..65535), gives 443 as before. An IPv6 host comes without its
+     * brackets, as in parseHostPort.
+     */
+    internal fun parseHysteria2Endpoint(uri: String): Hysteria2Endpoint? {
+        val rest = uri.substringAfter("://", "")
+        // End the authority where android.net.Uri ends it, so the host is cut
+        // at the same '@' as the password Uri reads.
+        val end = rest.indexOfFirst { it == '/' || it == '\\' || it == '?' || it == '#' }
+        val hostPorts = (if (end >= 0) rest.substring(0, end) else rest).substringAfterLast('@')
+        val host: String
+        val portSpec: String?
+        if (hostPorts.startsWith("[")) {
+            val close = hostPorts.indexOf(']')
+            if (close < 0) return null
+            host = hostPorts.substring(1, close)
+            portSpec = hostPorts.substring(close + 1).takeIf { it.startsWith(":") }?.substring(1)
+        } else {
+            // One ':' separates host and ports. More than one without brackets is
+            // an IPv6 address with no port (RFC 3986 brackets a v6 host that has
+            // one), so 2001:db8::abcd stays whole.
+            val colon = hostPorts.lastIndexOf(':')
+            val splits = colon >= 0 && hostPorts.indexOf(':') == colon
+            host = if (splits) hostPorts.substring(0, colon) else hostPorts
+            portSpec = if (splits) hostPorts.substring(colon + 1) else null
+        }
+        if (host.isEmpty()) return null
+        val fallback = Hysteria2Endpoint(host, 443)
+
+        val entries = portSpec?.split(',') ?: return fallback
+        val entryRe = Regex("([0-9]+)(?:-([0-9]+))?")
+        val ranges = entries.map { entry ->
+            val match = entryRe.matchEntire(entry) ?: return fallback
+            val first = match.groupValues[1].toIntOrNull() ?: return fallback
+            val last = match.groupValues[2].ifEmpty { match.groupValues[1] }.toIntOrNull() ?: return fallback
+            if (first < 1 || last > 65535 || first > last) return fallback
+            first to last
+        }
+        if (entries.size == 1 && '-' !in entries[0]) return Hysteria2Endpoint(host, ranges[0].first)
+        return Hysteria2Endpoint(host, ranges[0].first, ranges.map { (first, last) -> "$first:$last" })
+    }
+
+    /**
+     * server_port for one port; server_ports and hop_interval for a hopping
+     * list, the shape the backend's health check dials. sing-box ignores
+     * server_port next to server_ports, so it is left out.
+     */
+    internal fun putHysteria2Ports(outbound: JSONObject, endpoint: Hysteria2Endpoint) {
+        val serverPorts = endpoint.serverPorts
+        if (serverPorts == null) {
+            outbound.put("server_port", endpoint.port)
+        } else {
+            outbound.put("server_ports", serverPorts.toJsonArray())
+            outbound.put("hop_interval", "30s")
+        }
     }
 
     // ─── TROJAN ─────────────────────────────────────────────
