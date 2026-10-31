@@ -40,20 +40,30 @@ object DefaultNetworkMonitor {
         checkDefaultInterfaceUpdate(defaultNetwork)
     }
 
+    // Up to 10 tries for the interface to appear, and ONE update once it has: each
+    // updateDefaultInterface makes the core re-read every interface through Java
+    // (GetInterfaces: allNetworks, getLinkProperties, getNetworkCapabilities — binder
+    // calls), so the old loop without the return did that ten times on every start and
+    // every network change; on slow TVs the start sat there past the 45 s watchdog
+    // (crash analyzer group 004423caff). Same as upstream SFA ea63fb0f8b + 6aaa84d043.
     private fun checkDefaultInterfaceUpdate(newNetwork: Network?) {
         val listener = listener ?: return
         if (newNetwork != null) {
-            val interfaceName =
-                (Application.connectivity.getLinkProperties(newNetwork) ?: return).interfaceName
             for (times in 0 until 10) {
+                val linkProperties = Application.connectivity.getLinkProperties(newNetwork)
+                if (linkProperties == null) {
+                    Thread.sleep(100)
+                    continue
+                }
                 var interfaceIndex: Int
                 try {
-                    interfaceIndex = NetworkInterface.getByName(interfaceName).index
+                    interfaceIndex = NetworkInterface.getByName(linkProperties.interfaceName).index
                 } catch (e: Exception) {
                     Thread.sleep(100)
                     continue
                 }
-                listener.updateDefaultInterface(interfaceName, interfaceIndex, false, false)
+                listener.updateDefaultInterface(linkProperties.interfaceName, interfaceIndex, false, false)
+                return
             }
         } else {
             listener.updateDefaultInterface("", -1, false, false)
