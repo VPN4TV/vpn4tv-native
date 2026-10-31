@@ -48,6 +48,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     companion object {
         private const val PROFILE_UPDATE_INTERVAL = 15L * 60 * 1000 // 15 minutes in milliseconds
         private const val TAG = "BoxService"
+
+        // Reload requests this close together cost one reload.
+        private const val RELOAD_COALESCE_MS = 1500L
         val globalStatus = MutableLiveData(Status.Stopped)
         val lastError = MutableLiveData<String?>(null)
 
@@ -96,6 +99,18 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     private val notification = ServiceNotification(status, service)
     private lateinit var commandServer: CommandServer
 
+    // Starts and reloads run one at a time, and a burst of reload requests is
+    // one reload (ReloadGate). A stop does not wait here: it must be able to
+    // close a start that hangs, and the core closes a starting instance at once.
+    private val reloadGate = ReloadGate(RELOAD_COALESCE_MS)
+
+    // Set while this service's command server is being closed. A reload that
+    // was already inside serviceReload0 when the service stopped must not reach
+    // the closed server: the core still starts an instance there, nothing ever
+    // closes it, and it holds a tun and cache.db next to the next session's.
+    @Volatile
+    private var closing = false
+
     private var receiverRegistered = false
     private val receiver =
         object : BroadcastReceiver() {
@@ -119,12 +134,15 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         val commandServer = CommandServer(this, platformInterface)
         commandServer.start()
         this.commandServer = commandServer
+        closing = false
         Log.d(TAG, "commandServer started")
     }
 
     private var lastProfileName = ""
 
-    private suspend fun startService() {
+    private suspend fun startService() = reloadGate.start { startService0() }
+
+    private suspend fun startService0() {
         Log.d(TAG, "startService() begin")
         try {
             withContext(Dispatchers.Main) {
@@ -395,10 +413,10 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 .getSharedPreferences("session", android.content.Context.MODE_PRIVATE)
                 .edit().putBoolean("fakeDns_auto_disabled", true).apply()
             if (globalStatus.value != Status.Started) return
-            // Route the reload through the command-server IPC (same path as the
-            // WorkManager auto-update) rather than poking this BoxService
-            // instance directly from an arbitrary thread — it serializes with
-            // the server's own lifecycle and sidesteps the stop/reload TOCTOU.
+            // Through the command server like every other reload: serviceReload
+            // runs it after any start or reload in progress and merges it with
+            // requests that come at the same time (ReloadGate). The server
+            // itself does not order reloads.
             try {
                 val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
                 try { client.serviceReload() } finally { client.disconnect() }
@@ -484,13 +502,28 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         closeService()
     }
 
+    // Every reload request ends up here, on a command server thread: the
+    // refresh buttons, the refresh at launch, the background worker, the
+    // FakeDNS and tun-guard self-checks. They used to run side by side.
     override fun serviceReload() {
         runBlocking {
-            serviceReload0()
+            if (!reloadGate.reload { serviceReload0() }) {
+                Log.d(TAG, "serviceReload: already applied by a start or reload that began after the request")
+            }
         }
     }
 
+    /** Started, with a live command server: a reload has something to reload. */
+    private fun reloadable(): Boolean =
+        ::commandServer.isInitialized && !closing && globalStatus.value == Status.Started
+
     suspend fun serviceReload0() {
+        // The request may have waited behind a start or another reload; the
+        // service may be stopping or stopped by now.
+        if (!reloadable()) {
+            Log.w(TAG, "serviceReload skipped — service not running")
+            return
+        }
         val selectedProfileId = Settings.selectedProfile
         if (selectedProfileId == -1L) {
             stopAndAlert(Alert.EmptyConfiguration)
@@ -516,7 +549,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         }
         // Bail if the service is being torn down — a reload landing concurrently
         // with stopService()/closeService() would hit a closed command server.
-        if (!::commandServer.isInitialized || globalStatus.value == Status.Stopped) {
+        if (!reloadable()) {
             Log.w(TAG, "serviceReload skipped — service not running")
             return
         }
@@ -525,6 +558,11 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         // have, or at one whose link changed. Unchanged bridges keep running.
         syncBridges(profile.typed.path)?.let { error ->
             stopAndAlert(Alert.CreateService, error)
+            return
+        }
+        // Restarting a bridge takes time; check once more right before the core.
+        if (!reloadable()) {
+            Log.w(TAG, "serviceReload skipped — service not running")
             return
         }
         try {
@@ -543,6 +581,12 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 },
             )
         } catch (e: Exception) {
+            // A stop that closed the service under the reload is not an error
+            // to show; stopService finishes the teardown.
+            if (!reloadable()) {
+                Log.w(TAG, "reload ended by a stop: ${e.message}")
+                return
+            }
             stopAndAlert(Alert.CreateService, e.message)
             return
         }
@@ -590,6 +634,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     @OptIn(DelicateCoroutinesApi::class)
     private fun stopService() {
         if (status.value != Status.Started) return
+        closing = true
         status.value = Status.Stopping
         if (receiverRegistered) {
             service.unregisterReceiver(receiver)
@@ -626,6 +671,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     }
 
     private suspend fun stopAndAlert(type: Alert, message: String? = null) {
+        closing = true
         Log.e(TAG, "stopAndAlert: ${type.name} — $message")
         lastError.postValue("${type.name}: ${message ?: "unknown"}")
         Settings.startedByUser = false
