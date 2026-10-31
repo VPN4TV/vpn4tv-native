@@ -51,6 +51,12 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         val globalStatus = MutableLiveData(Status.Stopped)
         val lastError = MutableLiveData<String?>(null)
 
+        // Connect attempts, for the watchdog. Static: a watchdog armed by an earlier
+        // BoxService instance must see the newer attempts too.
+        private val connectAttempt = java.util.concurrent.atomic.AtomicInteger()
+        private val recentAttempts = java.util.ArrayDeque<Long>()
+        @Volatile private var startStage = ""
+
         // Set by the post-connect FakeDNS health check when the proxy is
         // provably alive but the fakeip/domain path is broken on this
         // network/router. While set, the config pipeline strips FakeDNS, so the
@@ -200,6 +206,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             fakeDnsAutoDisabled = false
             OutsideVpnGuard.ownerLookupBroken = false
 
+            markStage("transforms")
             content = try {
                 applyConfigTransforms(content)
             } catch (e: Exception) {
@@ -242,11 +249,13 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // A fresh start brings every bridge up from scratch, as before: the
             // record of what runs is cleared, so syncBridges starts them all.
             synchronized(bridgeLock) { runningBridgeSidecars.clear() }
+            markStage("bridges")
             syncBridges(profile.typed.path)?.let { error ->
                 stopAndAlert(Alert.CreateService, error)
                 return
             }
 
+            markStage("core")
             Log.d(TAG, "Starting sing-box with config ${content.length} bytes...")
             BridgeAuth.redact(content).chunked(3000).forEachIndexed { idx, chunk ->
                 Log.d(TAG, "singbox config[$idx]: $chunk")
@@ -305,6 +314,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
 
             // Restore saved server selection
+            markStage("restore")
             restoreSavedServer()
 
             lastError.postValue(null)
@@ -662,8 +672,20 @@ class BoxService(private val service: Service, private val platformInterface: Pl
      * clean.
      */
     private fun armConnectWatchdog() {
+        val attempt = connectAttempt.incrementAndGet()
+        val armedAt = android.os.SystemClock.elapsedRealtime()
+        synchronized(recentAttempts) {
+            recentAttempts.addLast(armedAt)
+            while (recentAttempts.size > 20) recentAttempts.removeFirst()
+        }
+        startStage = "armed"
         Thread {
             try { Thread.sleep(45_000) } catch (_: InterruptedException) { return@Thread }
+            // A later connect re-armed the watchdog, so this Starting is not ours: that
+            // attempt has its own watchdog. Without this check the oldest watchdog fired
+            // 45 s after ITS connect and killed a newer attempt only seconds old — 13 of
+            // the 24 hangs in the 2026-10-31 crash digest had more watchdogs still asleep.
+            if (attempt != connectAttempt.get()) return@Thread
             if (globalStatus.value != Status.Starting) return@Thread // reached Started/Stopped
             Log.w(TAG, "Connect watchdog: stuck in Starting 45s — capturing stacks")
             val sp = Application.application.getSharedPreferences("session", Context.MODE_PRIVATE)
@@ -682,6 +704,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     for (f in frames) sb.append("\tat ").append(f).append('\n')
                     sb.append('\n')
                 }
+                sb.append(watchdogTrailer(attempt, armedAt))
                 com.vpn4tv.app.utils.CrashUpload.upload(sb.toString(), bridges, "hang-java")
             } catch (t: Throwable) {
                 Log.w(TAG, "java stack dump failed: ${t.message}")
@@ -702,6 +725,27 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             try { Thread.sleep(3000) } catch (_: InterruptedException) {}
             android.os.Process.killProcess(android.os.Process.myPid())
         }.apply { name = "connect-watchdog" }.start()
+    }
+
+    /**
+     * One line after the thread list of the hang-java report (the analyzer's parser
+     * skips it): which attempt, how long it ran, how old the process is, how many
+     * connects in the last minute, and the last start stage it reached.
+     */
+    private fun watchdogTrailer(attempt: Int, armedAt: Long): String {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val lastMinute = synchronized(recentAttempts) { recentAttempts.count { now - it < 60_000 } }
+        val uptime = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            now - android.os.Process.getStartElapsedRealtime()
+        } else {
+            -1L
+        }
+        return "# vpn4tv watchdog attempt=$attempt attemptMs=${now - armedAt} processUptimeMs=$uptime " +
+            "attemptsLast60s=$lastMinute stage=$startStage\n"
+    }
+
+    private fun markStage(name: String) {
+        startStage = "$name@${android.os.SystemClock.elapsedRealtime()}"
     }
 
     @OptIn(DelicateCoroutinesApi::class)
@@ -768,6 +812,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 stopAndAlert(Alert.StartCommandServer, "Libbox init timeout")
                 return@launch
             }
+            markStage("command-server")
             try {
                 startCommandServer()
             } catch (t: Throwable) {
@@ -785,6 +830,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 }
                 return@launch
             }
+            markStage("profile")
             startService()
         }
         return Service.START_NOT_STICKY
