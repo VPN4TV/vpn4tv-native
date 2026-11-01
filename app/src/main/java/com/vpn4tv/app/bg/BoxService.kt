@@ -345,13 +345,15 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 // A start that fails with "Russia direct" is retried without
                 // it; if that fails too, the block was not the cause and the
                 // error is the one the user saw before.
-                if (content == base || closing) {
+                // Without it means with the torrents rule alone: torrents go direct in every mode.
+                val fallback = RussiaDirectRuntime.torrentsOnly(base, "session")
+                if (content == base || content == fallback || closing) {
                     stopAndAlert(Alert.CreateService, e.message)
                     return
                 }
                 Log.w(TAG, "start with Russia direct failed, retrying without it: ${e.message}")
                 try {
-                    commandServer.startOrReloadService(base, overrideOptions())
+                    commandServer.startOrReloadService(fallback, overrideOptions())
                 } catch (e2: Exception) {
                     Log.e(TAG, "start without Russia direct failed too: ${e2.message}", e2)
                     lastError.postValue("startService: ${e2.message}")
@@ -359,8 +361,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     return
                 }
                 RussiaDirectRuntime.rolledBack(Application.application, e.message)
-                routed = RussiaDirectRuntime.Prepared(base, "off (session: the start with it failed: ${e.message})", warn = true)
-                content = base
+                routed = RussiaDirectRuntime.Prepared(fallback, "off (session: the start with it failed: ${e.message})", warn = true)
+                content = fallback
                 lastError.postValue(null)
             }
             logRussiaDirect(routed)
@@ -489,15 +491,19 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         try {
             Thread.sleep(4000) // let the tunnel + bridges settle
             fun wanted() = !RussiaDirectRuntime.dnsRuFallback && globalStatus.value == Status.Started
-            if (!wanted()) return
-            if (RussiaDirectRuntime.probeDnsRu(attempts = 3) { wanted() }) {
-                Log.i(TAG, "dns-ru health check OK")
-                return
-            }
-            if (!wanted()) return
-            if (!probeProxyAliveByIp()) {
-                Log.w(TAG, "dns-ru health check: no answer, but the proxy is down too — not blaming dns-ru")
-                return
+            // A second round a minute later when the first cannot tell: the
+            // proxy was not up yet either (slow bridges, a start at boot).
+            for (round in 1..2) {
+                if (!wanted()) return
+                if (RussiaDirectRuntime.probeDnsRu(attempts = 3) { wanted() }) {
+                    Log.i(TAG, "dns-ru health check OK")
+                    return
+                }
+                if (!wanted()) return
+                if (probeProxyAliveByIp()) break
+                Log.w(TAG, "dns-ru health check: no answer, but the proxy is down too — not blaming dns-ru (round $round of 2)")
+                if (round == 2) return
+                Thread.sleep(60_000)
             }
             Log.w(TAG, "dns-ru health check FAILED — Russian names resolve through dns-direct this session; reloading")
             RussiaDirectRuntime.dnsRuFallback = true
@@ -672,14 +678,15 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         } catch (e: Exception) {
             // As in startService: without "Russia direct" once more, unless the
             // block was not in or the service is going away.
-            if (routed.content == base || !reloadable()) {
+            val fallback = RussiaDirectRuntime.torrentsOnly(base, "session")
+            if (routed.content == base || routed.content == fallback || !reloadable()) {
                 RussiaDirectRuntime.onStopped(Application.application)
                 failReload(Alert.CreateService, e.message)
                 return
             }
             Log.w(TAG, "reload with Russia direct failed, retrying without it: ${e.message}")
             try {
-                commandServer.startOrReloadService(base, overrideOptions())
+                commandServer.startOrReloadService(fallback, overrideOptions())
             } catch (e2: Exception) {
                 Log.e(TAG, "reload without Russia direct failed too: ${e2.message}", e2)
                 RussiaDirectRuntime.onStopped(Application.application)
@@ -687,7 +694,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 return
             }
             RussiaDirectRuntime.rolledBack(Application.application, e.message)
-            routed = RussiaDirectRuntime.Prepared(base, "off (session: the reload with it failed: ${e.message})", warn = true)
+            routed = RussiaDirectRuntime.Prepared(fallback, "off (session: the reload with it failed: ${e.message})", warn = true)
         }
         logRussiaDirect(routed)
         RussiaDirectRuntime.onRunning(Application.application, routed)

@@ -108,9 +108,21 @@ object RussiaDirectRuntime {
         Prepared(base, "off (error: ${t.javaClass.simpleName}: ${t.message})", warn = true)
     }
 
+    /**
+     * [base] with the plain-BitTorrent rule alone: what runs while the block is
+     * off for safety (crash guard, a failed start or check). Torrents go direct
+     * in every mode, and that rule alone cannot fail a start.
+     */
+    fun torrentsOnly(base: String, reason: String): String = try {
+        RussiaDirect.apply(base, RussiaDirect.Options(offReason = reason)).json
+    } catch (t: Throwable) {
+        Log.e(TAG, "torrents rule not applied: ${t.message}", t)
+        base
+    }
+
     private fun prepare0(context: Context, base: String, profileId: Long): Prepared {
-        admit(context)?.let { return Prepared(base, "off ($it)", warn = true) }
-        sessionOffReason?.let { return Prepared(base, "off ($it)", warn = true) }
+        admit(context)?.let { return Prepared(torrentsOnly(base, it), "off ($it)", warn = true) }
+        sessionOffReason?.let { return Prepared(torrentsOnly(base, it), "off ($it)", warn = true) }
         val offReason = when {
             Settings.allThroughVpn -> "user"
             HwidService.ruDirectOff(context, profileId) -> "head"
@@ -133,7 +145,7 @@ object RussiaDirectRuntime {
         if (result.applied) {
             checkProblem(context, result.json, base)?.let { problem ->
                 disarm(context, survived = false)
-                return Prepared(base, "off (check: $problem)", warn = true)
+                return Prepared(torrentsOnly(base, "check: $problem"), "off (check: $problem)", warn = true)
             }
         }
         return Prepared(result.json, result.state, warn, guarded = true, usesDnsRu = result.usesDnsRu)
