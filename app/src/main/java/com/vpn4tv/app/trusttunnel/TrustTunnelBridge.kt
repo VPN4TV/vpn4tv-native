@@ -96,7 +96,7 @@ object TrustTunnelBridge {
      * endpoint drops instead of letting sing-box fail over.
      */
     private fun buildToml(link: String, port: Int, username: String, password: String): String {
-        val endpointToml = DeepLink.decode(link)
+        val endpointToml = TtToml.withoutDnsUpstreams(DeepLink.decode(link))
         return buildString {
             append("vpn_mode = \"general\"\n")
             append("killswitch_enabled = false\n")
@@ -133,5 +133,36 @@ object TrustTunnelBridge {
         clients.clear()
         running = false
         Log.i(TAG, "trusttunnel bridge stopped")
+    }
+}
+
+/**
+ * The TOML a tt:// link decodes to, minus `dns_upstreams`. With them the
+ * library raises its own DNS proxy: a listener on 127.0.0.1 with no password
+ * that resolves through the tunnel, so any app on the device could learn the
+ * server's exit address from it (and its UDP relay takes any socket of this
+ * process). sing-box does the app's DNS anyway, and a name in a CONNECT is
+ * resolved by the TrustTunnel endpoint.
+ */
+internal object TtToml {
+    private val key = Regex("^\\s*dns_upstreams\\s*=")
+
+    fun withoutDnsUpstreams(toml: String): String {
+        val kept = mutableListOf<String>()
+        var inArray = false
+        for (line in toml.lines()) {
+            if (inArray) {
+                if (line.contains(']')) inArray = false
+                continue
+            }
+            if (key.containsMatchIn(line)) {
+                val value = line.substringAfter('=')
+                // A multi-line array: skip up to its closing bracket.
+                if (value.contains('[') && !value.contains(']')) inArray = true
+                continue
+            }
+            kept += line
+        }
+        return kept.joinToString("\n")
     }
 }
