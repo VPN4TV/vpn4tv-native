@@ -30,6 +30,19 @@ object TrustTunnelBridge {
 
     const val SOCKS_HOST = "127.0.0.127"
 
+    /**
+     * The library's "system" DNS proxy sends here: a closed port on the
+     * loopback (below 1024, so no app can take it). That proxy listens on
+     * 127.0.0.1 without a password whatever the link holds, and its upstream
+     * sockets are not protected: with the default upstream (AdGuard's, nobody
+     * sets system servers here) an app outside the VPN could send it a query
+     * that goes into our TUN, sing-box's hijack-dns and dns-remote through the
+     * selected server, and read that server's /24 from the answer
+     * (o-o.myaddr.l.google.com). The library asks this proxy only while the
+     * endpoint is down or for excluded domains, and we have no exclusions.
+     */
+    private const val SYSTEM_DNS_DEAD_END = "127.0.0.1:9"
+
     /** The AAR declares minSdk 24; the app runs on 23. Never touch it below 24. */
     val isSupported: Boolean get() = Build.VERSION.SDK_INT >= 24
 
@@ -55,6 +68,8 @@ object TrustTunnelBridge {
         }
         val endpoints = JSONObject(configJson).getJSONArray("endpoints")
         if (endpoints.length() == 0) throw IllegalArgumentException("no TrustTunnel endpoints")
+        // One setting for the whole process, read by each client's DNS handler at start.
+        VpnClient.setSystemDnsServers(listOf(SYSTEM_DNS_DEAD_END), null)
         val verificator = CertificateVerificator()
         try {
             for (i in 0 until endpoints.length()) {

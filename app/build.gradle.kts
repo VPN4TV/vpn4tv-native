@@ -2,6 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.FileInputStream
 import java.util.Properties
+import java.util.zip.ZipFile
 
 plugins {
     id("com.android.application")
@@ -204,3 +205,61 @@ tasks.withType<KotlinCompile>().configureEach {
         jvmTarget.set(JvmTarget.JVM_17)
     }
 }
+
+// TrustTunnel's socks outbound carries UDP (ConfigGenerator). That is safe only with the
+// relay of our build of the library (branch vpn4tv-udp), which serves the one socket of
+// this process that opened the association. The older relay takes datagrams from any app
+// on the device, around the bridge password, and nothing else would show it: libs/ is not
+// in git and the Java part of both builds is the same. So the build stops on an old AAR.
+val checkTrustTunnelAar by tasks.registering {
+    description = "Fails unless libs/trusttunnel-client.aar has the UDP relay that serves its own client only."
+    val aar = layout.projectDirectory.file("libs/trusttunnel-client.aar")
+    inputs.file(aar)
+    doLast {
+        val marker = "UDP association bound to" // a log line of that relay, in every ABI
+        val wanted = setOf("arm64-v8a", "armeabi-v7a")
+        val found = mutableSetOf<String>()
+        ZipFile(aar.asFile).use { zip ->
+            for (entry in zip.entries()) {
+                val abi = Regex("jni/([^/]+)/libtrusttunnel_android\\.so")
+                    .matchEntire(entry.name)?.groupValues?.get(1) ?: continue
+                val so = String(zip.getInputStream(entry).use { it.readBytes() }, Charsets.ISO_8859_1)
+                if (!so.contains(marker)) throw GradleException(
+                    "libs/trusttunnel-client.aar ($abi) has the old UDP relay, open to every app on " +
+                        "the device: rebuild it from the TrustTunnel library's vpn4tv-udp branch")
+                found += abi
+            }
+        }
+        if (!found.containsAll(wanted)) throw GradleException(
+            "libs/trusttunnel-client.aar has no TrustTunnel library for ${wanted - found}")
+    }
+}
+
+// The same for libbox: the configs need the core of the bridge-udp branch. An older one skips
+// the dns field of the Outline and AmneziaWG bridges without a word (their servers' names then
+// go to the tunnel's own DNS, a loop in bridge-only profiles), keeps UDP ASSOCIATE on and has
+// no cap on UDP sessions.
+val checkLibboxAar by tasks.registering {
+    description = "Fails unless libs/libbox.aar is a core with the bridges' own DNS resolver."
+    val aar = layout.projectDirectory.file("libs/libbox.aar")
+    inputs.file(aar)
+    doLast {
+        val marker = "is not a usable server" // a log line of that resolver, in every ABI
+        val wanted = setOf("arm64-v8a", "armeabi-v7a")
+        val found = mutableSetOf<String>()
+        ZipFile(aar.asFile).use { zip ->
+            for (entry in zip.entries()) {
+                val abi = Regex("jni/([^/]+)/libbox\\.so")
+                    .matchEntire(entry.name)?.groupValues?.get(1) ?: continue
+                val so = String(zip.getInputStream(entry).use { it.readBytes() }, Charsets.ISO_8859_1)
+                if (!so.contains(marker)) throw GradleException(
+                    "libs/libbox.aar ($abi) is an older core, without the bridges' DNS resolver: " +
+                        "rebuild it from the core's bridge-udp branch")
+                found += abi
+            }
+        }
+        if (!found.containsAll(wanted)) throw GradleException(
+            "libs/libbox.aar has no core for ${wanted - found}")
+    }
+}
+tasks.named("preBuild") { dependsOn(checkTrustTunnelAar, checkLibboxAar) }
