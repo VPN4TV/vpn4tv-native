@@ -42,6 +42,7 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 class BoxService(private val service: Service, private val platformInterface: PlatformInterface) : CommandServerHandler {
@@ -51,6 +52,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
         // Reload requests this close together cost one reload.
         private const val RELOAD_COALESCE_MS = 1500L
+
+        // How long a stop waits for a start or reload that is still running.
+        private const val STOP_WAITS_FOR_RELOAD_MS = 15_000L
         val globalStatus = MutableLiveData(Status.Stopped)
         val lastError = MutableLiveData<String?>(null)
 
@@ -80,7 +84,15 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                         Intent(Application.application, Settings.serviceClass())
                     }
                 }
-            ContextCompat.startForegroundService(Application.application, intent)
+            // From the background (the per-app screen restarts the service after the
+            // stop has ended, the user may have left the app) Android 12+ refuses
+            // a foreground start in proxy mode: VPN consent exempts only VPNService.
+            try {
+                ContextCompat.startForegroundService(Application.application, intent)
+            } catch (e: IllegalStateException) {
+                Log.e(TAG, "start refused: ${e.message}")
+                lastError.postValue("StartService: ${e.message}")
+            }
         }
 
         fun stop() {
@@ -100,8 +112,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     private lateinit var commandServer: CommandServer
 
     // Starts and reloads run one at a time, and a burst of reload requests is
-    // one reload (ReloadGate). A stop does not wait here: it must be able to
-    // close a start that hangs, and the core closes a starting instance at once.
+    // one reload (ReloadGate). A stop waits here too, for a limited time: the
+    // core finishes a reload that is already inside it even when the service is
+    // closed under it, and only the stop can close what that reload started.
     private val reloadGate = ReloadGate(RELOAD_COALESCE_MS)
 
     // Set while this service's command server is being closed. A reload that
@@ -517,6 +530,16 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     private fun reloadable(): Boolean =
         ::commandServer.isInitialized && !closing && globalStatus.value == Status.Started
 
+    // A reload that fails after a stop has begun is not an error to show, and the
+    // stop tears the service down itself.
+    private suspend fun failReload(type: Alert, message: String? = null) {
+        if (!reloadable()) {
+            Log.w(TAG, "reload failed after a stop: ${type.name} — $message")
+            return
+        }
+        stopAndAlert(type, message)
+    }
+
     suspend fun serviceReload0() {
         // The request may have waited behind a start or another reload; the
         // service may be stopping or stopped by now.
@@ -526,25 +549,25 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         }
         val selectedProfileId = Settings.selectedProfile
         if (selectedProfileId == -1L) {
-            stopAndAlert(Alert.EmptyConfiguration)
+            failReload(Alert.EmptyConfiguration)
             return
         }
 
         val profile = ProfileManager.get(selectedProfileId)
         if (profile == null) {
-            stopAndAlert(Alert.EmptyConfiguration)
+            failReload(Alert.EmptyConfiguration)
             return
         }
 
         val rawContent = File(profile.typed.path).readText()
         if (rawContent.isBlank()) {
-            stopAndAlert(Alert.EmptyConfiguration)
+            failReload(Alert.EmptyConfiguration)
             return
         }
         val content = try {
             applyConfigTransforms(rawContent)
         } catch (e: Exception) {
-            stopAndAlert(Alert.CreateService, "proxy-mode rewrite: ${e.message}")
+            failReload(Alert.CreateService, "proxy-mode rewrite: ${e.message}")
             return
         }
         // Bail if the service is being torn down — a reload landing concurrently
@@ -557,7 +580,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         // Bridges first: the new config may aim at a bridge the old one did not
         // have, or at one whose link changed. Unchanged bridges keep running.
         syncBridges(profile.typed.path)?.let { error ->
-            stopAndAlert(Alert.CreateService, error)
+            failReload(Alert.CreateService, error)
             return
         }
         // Restarting a bridge takes time; check once more right before the core.
@@ -581,13 +604,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 },
             )
         } catch (e: Exception) {
-            // A stop that closed the service under the reload is not an error
-            // to show; stopService finishes the teardown.
-            if (!reloadable()) {
-                Log.w(TAG, "reload ended by a stop: ${e.message}")
-                return
-            }
-            stopAndAlert(Alert.CreateService, e.message)
+            failReload(Alert.CreateService, e.message)
             return
         }
 
@@ -599,7 +616,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
                 }
             if (!service.hasPermission(wifiPermission)) {
-                stopAndAlert(Alert.RequestLocationPermission)
+                failReload(Alert.RequestLocationPermission)
                 return
             }
         }
@@ -642,6 +659,20 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         }
         notification.close()
         GlobalScope.launch(Dispatchers.IO) {
+            // Before the wait below: if the process dies meanwhile, boot must not
+            // connect again what the user has just turned off.
+            Settings.startedByUser = false
+            // A start or reload already inside the core finishes there even when
+            // the service is closed under it: a close while the core is closing
+            // the old instance does nothing, and an instance closed during its
+            // Start still brings up its tun. Nothing would close what it started,
+            // and the device would keep a VPN with no tunnel behind it while the
+            // app shows it stopped. Wait for it, for a limited time, then close
+            // what it left. A reload that has not reached the core yet sees
+            // `closing` and stops short.
+            if (withTimeoutOrNull(STOP_WAITS_FOR_RELOAD_MS) { reloadGate.awaitIdle() } == null) {
+                Log.w(TAG, "stop: a start or reload still runs after $STOP_WAITS_FOR_RELOAD_MS ms")
+            }
             val pfd = fileDescriptor
             if (pfd != null) {
                 pfd.close()
@@ -654,8 +685,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 //                Seq.destroyRef(refnum)
             }
             stopAllBridges()
-            Settings.startedByUser = false
             withContext(Dispatchers.Main) {
+                // Again: a start that finished while this stop waited shows it.
+                notification.close()
                 status.value = Status.Stopped
                 service.stopSelf()
             }
@@ -798,7 +830,22 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     @Suppress("SameReturnValue")
     internal fun onStartCommand(): Int {
         Log.d(TAG, "onStartCommand, status=${status.value}")
-        if (status.value != Status.Stopped) return Service.START_NOT_STICKY
+        if (status.value != Status.Stopped) {
+            // A start asked for while a stop runs is dropped with the service,
+            // but it came through startForegroundService, and the system takes
+            // the app down if the service ends without entering the foreground.
+            // The stop closes this notification when it ends.
+            if (status.value == Status.Stopping) {
+                notification.show(lastProfileName, R.string.status_stopping)
+                // The status is shared by both service classes: a start of the
+                // other one (the mode changed meanwhile) has no stop to close it.
+                if (!closing) {
+                    notification.close()
+                    service.stopSelf()
+                }
+            }
+            return Service.START_NOT_STICKY
+        }
         status.value = Status.Starting
 
         // Android 14 gives a foreground service only 5 seconds between

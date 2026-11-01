@@ -22,7 +22,11 @@ import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
 import com.vpn4tv.app.database.Settings
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class AppEntry(
     val packageName: String,
@@ -50,9 +54,18 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
         // Auto-reconnect if VPN is running and settings changed
         if (changed && com.vpn4tv.app.bg.BoxService.globalStatus.value == com.vpn4tv.app.constant.Status.Started) {
             com.vpn4tv.app.bg.BoxService.stop()
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                com.vpn4tv.app.bg.BoxService.start()
-            }, 1000)
+            // Start again once the stop has ended: it may wait for a reload in
+            // progress, and a start asked for before it ends is dropped.
+            GlobalScope.launch(Dispatchers.Main) {
+                withTimeoutOrNull(20_000) {
+                    while (com.vpn4tv.app.bg.BoxService.globalStatus.value != com.vpn4tv.app.constant.Status.Stopped) delay(100)
+                }
+                if (com.vpn4tv.app.bg.BoxService.globalStatus.value == com.vpn4tv.app.constant.Status.Stopped) {
+                    com.vpn4tv.app.bg.BoxService.start()
+                } else {
+                    android.util.Log.w("PerAppProxyScreen", "restart dropped: the stop has not ended in 20 s")
+                }
+            }
         }
         onBack()
     }

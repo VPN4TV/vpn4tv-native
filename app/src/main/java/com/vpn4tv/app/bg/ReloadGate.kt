@@ -61,6 +61,9 @@ internal class ReloadGate(private val coalesceMillis: Long) {
         }
     }
 
+    /** Returns once no start or reload holds the gate. A stop waits here before it closes the service. */
+    suspend fun awaitIdle() = mutex.withLock { }
+
     private fun serve(upTo: Long) {
         if (upTo > served) served = upTo
     }
