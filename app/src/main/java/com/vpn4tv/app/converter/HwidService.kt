@@ -28,6 +28,10 @@ data class SubscriptionResponse(
     val supportUrl: String?,
     /** `subscription-userinfo` header, pre-parsed into fields. */
     val userInfo: SubscriptionUserInfo?,
+    /** `x-vpn4tv-ru-direct: 0` from our server: no "Russia direct" for this subscription. */
+    val ruDirectOff: Boolean = false,
+    /** `x-vpn4tv-ru-vpn` from our server: more names kept on the VPN under "Russia direct". */
+    val ruVpnExtra: List<String> = emptyList(),
 )
 
 data class SubscriptionUserInfo(
@@ -157,6 +161,8 @@ object HwidService {
             webPageUrl = conn.getHeaderField("profile-web-page-url"),
             supportUrl = conn.getHeaderField("support-url"),
             userInfo = parseUserInfo(conn.getHeaderField("subscription-userinfo")),
+            ruDirectOff = conn.getHeaderField("x-vpn4tv-ru-direct")?.trim() == "0",
+            ruVpnExtra = parseNameList(conn.getHeaderField("x-vpn4tv-ru-vpn")),
         )
     }
 
@@ -607,6 +613,46 @@ tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1
         val s = context.getSharedPreferences(SUB_INFO_PREFS, Context.MODE_PRIVATE)
             .getString("p$profileId", null)
         return SubscriptionUserInfo.fromJson(s)
+    }
+
+    /**
+     * Keep what our server said about "Russia direct" for this profile.
+     * Returns whether it differs from what was kept (nothing kept = on, no
+     * extra names), so only a real change asks for a reload.
+     */
+    fun saveRuDirect(context: Context, profileId: Long, off: Boolean, extra: List<String>): Boolean {
+        val prefs = context.getSharedPreferences(SUB_INFO_PREFS, Context.MODE_PRIVATE)
+        val extraText = extra.joinToString(",")
+        val changed = prefs.getBoolean("rd$profileId", false) != off ||
+            prefs.getString("rv$profileId", "").orEmpty() != extraText
+        if (changed) {
+            prefs.edit().putBoolean("rd$profileId", off).putString("rv$profileId", extraText).apply()
+        }
+        return changed
+    }
+
+    /** Our server turned "Russia direct" off for this profile. */
+    fun ruDirectOff(context: Context, profileId: Long): Boolean =
+        context.getSharedPreferences(SUB_INFO_PREFS, Context.MODE_PRIVATE).getBoolean("rd$profileId", false)
+
+    /** Names our server keeps on the VPN for this profile, besides the built-in exceptions. */
+    fun ruVpnExtra(context: Context, profileId: Long): List<String> =
+        context.getSharedPreferences(SUB_INFO_PREFS, Context.MODE_PRIVATE)
+            .getString("rv$profileId", "").orEmpty()
+            .split(',').filter { it.isNotEmpty() }
+
+    /**
+     * `a.ru, b.su` → domain_suffix values: lower case, letters, digits, dots
+     * and dashes only, at most 500 of them. Anything else is dropped.
+     */
+    internal fun parseNameList(raw: String?): List<String> {
+        if (raw.isNullOrBlank()) return emptyList()
+        val name = Regex("^\\.?[a-z0-9-]+(\\.[a-z0-9-]+)*$")
+        return raw.split(',')
+            .map { it.trim().lowercase() }
+            .filter { it.length in 1..253 && name.matches(it) }
+            .distinct()
+            .take(500)
     }
 
     /**

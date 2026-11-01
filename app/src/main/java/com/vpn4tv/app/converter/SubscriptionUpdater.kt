@@ -32,8 +32,10 @@ object SubscriptionUpdater {
         /** A bridge sidecar changed. */
         val bridgesChanged: Boolean,
         val userInfo: SubscriptionUserInfo?,
+        /** What our server says about "Russia direct" for this profile changed. */
+        val routingChanged: Boolean = false,
     ) {
-        val changed: Boolean get() = configChanged || bridgesChanged
+        val changed: Boolean get() = configChanged || bridgesChanged || routingChanged
     }
 
     /** Fetch, regenerate the config and its bridge sidecars, update the profile. */
@@ -65,7 +67,8 @@ object SubscriptionUpdater {
         }
         ProfileManager.update(profile)
         HwidService.saveUserInfo(context, profile.id, sub.userInfo)
-        return Outcome(configChanged, bridgesChanged, sub.userInfo)
+        val routingChanged = HwidService.saveRuDirect(context, profile.id, sub.ruDirectOff, sub.ruVpnExtra)
+        return Outcome(configChanged, bridgesChanged, sub.userInfo, routingChanged)
     }
 
     /**
