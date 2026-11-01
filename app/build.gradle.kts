@@ -210,13 +210,21 @@ tasks.withType<KotlinCompile>().configureEach {
 // relay of our build of the library (branch vpn4tv-udp), which serves the one socket of
 // this process that opened the association. The older relay takes datagrams from any app
 // on the device, around the bridge password, and nothing else would show it: libs/ is not
-// in git and the Java part of both builds is the same. So the build stops on an old AAR.
+// in git and the Java part of both builds is the same. The same build has the library's
+// pings protect their sockets through our VpnService: the app stays inside its own VPN, and
+// an older library hands an unprotected ping socket on as the endpoint connection, which
+// then goes into the tunnel and drops (TrustTunnel never connects in VPN mode). So the
+// build stops on an AAR without either.
 val checkTrustTunnelAar by tasks.registering {
-    description = "Fails unless libs/trusttunnel-client.aar has the UDP relay that serves its own client only."
+    description = "Fails unless libs/trusttunnel-client.aar has the own-client UDP relay and protected pings."
     val aar = layout.projectDirectory.file("libs/trusttunnel-client.aar")
     inputs.file(aar)
     doLast {
-        val marker = "UDP association bound to" // a log line of that relay, in every ABI
+        // Log lines of the relay and of the ping protection, in every ABI.
+        val markers = mapOf(
+            "UDP association bound to" to "the old UDP relay, open to every app on the device",
+            "Ping socket not protected by the application's VPN" to "pings that bypass the app's VpnService",
+        )
         val wanted = setOf("arm64-v8a", "armeabi-v7a")
         val found = mutableSetOf<String>()
         ZipFile(aar.asFile).use { zip ->
@@ -224,9 +232,11 @@ val checkTrustTunnelAar by tasks.registering {
                 val abi = Regex("jni/([^/]+)/libtrusttunnel_android\\.so")
                     .matchEntire(entry.name)?.groupValues?.get(1) ?: continue
                 val so = String(zip.getInputStream(entry).use { it.readBytes() }, Charsets.ISO_8859_1)
-                if (!so.contains(marker)) throw GradleException(
-                    "libs/trusttunnel-client.aar ($abi) has the old UDP relay, open to every app on " +
-                        "the device: rebuild it from the TrustTunnel library's vpn4tv-udp branch")
+                for ((marker, problem) in markers) {
+                    if (!so.contains(marker)) throw GradleException(
+                        "libs/trusttunnel-client.aar ($abi) has $problem: " +
+                            "rebuild it from the TrustTunnel library's vpn4tv-udp branch")
+                }
                 found += abi
             }
         }
