@@ -235,6 +235,39 @@ class RussiaDirectTest {
         assertTrue(socks.all { it.getString("server") == "127.0.0.127" && it.getString("bind_interface") == "lo" })
     }
 
+    /** tcp-bridges as the generator writes it now for olcRTC / TrustTunnel only: UDP refused. */
+    private fun tcpOnlyBridges(): String {
+        val root = JSONObject(fixture("tcp-bridges"))
+        val rules = root.getJSONObject("route").getJSONArray("rules")
+        for (i in 0 until rules.length()) {
+            val rule = rules.getJSONObject(i)
+            if (rule.optString("network") == "udp") {
+                rule.remove("outbound")
+                rule.put("action", "reject")
+            }
+        }
+        return root.toString()
+    }
+
+    @Test
+    fun udpRejectOfTcpOnlyBridgesStaysLast() {
+        for (options in listOf(on, RussiaDirect.Options(sets = null), RussiaDirect.Options(offReason = "user", sets = sets))) {
+            val input = JSONObject(tcpOnlyBridges())
+            val out = JSONObject(RussiaDirect.apply(input.toString(), options).json)
+            val route = out.routeRules()
+            val reject = route.last()
+            assertEquals("udp", reject.getString("network"))
+            assertEquals("reject", reject.getString("action"))
+            assertEquals(1, route.count { it.optString("network") == "udp" })
+            // The torrent rule (and with Russia direct on, ours) come before it.
+            assertTrue(route.dropLast(1).any { isTorrent(it) })
+            if (options.offReason == null) assertTrue(route.dropLast(1).any { isOurLogical(it) })
+            // Everything else keeps its order.
+            val others = input.routeRules().filterNot { it.optString("network") == "udp" }
+            for (i in others.indices) assertTrue(same(others[i], route[i]))
+        }
+    }
+
     @Test
     fun everythingThroughVpnLeavesOnlyTheTorrentRule() {
         for (name in listOf("mixed-fakedns-on", "mixed-fakedns-off", "mixed-proxy-mode", "tcp-bridges")) {

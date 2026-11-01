@@ -84,6 +84,7 @@ object RussiaDirect {
             // legacy DNS mode; there a few old rule fields fail the start.
             val off = options.offReason ?: legacyDnsReason(root)?.let { "legacy: $it" }
             if (off != null) {
+                keepUdpRejectLast(routeRules)
                 return Result(root.toString(), "off ($off); torrents direct", applied = false, usesDnsRu = false)
             }
 
@@ -135,6 +136,7 @@ object RussiaDirect {
                 ruleSets.put(localRuleSet(GEOSITE, sets.geosite))
                 ruleSets.put(localRuleSet(GEOIP, sets.geoip))
             }
+            keepUdpRejectLast(routeRules)
 
             val details = listOfNotNull(
                 if (sets == null) "suffixes" else null,
@@ -219,6 +221,23 @@ object RussiaDirect {
         is String -> value.isNotEmpty()
         else -> true
     }
+
+    /**
+     * A profile made only of bridges that carry TCP only refuses UDP with a
+     * {network: udp, action: reject} rule (ConfigGenerator.buildRoute). Ours
+     * go ahead of it, so there too Russian UDP and torrents go direct and only
+     * the rest of the UDP is refused.
+     */
+    internal fun keepUdpRejectLast(rules: JSONArray) {
+        val at = (0 until rules.length()).firstOrNull { i -> rules.optJSONObject(i)?.let { isUdpReject(it) } == true } ?: return
+        if (at == rules.length() - 1) return
+        val rule = rules.get(at)
+        rules.remove(at)
+        rules.put(rule)
+    }
+
+    private fun isUdpReject(rule: JSONObject): Boolean =
+        rule.optString("action") == "reject" && rule.optString("network") == "udp" && rule.length() == 2
 
     /** The HTTPS/SVCB reject or the fakeip rule: ours go ahead of the first of them. */
     private fun isFakeDnsRule(rule: JSONObject): Boolean {
