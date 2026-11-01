@@ -106,15 +106,19 @@ object TrustTunnelBridge {
 
     /**
      * `[endpoint]` from the link plus what the SOCKS mode needs. The library
-     * refuses a config without vpn_mode; the kill switch is a TUN-mode
-     * feature and must stay off here or the listener blocks traffic when the
-     * endpoint drops instead of letting sing-box fail over.
+     * refuses a config without vpn_mode. The kill switch must be on: while
+     * the client recovers a lost or never-made connection, the listener
+     * without it holds a request up to 3 s and then sends it out directly,
+     * from the device's own address (bypass_until_connected), around the
+     * tunnel. With it the request is refused, and sing-box fails over to
+     * another outbound or reports the error. In SOCKS mode it changes nothing
+     * else on Android: no routes, no firewall.
      */
     private fun buildToml(link: String, port: Int, username: String, password: String): String {
         val endpointToml = TtToml.withoutDnsUpstreams(DeepLink.decode(link))
         return buildString {
             append("vpn_mode = \"general\"\n")
-            append("killswitch_enabled = false\n")
+            append("killswitch_enabled = true\n")
             append(endpointToml.trimEnd()).append('\n')
             append("\n[listener.socks]\n")
             append("address = \"").append(SOCKS_HOST).append(':').append(port).append("\"\n")

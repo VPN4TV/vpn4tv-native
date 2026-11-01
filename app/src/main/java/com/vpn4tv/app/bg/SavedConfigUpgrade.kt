@@ -46,8 +46,9 @@ object SavedConfigUpgrade {
 
     private val done = CountDownLatch(1)
 
-    // Whether a start went on without the upgrade, and whether the upgrade
-    // has finished and rewrote any file: whichever comes second reloads.
+    // Whether a start went on before the upgrade finished, and whether the
+    // upgrade has finished and rewrote any file: the upgrade's end reloads
+    // when both hold.
     private val reloadLock = Any()
     private var startWentOn = false
     private var finished = false
@@ -56,13 +57,15 @@ object SavedConfigUpgrade {
     /** False when the upgrade has not finished within [timeoutMs]. */
     fun awaitDone(timeoutMs: Long): Boolean = done.await(timeoutMs, TimeUnit.MILLISECONDS)
 
-    /** A start gave up waiting ([awaitDone] false) and reads the file as it is. */
+    /**
+     * A start gave up waiting ([awaitDone] false) and reads the file as it is.
+     * Finished meanwhile: the start reads the upgraded files anyway, nothing
+     * to reload.
+     */
     fun startedWithoutIt() {
-        val reload = synchronized(reloadLock) {
-            startWentOn = true
-            finished && rewrote
+        synchronized(reloadLock) {
+            if (!finished) startWentOn = true
         }
-        if (reload) reloadForUpgrade()
     }
 
     /** Once per process, from Application.onCreate, on a background thread. */

@@ -314,6 +314,21 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 .putLong("started_at", System.currentTimeMillis())
                 .apply()
 
+            // After a reboot the system lets this app protect sockets only once
+            // VpnService.prepare has made it the VPN app again. openTun calls it,
+            // but the bridges start before that, and at boot (BootReceiver) no
+            // activity has called it either: their first sockets would go out
+            // unprotected and end up in the tunnel once it is up.
+            (service as? android.net.VpnService)?.let { vpn ->
+                try {
+                    if (android.net.VpnService.prepare(vpn) != null) {
+                        Log.w(TAG, "no VPN permission: the bridges start unprotected, the core will refuse")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "VpnService.prepare before the bridges failed: ${e.message}")
+                }
+            }
+
             // A fresh start brings every bridge up from scratch, as before: the
             // record of what runs is cleared, so syncBridges starts them all.
             synchronized(bridgeLock) { runningBridgeSidecars.clear() }
