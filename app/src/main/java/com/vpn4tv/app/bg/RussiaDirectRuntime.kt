@@ -32,7 +32,10 @@ import java.util.concurrent.atomic.AtomicInteger
  *   the lists change.
  * - Before a config with the block reaches the core it goes once through
  *   Libbox.checkConfig, cached by app version and the parts the block
- *   touches. That catches what box.New refuses without dropping the tunnel.
+ *   touches. That catches what box.New refuses (an old DNS rule field the
+ *   block's DNS mode does not take, a file the core cannot read) without
+ *   dropping the tunnel. The block is blamed only if the config without it
+ *   passes the same check.
  * - A start or reload that fails with the block is retried without it
  *   (BoxService); the block then stays off for the session, and the files are
  *   copied anew if the core could not read them.
@@ -70,9 +73,10 @@ object RussiaDirectRuntime {
     private var armedHere = false
     private val armToken = AtomicInteger()
 
-    // Keys of configs checkConfig refused in this process (not kept on disk:
-    // a new process, maybe a new app version, asks again).
-    private val checkFailed = mutableSetOf<String>()
+    // What checkConfig said in this process, by key: the problem, or null
+    // when there is nothing to hold against the block. Only a pass is kept on
+    // disk; a new process, maybe a new app version, asks again.
+    private val checkVerdicts = mutableMapOf<String, String?>()
 
     class Prepared(
         /** What to start. */
@@ -127,7 +131,7 @@ object RussiaDirectRuntime {
         if (result.json == base) return Prepared(base, result.state, warn)
         arm(context)
         if (result.applied) {
-            checkProblem(context, result.json)?.let { problem ->
+            checkProblem(context, result.json, base)?.let { problem ->
                 disarm(context, survived = false)
                 return Prepared(base, "off (check: $problem)", warn = true)
             }
@@ -250,8 +254,14 @@ object RussiaDirectRuntime {
         editor.commit()
     }
 
-    /** Why checkConfig refuses [content], or null (also when the check is not available). */
-    private fun checkProblem(context: Context, content: String): String? {
+    /**
+     * Why checkConfig refuses [content], the config with the block, or null.
+     * The block is blamed only if [base], the same config without it, passes:
+     * a check that refuses both says nothing about the block, and the start
+     * (with its retry without the block) decides as before. Null also when
+     * the check is not available.
+     */
+    private fun checkProblem(context: Context, content: String, base: String): String? {
         val key = try {
             checkKey(content)
         } catch (e: Exception) {
@@ -259,21 +269,34 @@ object RussiaDirectRuntime {
         }
         val prefs = prefs(context)
         if (prefs.getString(KEY_CHECKED, null) == key) return null
-        synchronized(checkFailed) {
-            if (key in checkFailed) return "refused earlier"
+        synchronized(checkVerdicts) {
+            if (key in checkVerdicts) return checkVerdicts[key]
         }
-        return try {
+        val verdict: String? = try {
             Libbox.checkConfig(content)
             prefs.edit().putString(KEY_CHECKED, key).apply()
             null
         } catch (e: Exception) {
-            synchronized(checkFailed) { checkFailed += key }
-            Log.w(TAG, "checkConfig refused the config with Russia direct: ${e.message}")
-            (e.message ?: e.javaClass.simpleName).take(200)
+            val problem = (e.message ?: e.javaClass.simpleName).take(200)
+            val baseRefused = try {
+                Libbox.checkConfig(base)
+                false
+            } catch (_: Throwable) {
+                true
+            }
+            if (baseRefused) {
+                Log.w(TAG, "checkConfig refuses the config without Russia direct too, leaving it to the start: $problem")
+                null
+            } else {
+                Log.w(TAG, "checkConfig refused the config with Russia direct: $problem")
+                problem
+            }
         } catch (t: Throwable) {
             Log.w(TAG, "checkConfig not available: ${t.javaClass.simpleName}: ${t.message}")
             null
         }
+        synchronized(checkVerdicts) { checkVerdicts[key] = verdict }
+        return verdict
     }
 
     /**
