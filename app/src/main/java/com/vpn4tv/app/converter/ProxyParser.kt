@@ -73,7 +73,41 @@ object ProxyParser {
     /** Last parsed DNS config from Xray JSON subscription */
     var lastDns = SubscriptionDns()
 
-    fun parse(line: String): ProxyConfig? {
+    /**
+     * The uTLS fingerprint names the core knows, lower case: the core's own
+     * (common/tls/utls_client.go, uTLSClientHelloID) and Xray's pinned names
+     * (xrayFingerprints there). A key whose fp is none of them would fail the
+     * start of the whole profile with "unknown uTLS fingerprint", so it is left
+     * out with a warning; another fingerprint is never put in its place.
+     */
+    internal val KNOWN_FINGERPRINTS: Set<String> = setOf(
+        "", "chrome", "chrome_psk", "chrome_psk_shuffle", "chrome_padding_psk_shuffle", "chrome_pq", "chrome_pq_psk",
+        "chrome133", "hellochrome_133", "firefox", "hellofirefox_148", "edge", "safari", "hellosafari_26_3",
+        "360", "qq", "ios", "android", "random", "randomized",
+        "hellofirefox_99", "hellofirefox_102", "hellofirefox_105", "hellofirefox_120",
+        "hellochrome_83", "hellochrome_87", "hellochrome_96", "hellochrome_100", "hellochrome_102",
+        "hellochrome_106_shuffle", "hellochrome_120", "hellochrome_131", "helloios_13", "helloios_14",
+        "helloedge_85", "helloedge_106", "hellosafari_16_0", "hello360_11_0", "helloqq_11_1",
+        "hellogolang", "hellorandomized", "hellorandomizedalpn", "hellorandomizednoalpn",
+        "hellofirefox_auto", "hellofirefox_55", "hellofirefox_56", "hellofirefox_63", "hellofirefox_65",
+        "hellochrome_auto", "hellochrome_58", "hellochrome_62", "hellochrome_70", "hellochrome_72",
+        "helloios_auto", "helloios_11_1", "helloios_12_1", "helloandroid_11_okhttp", "helloedge_auto",
+        "hellosafari_auto", "hello360_auto", "hello360_7_5", "helloqq_auto",
+        "hellochrome_100_psk", "hellochrome_112_psk_shuf", "hellochrome_114_padding_psk_shuf",
+        "hellochrome_115_pq", "hellochrome_115_pq_psk", "hellochrome_120_pq",
+    )
+
+    /** False for a proxy whose uTLS fingerprint the core does not know (see [KNOWN_FINGERPRINTS]). */
+    internal fun knownFingerprint(proxy: ProxyConfig): Boolean {
+        val fp = proxy.outbound.optJSONObject("tls")?.optJSONObject("utls")?.optString("fingerprint", "") ?: return true
+        if (fp.lowercase() in KNOWN_FINGERPRINTS) return true
+        android.util.Log.w("ProxyParser", "Skipping '${proxy.tag}': uTLS fingerprint '$fp' is not supported")
+        return false
+    }
+
+    fun parse(line: String): ProxyConfig? = parse0(line)?.takeIf { knownFingerprint(it) }
+
+    private fun parse0(line: String): ProxyConfig? {
         val trimmed = line.trim()
         if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("//")) return null
 
@@ -221,7 +255,9 @@ object ProxyParser {
         return if (decoded.contains("://") || decoded.startsWith("{")) decoded else null
     }
 
-    fun parseSubscription(content: String): List<ProxyConfig> {
+    fun parseSubscription(content: String): List<ProxyConfig> = parseSubscription0(content).filter { knownFingerprint(it) }
+
+    private fun parseSubscription0(content: String): List<ProxyConfig> {
         // Our own link carries the real payload; everything below works on that.
         val source = decodeVpn4tvLink(content) ?: content
         val trimmed = source.trim()
