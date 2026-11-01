@@ -147,13 +147,155 @@ class ConfigUpgradeTest {
             val old = before(name)
             val result = ConfigUpgrade.upgrade(old, sidecarsOf(name))
             val upgraded = result.json ?: old
-            val expected = generated(fixture).singboxJson
+            val generated = generated(fixture)
+            val expected = generated.singboxJson
             if (fixture.fakeDnsDiffers) {
                 assertEquals(name, canonical(withoutFakeDns(expected)), canonical(withoutFakeDns(upgraded)))
             } else {
                 assertEquals(name, canonical(JSONObject(expected)), canonical(JSONObject(upgraded)))
             }
+            // The xray sidecar too: the one the generator writes now.
+            val oldXray = resource("$name.json.xray.json")
+            if (oldXray == null) {
+                assertNull(name, result.xray)
+                assertNull(name, generated.xrayJson)
+            } else {
+                assertEquals(name, canonical(JSONObject(generated.xrayJson!!)), canonical(JSONObject(result.xray ?: oldXray)))
+            }
         }
+    }
+
+    /** What a 5.4.0 release candidate wrote for xray-only: the 5.3.x shape, UDP refused last. */
+    private fun xrayOnlyOfAReleaseCandidate(): String = JSONObject(before("xray-only")).apply {
+        getJSONObject("route").getJSONArray("rules").put(ConfigGenerator.udpRejectRule())
+    }.toString()
+
+    private fun assertXrayBridge(outbound: JSONObject, port: Int) {
+        assertEquals("vless", outbound.getString("type"))
+        assertEquals("127.0.0.127", outbound.getString("server"))
+        assertEquals(port, outbound.getInt("server_port"))
+        assertEquals("lo", outbound.getString("bind_interface"))
+        assertEquals(com.vpn4tv.app.bg.BridgeAuth.UUID_PLACEHOLDER, outbound.getString("uuid"))
+        assertEquals("xudp", outbound.getString("packet_encoding"))
+        for (key in listOf("network", "version", "username", "password", "udp_over_tcp")) assertFalse(key, outbound.has(key))
+    }
+
+    private fun assertVlessSidecar(text: String) {
+        val root = JSONObject(text)
+        val inbounds = root.getJSONArray("inbounds").objects()
+        assertTrue(inbounds.isNotEmpty())
+        for (inbound in inbounds) {
+            assertEquals("vless", inbound.getString("protocol"))
+            assertTrue(inbound.getString("tag").startsWith("vless-in-"))
+            assertEquals("127.0.0.127", inbound.getString("listen"))
+            val settings = inbound.getJSONObject("settings")
+            assertEquals("none", settings.getString("decryption"))
+            assertEquals(com.vpn4tv.app.bg.BridgeAuth.UUID_PLACEHOLDER, settings.getJSONArray("clients").getJSONObject(0).getString("id"))
+            assertFalse(settings.has("udp"))
+            assertFalse(settings.has("auth"))
+        }
+        val routed = root.getJSONObject("routing").getJSONArray("rules").objects().map { it.getJSONArray("inboundTag").getString(0) }
+        assertEquals(inbounds.map { it.getString("tag") }, routed)
+    }
+
+    @Test
+    fun xrayBecomesVlessWithUdpAndItsSidecarFollows() {
+        for ((name, tag) in listOf("xray-only" to "XH 1", "xray-native" to "XH 2")) {
+            val result = ConfigUpgrade.upgrade(before(name), sidecarsOf(name))
+            val config = JSONObject(result.json!!)
+            assertXrayBridge(config.outbound(tag), 30000)
+            // UDP goes to the bridge: nothing refused.
+            assertTrue("$name udp rules: ${udpRules(config)}", udpRules(config).isEmpty())
+            assertEquals(listOf("sniff", "hijack-dns"), config.routeRules().map { it.optString("action") })
+            // DoH already, TCP: stays.
+            assertEquals("https", config.dnsRemote().getString("type"))
+            assertVlessSidecar(result.xray!!)
+            assertTrue(result.changes.toString(), result.changes.any { it.contains("VLESS to the xray bridge") })
+            assertTrue(result.changes.toString(), result.changes.any { it.contains("xray bridge: VLESS inbounds") })
+            // No keys in the log lines.
+            assertTrue(result.changes.none { it.contains(com.vpn4tv.app.bg.BridgeAuth.UUID_PLACEHOLDER) })
+        }
+        // A UDP DNS server is asked over TCP through the bridge, as through the others.
+        val udpDns = JSONObject(before("xray-only")).apply { dnsRemote().put("type", "udp").put("server", "1.1.1.1") }
+        val config = JSONObject(ConfigUpgrade.upgrade(udpDns.toString(), sidecarsOf("xray-only")).json!!)
+        assertEquals("tcp", config.dnsRemote().getString("type"))
+    }
+
+    @Test
+    fun theRefusalOfAReleaseCandidateGoesOnceXrayCarriesUdp() {
+        val result = ConfigUpgrade.upgrade(xrayOnlyOfAReleaseCandidate(), sidecarsOf("xray-only"))
+        val config = JSONObject(result.json!!)
+        assertTrue(udpRules(config).isEmpty())
+        assertTrue(result.changes.toString(), result.changes.any { it.contains("UDP refusal removed") })
+        ProxyParser.lastDns = defaultDns
+        assertEquals(canonical(JSONObject(generated(fixtures.getValue("xray-only")).singboxJson)), canonical(config))
+        // xray with olcRTC: xray carries UDP, so nothing is refused either.
+        val generated = ConfigGenerator.generateFull(listOf(xray("XH 7"), olcrtc("OLC 7")), portBase = 30000)
+        assertTrue(udpRules(JSONObject(generated.singboxJson)).isEmpty())
+    }
+
+    @Test
+    fun aPairLeftHalfDoneIsCompleted() {
+        val full = ConfigUpgrade.upgrade(before("xray-only"), sidecarsOf("xray-only"))
+        // The sidecar written, the config not.
+        val configOnly = ConfigUpgrade.upgrade(before("xray-only"), ConfigUpgrade.Sidecars(xray = full.xray))
+        assertNull(configOnly.xray)
+        assertEquals(canonical(JSONObject(full.json!!)), canonical(JSONObject(configOnly.json!!)))
+        // The config written, the sidecar not.
+        val sidecarOnly = ConfigUpgrade.upgrade(full.json!!, sidecarsOf("xray-only"))
+        assertNull(sidecarOnly.json)
+        assertNull(sidecarOnly.skipped)
+        assertEquals(full.xray, sidecarOnly.xray)
+        assertEquals(listOf("xray bridge: VLESS inbounds"), sidecarOnly.changes)
+        // Both written: nothing more.
+        val done = ConfigUpgrade.upgrade(full.json!!, ConfigUpgrade.Sidecars(xray = full.xray))
+        assertNull(done.json)
+        assertNull(done.xray)
+        assertTrue(done.changes.isEmpty())
+    }
+
+    @Test
+    fun anXraySidecarIsUpgradedOnlyWithAConfigThatReachesIt() {
+        // No xray outbound in the config: the sidecar is not touched (and the
+        // outline outbound is not taken for xray).
+        val outline = ConfigUpgrade.upgrade(before("outline-only"),
+            ConfigUpgrade.Sidecars(outline = resource("outline-only.json.outline.json"), xray = resource("xray-only.json.xray.json")))
+        assertNull(outline.xray)
+        assertEquals("socks", JSONObject(outline.json!!).outbound("OL 1").getString("type"))
+        // A port the xray sidecar does not serve: the socks outbound is no xray bridge.
+        val elsewhere = JSONObject(before("xray-only")).apply { outbound("XH 1").put("server_port", 30005) }
+        val result = ConfigUpgrade.upgrade(elsewhere.toString(), sidecarsOf("xray-only"))
+        assertNull(result.json)
+        assertNull(result.xray)
+        assertEquals(ConfigUpgrade.NO_BRIDGE, result.skipped)
+        // An xray sidecar whose inbound is neither SOCKS5 nor VLESS: no bridge either.
+        val odd = resource("xray-only.json.xray.json")!!.replace("\"protocol\":\"socks\"", "\"protocol\":\"http\"")
+        assertEquals(ConfigUpgrade.NO_BRIDGE, ConfigUpgrade.upgrade(before("xray-only"), ConfigUpgrade.Sidecars(xray = odd)).skipped)
+    }
+
+    @Test
+    fun theXraySidecarUpgradeKeepsEverythingElse() {
+        val old = JSONObject(resource("xray-only.json.xray.json")!!)
+        val new = JSONObject(ConfigUpgrade.upgradeXraySidecar(old.toString())!!)
+        assertEquals(canonical(old.getJSONArray("outbounds")), canonical(new.getJSONArray("outbounds")))
+        assertEquals(canonical(old.getJSONObject("log")), canonical(new.getJSONObject("log")))
+        val oldInbound = old.getJSONArray("inbounds").getJSONObject(0)
+        val newInbound = new.getJSONArray("inbounds").getJSONObject(0)
+        for (key in listOf("listen", "port", "sniffing")) assertEquals(key, canonical(oldInbound.get(key)), canonical(newInbound.get(key)))
+        // An inboundTag given as a plain string is renamed too; a tag that is
+        // not the old generator's stays, with its rule.
+        val custom = JSONObject(old.toString()).apply {
+            getJSONObject("routing").getJSONArray("rules").getJSONObject(0).put("inboundTag", "socks-in-0")
+        }
+        val renamed = JSONObject(ConfigUpgrade.upgradeXraySidecar(custom.toString())!!)
+        assertEquals("vless-in-0", renamed.getJSONObject("routing").getJSONArray("rules").getJSONObject(0).getString("inboundTag"))
+        val mine = JSONObject(old.toString().replace("socks-in-0", "mine"))
+        val kept = JSONObject(ConfigUpgrade.upgradeXraySidecar(mine.toString())!!)
+        assertEquals("mine", kept.getJSONArray("inbounds").getJSONObject(0).getString("tag"))
+        assertEquals("mine", kept.getJSONObject("routing").getJSONArray("rules").getJSONObject(0).getJSONArray("inboundTag").getString(0))
+        // Nothing to do, or not an xray config: null.
+        assertNull(ConfigUpgrade.upgradeXraySidecar(new.toString()))
+        for (text in listOf(null, "", "{", "[]", "{\"inbounds\": 7}")) assertNull(text, ConfigUpgrade.upgradeXraySidecar(text))
     }
 
     @Test
@@ -190,10 +332,11 @@ class ConfigUpgradeTest {
         val olc = JSONObject(ConfigUpgrade.upgrade(before("olcrtc-only"), sidecarsOf("olcrtc-only")).json!!)
         assertEquals(ConfigGenerator.udpRejectRule().toString(), olc.routeRules().last().toString())
 
-        // xray only: no leak to fix, but UDP is refused now, last.
+        // xray only: VLESS to the bridge, which carries UDP now; nothing refused.
         val xray = JSONObject(ConfigUpgrade.upgrade(before("xray-only"), sidecarsOf("xray-only")).json!!)
-        assertEquals(ConfigGenerator.udpRejectRule().toString(), xray.routeRules().last().toString())
-        assertEquals("tcp", xray.outbound("XH 1").getString("network"))
+        assertTrue(udpRules(xray).isEmpty())
+        assertEquals("vless", xray.outbound("XH 1").getString("type"))
+        assertFalse(xray.outbound("XH 1").has("network"))
         assertEquals("https", xray.dnsRemote().getString("type"))
 
         // Mixed with a native proxy: nothing refused, bridges carry UDP where they can.
@@ -217,9 +360,12 @@ class ConfigUpgradeTest {
     @Test
     fun anUpgradedConfigNeedsNothingMore() {
         for (name in fixtures.keys) {
-            val once = ConfigUpgrade.upgrade(before(name), sidecarsOf(name)).json ?: continue
-            val twice = ConfigUpgrade.upgrade(once, sidecarsOf(name))
+            val first = ConfigUpgrade.upgrade(before(name), sidecarsOf(name))
+            val once = first.json ?: continue
+            val sidecars = sidecarsOf(name).let { ConfigUpgrade.Sidecars(first.xray ?: it.xray, it.outline, it.wg, it.olcrtc, it.tt) }
+            val twice = ConfigUpgrade.upgrade(once, sidecars)
             assertNull(name, twice.json)
+            assertNull(name, twice.xray)
             assertTrue(name, twice.changes.isEmpty())
             assertNull(name, twice.skipped)
         }
@@ -231,6 +377,7 @@ class ConfigUpgradeTest {
             val result = generated(fixture)
             val upgrade = ConfigUpgrade.upgrade(result.singboxJson, sidecarsOf(result))
             assertNull(name, upgrade.json)
+            assertNull(name, upgrade.xray)
             assertTrue(name, upgrade.changes.isEmpty())
         }
     }
@@ -302,7 +449,7 @@ class ConfigUpgradeTest {
     @Test
     fun russiaDirectKeepsTheRefusalLastAfterTheUpgrade() {
         val sets = RussiaDirect.Sets(geosite = "/data/geosite-category-ru.srs", geoip = "/data/geoip-ru.srs")
-        for (name in listOf("olcrtc-only", "xray-only")) {
+        for (name in listOf("olcrtc-only")) {
             val upgraded = ConfigUpgrade.upgrade(before(name), sidecarsOf(name)).json!!
             for (options in listOf(RussiaDirect.Options(sets = sets), RussiaDirect.Options(offReason = "user", sets = sets))) {
                 val out = JSONObject(RussiaDirect.apply(upgraded, options).json)
@@ -311,6 +458,13 @@ class ConfigUpgradeTest {
                 assertEquals(name, 1, udpRules(out).size)
                 assertTrue(name, rules.size > 3)
             }
+        }
+        // xray only carries UDP now: Russia direct adds its rules, nothing refuses UDP.
+        val xray = ConfigUpgrade.upgrade(before("xray-only"), sidecarsOf("xray-only")).json!!
+        for (options in listOf(RussiaDirect.Options(sets = sets), RussiaDirect.Options(offReason = "user", sets = sets))) {
+            val out = JSONObject(RussiaDirect.apply(xray, options).json)
+            assertTrue(out.routeRules().none { RussiaDirect.isUdpReject(it) })
+            assertTrue(out.routeRules().size > 2)
         }
     }
 

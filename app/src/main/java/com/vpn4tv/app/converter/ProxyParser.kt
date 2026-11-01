@@ -1209,7 +1209,7 @@ object ProxyParser {
 
     /**
      * Extract remote server host from an Xray outbound, for display and
-     * for the sing-box socks-to-xray shim. Returns null if the structure
+     * for the sing-box-to-xray shim. Returns null if the structure
      * is unexpected.
      */
     private fun extractXrayServer(ob: JSONObject): String? {

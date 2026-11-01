@@ -90,6 +90,57 @@ class SavedConfigUpgradeTest {
     }
 
     @Test
+    fun theXraySidecarIsRewrittenWithItsConfig() {
+        val config = install("xray-only", "1")
+        val sidecar = File(dir, "1.json.xray.json")
+        val expected = ConfigUpgrade.upgrade(requireNotNull(resource("xray-only.json")), sidecarsOf("xray-only"))
+
+        assertEquals(SavedConfigUpgrade.Outcome.UPGRADED, SavedConfigUpgrade.upgradeFile(config.path))
+        assertEquals(expected.json, config.readText())
+        assertEquals(expected.xray, sidecar.readText())
+        assertTrue(sidecar.readText().contains("\"vless\""))
+        assertFalse(sidecar.readText().contains("\"socks\""))
+        assertTrue(tempFiles(dir).isEmpty())
+
+        // Again: nothing to do, nothing written.
+        val bytes = listOf(config, sidecar).associateWith { it.readBytes() }
+        assertEquals(SavedConfigUpgrade.Outcome.UNCHANGED, SavedConfigUpgrade.upgradeFile(config.path))
+        for ((file, before) in bytes) assertArrayEquals(file.name, before, file.readBytes())
+    }
+
+    @Test
+    fun aPairLeftHalfDoneIsCompletedOnTheNextRun() {
+        val expected = ConfigUpgrade.upgrade(requireNotNull(resource("xray-only.json")), sidecarsOf("xray-only"))
+        // The config written, the sidecar not (the process died in between).
+        val config = install("xray-only", "1")
+        config.writeText(expected.json!!)
+        val sidecar = File(dir, "1.json.xray.json")
+        assertEquals(SavedConfigUpgrade.Outcome.UPGRADED, SavedConfigUpgrade.upgradeFile(config.path))
+        assertEquals(expected.json, config.readText())
+        assertEquals(expected.xray, sidecar.readText())
+        // The sidecar written, the config not.
+        val other = install("xray-only", "2")
+        val otherSidecar = File(dir, "2.json.xray.json").apply { writeText(expected.xray!!) }
+        assertEquals(SavedConfigUpgrade.Outcome.UPGRADED, SavedConfigUpgrade.upgradeFile(other.path))
+        assertEquals(expected.json, other.readText())
+        assertEquals(expected.xray, otherSidecar.readText())
+        assertTrue(tempFiles(dir).isEmpty())
+    }
+
+    @Test
+    fun aSidecarThatCannotBeWrittenLeavesTheConfigAsItWas() {
+        val config = install("xray-only", "1")
+        val sidecar = File(dir, "1.json.xray.json")
+        val before = listOf(config, sidecar).associateWith { it.readBytes() }
+        // Where the sidecar's temporary file would go, a directory that is not
+        // empty: writing the sidecar fails, and the config, written after it,
+        // is not touched; the next launch tries again.
+        File(dir, "1.json.xray.json.upgrade.tmp").apply { mkdirs(); File(this, "x").writeText("x") }
+        assertEquals(SavedConfigUpgrade.Outcome.FAILED, SavedConfigUpgrade.upgradeFile(config.path))
+        for ((file, bytes) in before) assertArrayEquals(file.name, bytes, file.readBytes())
+    }
+
+    @Test
     fun oneFailingProfileDoesNotStopTheOthers() {
         val locked = File(dir, "locked")
         val stuck = install("outline-only", "1", locked)

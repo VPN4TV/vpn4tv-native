@@ -21,10 +21,14 @@ import java.util.concurrent.TimeUnit
  *
  * Each file is replaced atomically (a temporary file in the same directory,
  * then renameTo), under [ConfigGenerator.fileLock] so a refresh writing the
- * same profile is never overwritten. A profile that fails is logged and the
- * others go on; the version code is recorded only when no file failed, so a
- * failed write is tried again at the next launch. Running it again is safe:
- * an upgraded config gives no changes.
+ * same profile is never overwritten. The xray sidecar is rewritten with its
+ * config (the bridge's inbound and sing-box's outbound to it change together):
+ * the sidecar first, then the config. The pair is not one atomic step, but a
+ * pair left half done is completed by the next run, which ConfigUpgrade does
+ * one half at a time. A profile that fails is logged and the others go on;
+ * the version code is recorded only when no file failed, so a failed write is
+ * tried again at the next launch. Running it again is safe: an upgraded
+ * config gives no changes.
  */
 object SavedConfigUpgrade {
     private const val TAG = "ConfigUpgrade"
@@ -95,9 +99,10 @@ object SavedConfigUpgrade {
                         Log.i(TAG, "$name: left alone (${result.skipped})")
                         Outcome.SKIPPED
                     }
-                    result.json == null -> Outcome.UNCHANGED
+                    result.json == null && result.xray == null -> Outcome.UNCHANGED
                     else -> {
-                        writeAtomically(file, result.json)
+                        result.xray?.let { writeAtomically(File(ConfigGenerator.xraySidecarPath(path)), it) }
+                        result.json?.let { writeAtomically(file, it) }
                         Log.i(TAG, "$name: ${result.changes.joinToString("; ")}")
                         Outcome.UPGRADED
                     }
