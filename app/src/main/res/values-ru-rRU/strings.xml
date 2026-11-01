@@ -575,7 +575,8 @@
     <string name="setting_fake_dns">Обход DNS-блокировок (FakeDNS)</string>
     <string name="setting_fake_dns_desc">Резолвить домены на VPN-сервере, чтобы провайдер не мог блокировать или подменять DNS. Экспериментально — на некоторых ТВ/роутерах может мешать подключению; оставьте выключенным, если подключение зависает.</string>
     <string name="setting_all_through_vpn">Всё через VPN</string>
-    <string name="setting_all_through_vpn_desc">Выключено: российские сайты и сервисы (.ru, .рф, Яндекс, VK, банки, Госуслуги) открываются напрямую, мимо VPN. Включено: через VPN идёт всё, кроме торрентов.</string>
+    <string name="setting_all_through_vpn_desc">Выключено: российские сайты и сервисы (.ru, .рф, Яндекс, VK, банки, Госуслуги) открываются напрямую, мимо VPN. Включено: всё идёт через VPN.</string>
+    <string name="settings_torrents_note">Торренты всегда идут напрямую, без VPN, — по правилам использования.</string>
     <string name="setting_lan_import_desc">Добавить ключ или подписку из браузера телефона по локальной сети</string>
     <string name="lan_import_title">Импорт по локальной сети</string>
     <string name="lan_import_step1">На телефоне откройте в любом браузере:</string>

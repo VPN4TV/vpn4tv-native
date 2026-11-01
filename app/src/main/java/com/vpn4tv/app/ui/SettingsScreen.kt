@@ -165,6 +165,15 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}, onLanImpo
                 }
             )
         }
+
+        // Plain BitTorrent goes direct in every mode, "Everything through VPN"
+        // included (Russia direct); said once, in small print, at the bottom.
+        Text(
+            stringResource(R.string.settings_torrents_note),
+            fontSize = 11.sp,
+            color = Color.Gray,
+            modifier = Modifier.padding(top = 16.dp)
+        )
     }
 }
 
