@@ -1,0 +1,1 @@
+{"endpoints":[{"ini":"[Interface]\nPrivateKey = x\nAddress = 10.8.1.2/32\n\n[Peer]\nPublicKey = y\nEndpoint = 192.0.2.20:51820\n","port":32000}]}

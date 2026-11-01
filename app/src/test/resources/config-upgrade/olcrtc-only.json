@@ -1,0 +1,86 @@
+{
+  "route": {
+    "final": "select",
+    "rules": [
+      {"action": "sniff"},
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "outbound": "direct",
+        "network": "udp"
+      }
+    ],
+    "auto_detect_interface": true,
+    "default_domain_resolver": {"server": "dns-direct"}
+  },
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "outbounds": [
+    {
+      "outbounds": ["OLC 1"],
+      "interval": "5m",
+      "tag": "auto",
+      "type": "urltest",
+      "url": "https://cp.cloudflare.com/",
+      "tolerance": 50
+    },
+    {
+      "default": "auto",
+      "outbounds": [
+        "auto",
+        "OLC 1"
+      ],
+      "tag": "select",
+      "type": "selector"
+    },
+    {
+      "server": "127.0.0.127",
+      "bind_interface": "lo",
+      "domain_strategy": "ipv4_only",
+      "server_port": 33000,
+      "tag": "OLC 1",
+      "type": "socks",
+      "version": "5",
+      "network": "tcp"
+    },
+    {
+      "tag": "direct",
+      "type": "direct"
+    }
+  ],
+  "dns": {
+    "servers": [
+      {
+        "server": "8.8.8.8",
+        "domain_resolver": "dns-direct",
+        "tag": "dns-remote",
+        "type": "https"
+      },
+      {
+        "server": "9.9.9.9",
+        "tag": "dns-direct",
+        "type": "udp"
+      }
+    ],
+    "rules": [{
+      "server": "dns-direct",
+      "outbound": "any"
+    }],
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [{
+    "strict_route": true,
+    "stack": "mixed",
+    "address": [
+      "172.19.0.1/30",
+      "fdfe:dcba:9876::1/126"
+    ],
+    "auto_route": true,
+    "tag": "tun-in",
+    "type": "tun"
+  }]
+}

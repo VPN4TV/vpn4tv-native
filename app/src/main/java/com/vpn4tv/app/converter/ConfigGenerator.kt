@@ -16,6 +16,14 @@ object ConfigGenerator {
     const val FAKEIP_INET6_RANGE = "fc00::/18"
 
     /**
+     * Serializes the writes of a profile's config and sidecars ([writeAll])
+     * with SavedConfigUpgrade, which rewrites saved configs once after an
+     * update: a refresh at launch must not be overwritten by an upgrade of
+     * the file it replaced.
+     */
+    val fileLock = Any()
+
+    /**
      * Its outbound is a socks outbound to one of our local bridges (xray
      * included). DNS through those goes over TCP, see [dnsOverTcp].
      */
@@ -127,7 +135,7 @@ object ConfigGenerator {
      * sidecar next to it, deleting any stale sidecars when the new result
      * no longer needs them. Call after [generateFull].
      */
-    fun writeAll(configPath: String, result: Result) {
+    fun writeAll(configPath: String, result: Result) = synchronized(fileLock) {
         File(configPath).writeText(result.singboxJson)
         writeOrDelete(xraySidecarPath(configPath), result.xrayJson)
         writeOrDelete(outlineSidecarPath(configPath), result.outlineJson)

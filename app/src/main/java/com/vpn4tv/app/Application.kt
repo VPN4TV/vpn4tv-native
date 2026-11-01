@@ -68,6 +68,16 @@ class Application : Application() {
             Log.e("Application", "migrateLegacySelectedServer failed: ${e.message}", e)
         }
 
+        // First launch of a new version code: bring the saved configs on disk
+        // to the current generator's shape (5.4.0: bridge UDP and DNS stay in
+        // the tunnel), local profiles included — they are never regenerated.
+        // Off the main thread (Room, file I/O); BoxService waits for it before
+        // it reads a profile. It never throws and always opens that gate.
+        @Suppress("OPT_IN_USAGE")
+        GlobalScope.launch(Dispatchers.IO) {
+            com.vpn4tv.app.bg.SavedConfigUpgrade.runIfVersionChanged()
+        }
+
         // Probe DNS servers on a background thread so by the time the
         // user taps Connect, we know which DoH/UDP server works on their
         // ISP. Results feed into BoxService (config rewrite) and

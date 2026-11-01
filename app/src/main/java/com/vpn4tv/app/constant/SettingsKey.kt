@@ -50,4 +50,7 @@ object SettingsKey {
 
     // cache
     const val STARTED_BY_USER = "started_by_user"
+
+    // The version code the saved configs were last upgraded for (SavedConfigUpgrade).
+    const val CONFIG_UPGRADE_VERSION = "config_upgrade_version"
 }

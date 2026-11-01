@@ -236,7 +236,7 @@ object RussiaDirect {
         rules.put(rule)
     }
 
-    private fun isUdpReject(rule: JSONObject): Boolean =
+    internal fun isUdpReject(rule: JSONObject): Boolean =
         rule.optString("action") == "reject" && rule.optString("network") == "udp" && rule.length() == 2
 
     /** The HTTPS/SVCB reject or the fakeip rule: ours go ahead of the first of them. */
