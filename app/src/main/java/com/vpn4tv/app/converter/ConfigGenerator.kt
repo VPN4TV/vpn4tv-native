@@ -16,15 +16,6 @@ object ConfigGenerator {
     const val FAKEIP_INET6_RANGE = "fc00::/18"
 
     /**
-     * The bridges that carry TCP only: olcRTC by design, and TrustTunnel,
-     * whose SOCKS UDP relay takes datagrams from any local app (the bridge
-     * password would not cover them). Their socks outbounds keep
-     * network = tcp. Outline and AmneziaWG carry UDP inside the
-     * authenticated TCP connection ([udpOverTcp]).
-     */
-    private fun ProxyConfig.isTcpOnlyBridge(): Boolean = olcrtcUrl != null || ttUrl != null
-
-    /**
      * Its outbound is a socks outbound to one of our local bridges (xray
      * included). DNS through those goes over TCP, see [dnsOverTcp].
      */
@@ -32,9 +23,13 @@ object ConfigGenerator {
         xrayOutbound != null || outlineUrl != null || outlineDynamicUrl != null ||
             awgIni != null || olcrtcUrl != null || ttUrl != null
 
-    /** Routed through a local bridge: what FakeDNS and the IPv4-only strategy look at. */
+    /**
+     * Routed through a local bridge other than xray: what FakeDNS and the
+     * IPv4-only strategy look at. An Outline dynamic key is an Outline
+     * bridge like a plain one.
+     */
     private fun ProxyConfig.isBridged(): Boolean =
-        outlineUrl != null || awgIni != null || olcrtcUrl != null || ttUrl != null
+        outlineUrl != null || outlineDynamicUrl != null || awgIni != null || olcrtcUrl != null || ttUrl != null
 
     /**
      * sing-box's UDP over TCP on the socks outbound to a bridge: the
@@ -42,7 +37,31 @@ object ConfigGenerator {
      * (the core's bridges serve it since bridge-udp), so nothing listens for
      * UDP on the shared loopback and the bridge password covers UDP as well.
      */
-    private fun udpOverTcp(): JSONObject = JSONObject().put("enabled", true).put("version", 2)
+    internal fun udpOverTcp(): JSONObject = JSONObject().put("enabled", true).put("version", 2)
+
+    /**
+     * Whether sing-box can send UDP through [outbound], one of a generated
+     * config's proxies. The socks outbounds to olcRTC, TrustTunnel and xray
+     * carry TCP only (network = tcp); Outline and AmneziaWG carry UDP over
+     * TCP; naive carries UDP only over TCP, when that is on; http never.
+     * Groups, direct and the like are not proxies and carry nothing here.
+     */
+    internal fun carriesUdp(outbound: JSONObject): Boolean = when (outbound.optString("type")) {
+        "selector", "urltest", "direct", "block", "dns" -> false
+        "http" -> false
+        "naive" -> outbound.opt("udp_over_tcp") == true ||
+            outbound.optJSONObject("udp_over_tcp")?.optBoolean("enabled", false) == true
+        else -> outbound.optString("network") != "tcp"
+    }
+
+    /**
+     * The rule that refuses UDP in a profile where no proxy carries it, the
+     * last of the generated rules: apps take the refusal as "no QUIC" and go
+     * over TCP at once. The rules added at start keep it last (the LAN
+     * bypass goes ahead of it, RussiaDirect.keepUdpRejectLast moves it after
+     * Russia direct), so LAN, Russian UDP and torrents still go direct.
+     */
+    internal fun udpRejectRule(): JSONObject = JSONObject().put("network", "udp").put("action", "reject")
 
     /**
      * True when [root] (a generated config) can send DNS through one of our
@@ -499,12 +518,13 @@ object ConfigGenerator {
     private fun buildRoute(proxies: List<ProxyConfig>): JSONObject {
         // UDP never goes "direct" behind the user's back any more: that sent
         // QUIC, calls, WebRTC and the like around the tunnel with the real
-        // address. Outline and AmneziaWG carry UDP now. A profile made only of
-        // bridges that carry TCP only (olcRTC, TrustTunnel) refuses UDP
-        // outright — an answer apps take as "no QUIC" and fall back to TCP at
-        // once, where the selector would only fail each flow with "UDP is not
-        // supported by outbound: select".
-        val allTcpOnly = proxies.all { it.isTcpOnlyBridge() }
+        // address. Outline and AmneziaWG carry UDP now. A profile where no
+        // proxy carries UDP (only olcRTC, TrustTunnel, xray — naive without
+        // UDP over TCP) refuses UDP outright, last: an answer apps take as
+        // "no QUIC" and fall back to TCP at once, where the selector would
+        // only fail each flow with "UDP is not supported by outbound: select".
+        // The outbounds are final here: the bridge loops above rewrote them.
+        val noUdp = proxies.none { carriesUdp(it.outbound) }
         return JSONObject().apply {
             put("rules", JSONArray().apply {
                 // sing-box 1.13+: sniff via rule action
@@ -516,12 +536,8 @@ object ConfigGenerator {
                     put("protocol", "dns")
                     put("action", "hijack-dns")
                 })
-                if (allTcpOnly) {
-                    put(JSONObject().apply {
-                        put("network", "udp")
-                        put("action", "reject")
-                    })
-                }
+                // Keep it the last rule: see udpRejectRule.
+                if (noUdp) put(udpRejectRule())
             })
             put("auto_detect_interface", true)
             // Always route via the "select" group; ConfigGenerator builds it

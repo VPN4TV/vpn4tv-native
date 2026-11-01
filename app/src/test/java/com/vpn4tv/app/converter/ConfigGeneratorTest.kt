@@ -114,6 +114,18 @@ class ConfigGeneratorTest {
         val config = generate(outlineDynamic())
         assertCarriesUdp(config.outbound("OLD"))
         assertNoLeak(config)
+        assertTrue(udpRules(config).isEmpty())
+        // A dynamic key is an Outline bridge: no FakeDNS, IPv4 only, as for a plain key.
+        assertFalse(config.has("experimental"))
+        assertTrue(config.getJSONObject("dns").getJSONArray("servers").objects().none { it.optString("type") == "fakeip" })
+        assertEquals("ipv4_only", config.getJSONObject("dns").getString("strategy"))
+    }
+
+    @Test
+    fun outlineKeysPlainAndDynamicAreBridgeOnly() {
+        val config = generate(outline(), outlineDynamic())
+        assertFalse(config.has("experimental"))
+        assertEquals("ipv4_only", config.getJSONObject("dns").getString("strategy"))
     }
 
     @Test
@@ -194,13 +206,62 @@ class ConfigGeneratorTest {
     }
 
     @Test
-    fun xrayAsksDnsOverTcpButIsNotRefusedUdp() {
+    fun xrayOnlyRefusesUdpLastAndAsksDnsOverTcp() {
         ProxyParser.lastDns = SubscriptionDns(remoteDns = "quic://dns.example.net", directDns = "9.9.9.9")
         val config = generate(xray())
         assertTcpOnly(config.outbound("XH"))
-        // No reject: xray profiles route as before (Russia direct still sees their UDP).
-        assertTrue(udpRules(config).isEmpty())
+        // The xray bridge carries TCP only: UDP is refused, so QUIC falls back
+        // to TCP at once. Russia direct still sees Russian UDP: it goes ahead
+        // of the refusal (RussiaDirect.keepUdpRejectLast).
+        assertEquals(ConfigGenerator.udpRejectRule().toString(), config.routeRules().last().toString())
+        assertEquals(1, udpRules(config).size)
+        assertNoLeak(config)
         assertEquals("tls", config.dnsServer("dns-remote").getString("type"))
+        // FakeDNS stays: xray passes the sniffed domain to the server.
+        assertTrue(config.getJSONObject("experimental").getJSONObject("cache_file").getBoolean("store_fakeip"))
+    }
+
+    @Test
+    fun theUdpRefusalIsTheLastRuleWhereNoProxyCarriesUdp() {
+        val naive = ProxyConfig(
+            tag = "NV", type = "naive", server = "192.0.2.50", serverPort = 443,
+            outbound = JSONObject().put("type", "naive").put("tag", "NV").put("server", "192.0.2.50").put("server_port", 443),
+        )
+        for (proxies in listOf(listOf(olcrtc()), listOf(trustTunnel()), listOf(xray()), listOf(naive), listOf(xray("X1"), olcrtc("O1"), trustTunnel("T1")))) {
+            val config = generate(*proxies.toTypedArray())
+            val rules = config.routeRules()
+            assertEquals(proxies.joinToString { it.tag }, listOf("sniff", "hijack-dns", "reject"), rules.map { it.optString("action") })
+            assertEquals(ConfigGenerator.udpRejectRule().toString(), rules.last().toString())
+        }
+    }
+
+    @Test
+    fun noUdpRefusalWhereAProxyCarriesUdp() {
+        val naiveUot = ProxyConfig(
+            tag = "NU", type = "naive", server = "192.0.2.51", serverPort = 443,
+            outbound = JSONObject().put("type", "naive").put("tag", "NU").put("server", "192.0.2.51").put("server_port", 443)
+                .put("udp_over_tcp", JSONObject().put("enabled", true)),
+        )
+        for (proxies in listOf(listOf(xray(), native()), listOf(xray(), outline()), listOf(olcrtc(), awg()), listOf(naiveUot), listOf(native()))) {
+            val config = generate(*proxies.toTypedArray())
+            assertTrue(proxies.joinToString { it.tag }, udpRules(config).isEmpty())
+        }
+    }
+
+    @Test
+    fun whatCarriesUdp() {
+        fun ob(type: String) = JSONObject().put("type", type)
+        assertTrue(ConfigGenerator.carriesUdp(ob("shadowsocks")))
+        assertTrue(ConfigGenerator.carriesUdp(ob("vless")))
+        assertFalse(ConfigGenerator.carriesUdp(ob("vless").put("network", "tcp")))
+        assertTrue(ConfigGenerator.carriesUdp(ob("hysteria2").put("network", "udp")))
+        assertFalse(ConfigGenerator.carriesUdp(ob("socks").put("network", "tcp")))
+        assertTrue(ConfigGenerator.carriesUdp(ob("socks").put("udp_over_tcp", ConfigGenerator.udpOverTcp())))
+        assertFalse(ConfigGenerator.carriesUdp(ob("naive")))
+        assertTrue(ConfigGenerator.carriesUdp(ob("naive").put("udp_over_tcp", true)))
+        assertTrue(ConfigGenerator.carriesUdp(ob("naive").put("udp_over_tcp", JSONObject().put("enabled", true))))
+        assertFalse(ConfigGenerator.carriesUdp(ob("http")))
+        for (type in listOf("selector", "urltest", "direct", "block", "dns")) assertFalse(type, ConfigGenerator.carriesUdp(ob(type)))
     }
 
     @Test
