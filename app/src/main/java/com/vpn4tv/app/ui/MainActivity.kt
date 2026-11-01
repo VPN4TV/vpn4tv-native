@@ -46,6 +46,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // First thing: a launch that never gets to the home screen gets its thread stacks reported.
+        com.vpn4tv.app.utils.StartupWatchdog.arm { profileReady.value == true }
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
 
         // Fire-and-forget Play in-app update check. Will only actually
