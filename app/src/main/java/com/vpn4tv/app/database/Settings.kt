@@ -87,6 +87,23 @@ object Settings {
     // still can't be auto-caught — acceptable given the bypass value.
     var fakeDns by dataStore.boolean(SettingsKey.FAKE_DNS) { true }
 
+    private val UKRAINIAN_TIME_ZONES = setOf("Europe/Kyiv", "Europe/Kiev", "Europe/Uzhgorod", "Europe/Zaporozhye")
+
+    /**
+     * "Everything through VPN". Off by default: Russian sites and services go
+     * direct ("Russia direct", BoxService/RussiaDirect), for everyone without
+     * a question, updated installs included. On by default in Ukrainian time
+     * zones, where Russian sites are blocked locally, until the user picks a
+     * side: the default is read anew while the key has no entry.
+     */
+    var allThroughVpn by dataStore.boolean(SettingsKey.ALL_THROUGH_VPN) { inUkrainianTimeZone() }
+
+    fun inUkrainianTimeZone(): Boolean = try {
+        java.util.TimeZone.getDefault().id in UKRAINIAN_TIME_ZONES
+    } catch (_: Exception) {
+        false
+    }
+
     var dynamicNotification by dataStore.boolean(SettingsKey.DYNAMIC_NOTIFICATION) { true }
     var disableDeprecatedWarnings by dataStore.boolean(SettingsKey.DISABLE_DEPRECATED_WARNINGS) { false }
 

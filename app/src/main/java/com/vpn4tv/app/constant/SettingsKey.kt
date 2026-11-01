@@ -29,6 +29,10 @@ object SettingsKey {
     //    fakeDnsAutoDisabled (post-connect health check) turns it off on nets
     //    where the fakeip path is broken — the protection 5.1.2 lacked.
     const val FAKE_DNS = "fake_dns_v3"
+    // "Everything through VPN" (5.4.0), the off switch of "Russia direct".
+    // No entry means the default (off: Russia direct on), for updated
+    // installs too. To re-default everyone later, rename the key as above.
+    const val ALL_THROUGH_VPN = "all_through_vpn"
 
     const val PRIVILEGE_SETTINGS_ENABLED = "hide_settings_enabled"
     const val PRIVILEGE_SETTINGS_LIST = "hide_settings_list"

@@ -102,6 +102,28 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 ),
             )
         }
+
+        /**
+         * Reload the running service after a setting the config is built
+         * from changed. The same path as every other reload: the command
+         * server's serviceReload, which waits for a start or reload in
+         * progress and merges a burst of requests into one (ReloadGate). A
+         * start still running gets it too: it may have read the setting
+         * before the change.
+         */
+        @OptIn(DelicateCoroutinesApi::class)
+        fun reloadIfRunning() {
+            val now = globalStatus.value
+            if (now != Status.Started && now != Status.Starting) return
+            GlobalScope.launch(Dispatchers.IO) {
+                try {
+                    val client = Libbox.newStandaloneCommandClient()
+                    try { client.serviceReload() } finally { client.disconnect() }
+                } catch (e: Exception) {
+                    Log.w(TAG, "reload after a settings change failed: ${e.message}")
+                }
+            }
+        }
     }
 
     var fileDescriptor: ParcelFileDescriptor? = null
@@ -236,18 +258,19 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // startService, so it does not clear the flag it just set.)
             fakeDnsAutoDisabled = false
             OutsideVpnGuard.ownerLookupBroken = false
+            RussiaDirectRuntime.newSession()
 
             markStage("transforms")
-            content = try {
+            // The config without "Russia direct": what a start that fails with
+            // it is retried with, and what 5.3.3 ran.
+            val base = try {
                 applyConfigTransforms(content)
             } catch (e: Exception) {
                 Log.e(TAG, "config transform (proxy-mode) failed: ${e.message}", e)
                 stopAndAlert(Alert.CreateService, "proxy-mode rewrite: ${e.message}")
                 return
             }
-            // Whether the running config actually carries FakeDNS — used to arm
-            // the post-connect health check only when it's worth checking.
-            val fakeDnsInConfig = content.contains("\"dns-fakeip\"")
+            content = base
 
             lastProfileName = profile.name
             withContext(Dispatchers.Main) {
@@ -286,6 +309,13 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 return
             }
 
+            markStage("russia-direct")
+            var routed = RussiaDirectRuntime.prepare(Application.application, base, selectedProfileId)
+            content = routed.content
+            // Whether the running config actually carries FakeDNS — used to arm
+            // the post-connect health check only when it's worth checking.
+            val fakeDnsInConfig = content.contains("\"dns-fakeip\"")
+
             markStage("core")
             Log.d(TAG, "Starting sing-box with config ${content.length} bytes...")
             BridgeAuth.redact(content).chunked(3000).forEachIndexed { idx, chunk ->
@@ -293,22 +323,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
             try {
                 Log.d(TAG, "Calling commandServer.startOrReloadService()")
-                commandServer.startOrReloadService(
-                    content,
-                    OverrideOptions().apply {
-                        autoRedirect = Settings.autoRedirect
-                        if (Settings.perAppProxyEnabled) {
-                            val appList = Settings.getEffectivePerAppProxyList()
-                            if (Settings.getEffectivePerAppProxyMode() == Settings.PER_APP_PROXY_INCLUDE) {
-                                includePackage =
-                                    PlatformInterfaceWrapper.StringArray((appList + Application.application.packageName).iterator())
-                            } else {
-                                excludePackage =
-                                    PlatformInterfaceWrapper.StringArray((appList - Application.application.packageName).iterator())
-                            }
-                        }
-                    },
-                )
+                commandServer.startOrReloadService(content, overrideOptions())
                 Log.d(TAG, "startOrReloadService completed successfully")
             } catch (e: Exception) {
                 Log.e(TAG, "startOrReloadService FAILED: ${e.message}", e)
@@ -327,9 +342,28 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     android.os.Process.killProcess(android.os.Process.myPid())
                     return
                 }
-                stopAndAlert(Alert.CreateService, e.message)
-                return
+                // A start that fails with "Russia direct" is retried without
+                // it; if that fails too, the block was not the cause and the
+                // error is the one the user saw before.
+                if (content == base || closing) {
+                    stopAndAlert(Alert.CreateService, e.message)
+                    return
+                }
+                Log.w(TAG, "start with Russia direct failed, retrying without it: ${e.message}")
+                try {
+                    commandServer.startOrReloadService(base, overrideOptions())
+                } catch (e2: Exception) {
+                    Log.e(TAG, "start without Russia direct failed too: ${e2.message}", e2)
+                    lastError.postValue("startService: ${e2.message}")
+                    stopAndAlert(Alert.CreateService, e2.message)
+                    return
+                }
+                RussiaDirectRuntime.rolledBack(Application.application, e.message)
+                routed = RussiaDirectRuntime.Prepared(base, "off (session: the start with it failed: ${e.message})", warn = true)
+                content = base
+                lastError.postValue(null)
             }
+            logRussiaDirect(routed)
 
             if (commandServer.needWIFIState()) {
                 val wifiPermission =
@@ -382,6 +416,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // The tun guard rejects connections the system won't name an owner
             // for; make sure it names ours, or drop the rule for the session.
             if (OutsideVpnGuard.inConfig(content)) OutsideVpnGuard.verifyAfterStart()
+            RussiaDirectRuntime.onRunning(Application.application, routed)
+            if (RussiaDirectRuntime.claimDnsCheck(routed)) Thread { runDnsRuHealthCheck() }.start()
         } catch (e: Exception) {
             stopAndAlert(Alert.StartService, e.message)
             return
@@ -438,6 +474,42 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
         } catch (e: Exception) {
             Log.w(TAG, "FakeDNS health check error: ${e.message}")
+        }
+    }
+
+    /**
+     * "Russia direct" resolves Russian names at Yandex over TCP 53, outside
+     * the tunnel. Where that port is closed (hotels, offices, some networks
+     * abroad) Russian names would stop resolving. Ask for one through the
+     * tunnel after connect; if dns-ru does not answer while the proxy does,
+     * our DNS rule resolves through dns-direct for the session, and reload.
+     * Only ever falls back, once per session.
+     */
+    private fun runDnsRuHealthCheck() {
+        try {
+            Thread.sleep(4000) // let the tunnel + bridges settle
+            fun wanted() = !RussiaDirectRuntime.dnsRuFallback && globalStatus.value == Status.Started
+            if (!wanted()) return
+            if (RussiaDirectRuntime.probeDnsRu(attempts = 3) { wanted() }) {
+                Log.i(TAG, "dns-ru health check OK")
+                return
+            }
+            if (!wanted()) return
+            if (!probeProxyAliveByIp()) {
+                Log.w(TAG, "dns-ru health check: no answer, but the proxy is down too — not blaming dns-ru")
+                return
+            }
+            Log.w(TAG, "dns-ru health check FAILED — Russian names resolve through dns-direct this session; reloading")
+            RussiaDirectRuntime.dnsRuFallback = true
+            if (globalStatus.value != Status.Started) return
+            try {
+                val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
+                try { client.serviceReload() } finally { client.disconnect() }
+            } catch (e: Exception) {
+                Log.w(TAG, "dns-ru fallback reload failed: ${e.message}")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "dns-ru health check error: ${e.message}")
         }
     }
 
@@ -564,7 +636,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             failReload(Alert.EmptyConfiguration)
             return
         }
-        val content = try {
+        val base = try {
             applyConfigTransforms(rawContent)
         } catch (e: Exception) {
             failReload(Alert.CreateService, "proxy-mode rewrite: ${e.message}")
@@ -588,25 +660,38 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             Log.w(TAG, "serviceReload skipped — service not running")
             return
         }
-        try {
-            commandServer.startOrReloadService(
-                content,
-                OverrideOptions().apply {
-                    autoRedirect = Settings.autoRedirect
-                    if (Settings.perAppProxyEnabled) {
-                        val appList = Settings.getEffectivePerAppProxyList()
-                        if (Settings.getEffectivePerAppProxyMode() == Settings.PER_APP_PROXY_INCLUDE) {
-                            includePackage = PlatformInterfaceWrapper.StringArray((appList + Application.application.packageName).iterator())
-                        } else {
-                            excludePackage = PlatformInterfaceWrapper.StringArray((appList - Application.application.packageName).iterator())
-                        }
-                    }
-                },
-            )
-        } catch (e: Exception) {
-            failReload(Alert.CreateService, e.message)
+        var routed = RussiaDirectRuntime.prepare(Application.application, base, selectedProfileId)
+        // The check inside may have taken a moment.
+        if (!reloadable()) {
+            RussiaDirectRuntime.onStopped(Application.application)
+            Log.w(TAG, "serviceReload skipped — service not running")
             return
         }
+        try {
+            commandServer.startOrReloadService(routed.content, overrideOptions())
+        } catch (e: Exception) {
+            // As in startService: without "Russia direct" once more, unless the
+            // block was not in or the service is going away.
+            if (routed.content == base || !reloadable()) {
+                RussiaDirectRuntime.onStopped(Application.application)
+                failReload(Alert.CreateService, e.message)
+                return
+            }
+            Log.w(TAG, "reload with Russia direct failed, retrying without it: ${e.message}")
+            try {
+                commandServer.startOrReloadService(base, overrideOptions())
+            } catch (e2: Exception) {
+                Log.e(TAG, "reload without Russia direct failed too: ${e2.message}", e2)
+                RussiaDirectRuntime.onStopped(Application.application)
+                failReload(Alert.CreateService, e2.message)
+                return
+            }
+            RussiaDirectRuntime.rolledBack(Application.application, e.message)
+            routed = RussiaDirectRuntime.Prepared(base, "off (session: the reload with it failed: ${e.message})", warn = true)
+        }
+        logRussiaDirect(routed)
+        RussiaDirectRuntime.onRunning(Application.application, routed)
+        if (RussiaDirectRuntime.claimDnsCheck(routed)) Thread { runDnsRuHealthCheck() }.start()
 
         if (commandServer.needWIFIState()) {
             val wifiPermission =
@@ -684,6 +769,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 close()
 //                Seq.destroyRef(refnum)
             }
+            RussiaDirectRuntime.onStopped(Application.application)
             stopAllBridges()
             withContext(Dispatchers.Main) {
                 // Again: a start that finished while this stop waited shows it.
@@ -702,6 +788,37 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         }
     }
 
+    /** Per-app routing for the tun, the same for a start, a reload and their retries. */
+    private fun overrideOptions() = OverrideOptions().apply {
+        autoRedirect = Settings.autoRedirect
+        if (Settings.perAppProxyEnabled) {
+            val appList = Settings.getEffectivePerAppProxyList()
+            if (Settings.getEffectivePerAppProxyMode() == Settings.PER_APP_PROXY_INCLUDE) {
+                includePackage =
+                    PlatformInterfaceWrapper.StringArray((appList + Application.application.packageName).iterator())
+            } else {
+                excludePackage =
+                    PlatformInterfaceWrapper.StringArray((appList - Application.application.packageName).iterator())
+            }
+        }
+    }
+
+    /**
+     * One line for support after every start and reload: whether "Russia
+     * direct" is in and why not. Into the core's log too (the Logs screen),
+     * after the start, since a start clears that log.
+     */
+    private fun logRussiaDirect(prepared: RussiaDirectRuntime.Prepared) {
+        val line = prepared.line
+        if (prepared.warn) Log.w(TAG, line) else Log.i(TAG, line)
+        try {
+            // libbox log levels: 3 warn, 4 info.
+            commandServer.writeMessage(if (prepared.warn) 3 else 4, (if (prepared.warn) "WARN " else "INFO ") + line)
+        } catch (t: Throwable) {
+            Log.w(TAG, "russia-direct line not written to the core log: ${t.message}")
+        }
+    }
+
     private suspend fun stopAndAlert(type: Alert, message: String? = null) {
         closing = true
         Log.e(TAG, "stopAndAlert: ${type.name} — $message")
@@ -717,6 +834,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             closeService()
             commandServer.close()
         }
+        RussiaDirectRuntime.onStopped(Application.application)
         stopAllBridges()
         withContext(Dispatchers.Main) {
             if (receiverRegistered) {

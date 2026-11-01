@@ -148,6 +148,20 @@ class Application : Application() {
           }
         }
 
+        // "Russia direct" rule sets: assets → internal files dir, checked against
+        // their constants. Its own coroutine, outside the Libbox start gate
+        // above: it never touches Libbox, and a slow flash must not hold the
+        // service's start. BoxService copies them itself if this has not run
+        // yet or failed; a failure only logs.
+        @Suppress("OPT_IN_USAGE")
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                com.vpn4tv.app.bg.RuleSetFiles.ensure(this@Application)
+            } catch (t: Throwable) {
+                Log.w("Application", "rule sets not copied: ${t.message}")
+            }
+        }
+
         // Off main thread: registerReceiver is a synchronous binder call into
         // system_server; at boot/wake AMS can be overloaded for seconds and
         // this transact showed up as the blocking frame in vc50326 onCreate

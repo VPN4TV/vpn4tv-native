@@ -25,6 +25,7 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}, onLanImpo
     var proxyMode by remember { mutableStateOf(Settings.isProxyMode) }
     var bypassLan by remember { mutableStateOf(Settings.bypassLan) }
     var fakeDns by remember { mutableStateOf(Settings.fakeDns) }
+    var allThroughVpn by remember { mutableStateOf(Settings.allThroughVpn) }
 
     // verticalScroll: the settings list outgrew one screen once FakeDNS + LAN
     // import were added — on short-height TVs (Mi Box) those last rows were
@@ -95,6 +96,20 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}, onLanImpo
             onCheckedChange = {
                 fakeDns = it
                 Settings.fakeDns = it
+            }
+        )
+
+        // "Everything through VPN" — off: Russian sites and services go
+        // direct ("Russia direct"). Shown in both modes; unlike the toggles
+        // above it applies at once, through a reload of the running service.
+        SettingsToggle(
+            title = stringResource(R.string.setting_all_through_vpn),
+            subtitle = stringResource(R.string.setting_all_through_vpn_desc),
+            checked = allThroughVpn,
+            onCheckedChange = {
+                allThroughVpn = it
+                Settings.allThroughVpn = it
+                com.vpn4tv.app.bg.BoxService.reloadIfRunning()
             }
         )
 

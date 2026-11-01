@@ -1,0 +1,164 @@
+{
+  "route": {
+    "final": "select",
+    "rules": [
+      {
+        "package_name": [
+          "!outside-vpn"
+        ],
+        "action": "reject"
+      },
+      {
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "mode": "and",
+        "outbound": "direct",
+        "action": "route",
+        "rules": [
+          {
+            "ip_is_private": true
+          },
+          {
+            "invert": true,
+            "ip_cidr": [
+              "198.18.0.0/15",
+              "fc00::/18"
+            ]
+          }
+        ],
+        "type": "logical"
+      },
+      {
+        "outbound": "direct",
+        "network": "udp"
+      }
+    ],
+    "auto_detect_interface": true,
+    "default_domain_resolver": {
+      "server": "dns-direct"
+    }
+  },
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "outbounds": [
+    {
+      "outbounds": [
+        "OL 6",
+        "AWG 7",
+        "TT 8",
+        "OLC 9"
+      ],
+      "interval": "5m",
+      "tag": "auto",
+      "type": "urltest",
+      "url": "https://cp.cloudflare.com/",
+      "tolerance": 50
+    },
+    {
+      "default": "auto",
+      "outbounds": [
+        "auto",
+        "OL 6",
+        "AWG 7",
+        "TT 8",
+        "OLC 9"
+      ],
+      "tag": "select",
+      "type": "selector"
+    },
+    {
+      "server": "127.0.0.127",
+      "bind_interface": "lo",
+      "password": "bridge-pass",
+      "server_port": 32000,
+      "tag": "OL 6",
+      "type": "socks",
+      "version": "5",
+      "network": "tcp",
+      "username": "bridge-user"
+    },
+    {
+      "server": "127.0.0.127",
+      "bind_interface": "lo",
+      "password": "bridge-pass",
+      "domain_strategy": "ipv4_only",
+      "server_port": 33000,
+      "tag": "AWG 7",
+      "type": "socks",
+      "version": "5",
+      "network": "tcp",
+      "username": "bridge-user"
+    },
+    {
+      "server": "127.0.0.127",
+      "bind_interface": "lo",
+      "password": "bridge-pass",
+      "domain_strategy": "ipv4_only",
+      "server_port": 35000,
+      "tag": "TT 8",
+      "type": "socks",
+      "version": "5",
+      "network": "tcp",
+      "username": "bridge-user"
+    },
+    {
+      "server": "127.0.0.127",
+      "bind_interface": "lo",
+      "password": "bridge-pass",
+      "domain_strategy": "ipv4_only",
+      "server_port": 34000,
+      "tag": "OLC 9",
+      "type": "socks",
+      "version": "5",
+      "network": "tcp",
+      "username": "bridge-user"
+    },
+    {
+      "tag": "direct",
+      "type": "direct"
+    }
+  ],
+  "dns": {
+    "servers": [
+      {
+        "server": "9.9.9.9",
+        "domain_resolver": "dns-direct",
+        "tag": "dns-remote",
+        "type": "https"
+      },
+      {
+        "server": "9.9.9.9",
+        "path": "/dns-query",
+        "tag": "dns-direct",
+        "type": "https"
+      }
+    ],
+    "rules": [
+      {
+        "server": "dns-direct",
+        "outbound": "any"
+      }
+    ],
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {
+      "strict_route": true,
+      "stack": "mixed",
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "auto_route": true,
+      "tag": "tun-in",
+      "type": "tun"
+    }
+  ]
+}

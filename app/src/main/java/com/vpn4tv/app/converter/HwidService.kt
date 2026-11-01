@@ -479,7 +479,7 @@ tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1
     }
 
     /** Minimal DNS query packet: one A question, RD set. */
-    private fun buildDnsQuery(hostname: String): ByteArray {
+    internal fun buildDnsQuery(hostname: String): ByteArray {
         val out = java.io.ByteArrayOutputStream()
         val id = (Math.random() * 0xFFFF).toInt()
         out.write(id shr 8); out.write(id and 0xFF)
@@ -498,7 +498,7 @@ tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1
     }
 
     /** Extract all A-record IPs from a DNS wireformat response. */
-    private fun parseDnsAnswers(msg: ByteArray): List<String> {
+    internal fun parseDnsAnswers(msg: ByteArray): List<String> {
         val ips = mutableListOf<String>()
         try {
             if (msg.size < 12) return ips

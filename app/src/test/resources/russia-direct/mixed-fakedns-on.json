@@ -1,0 +1,214 @@
+{
+  "route": {
+    "final": "select",
+    "rules": [
+      {
+        "package_name": [
+          "!outside-vpn"
+        ],
+        "action": "reject"
+      },
+      {
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "mode": "and",
+        "outbound": "direct",
+        "action": "route",
+        "rules": [
+          {
+            "ip_is_private": true
+          },
+          {
+            "invert": true,
+            "ip_cidr": [
+              "198.18.0.0/15",
+              "fc00::/18"
+            ]
+          }
+        ],
+        "type": "logical"
+      }
+    ],
+    "auto_detect_interface": true,
+    "default_domain_resolver": {
+      "server": "dns-direct"
+    }
+  },
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "outbounds": [
+    {
+      "outbounds": [
+        "NL 1",
+        "DE 2",
+        "FI 3",
+        "SS 4"
+      ],
+      "interval": "5m",
+      "tag": "auto",
+      "type": "urltest",
+      "url": "https://cp.cloudflare.com/",
+      "tolerance": 50
+    },
+    {
+      "default": "auto",
+      "outbounds": [
+        "auto",
+        "NL 1",
+        "DE 2",
+        "FI 3",
+        "SS 4"
+      ],
+      "tag": "select",
+      "type": "selector"
+    },
+    {
+      "server": "nl.example.net",
+      "packet_encoding": "xudp",
+      "server_port": 443,
+      "tls": {
+        "utls": {
+          "fingerprint": "chrome",
+          "enabled": true
+        },
+        "server_name": "www.example.com",
+        "reality": {
+          "public_key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+          "short_id": "0123abcd",
+          "enabled": true
+        },
+        "enabled": true
+      },
+      "tag": "NL 1",
+      "type": "vless",
+      "uuid": "11111111-2222-3333-4444-555555555555",
+      "flow": "xtls-rprx-vision"
+    },
+    {
+      "server": "de.example.net",
+      "password": "fake-password",
+      "server_port": 8443,
+      "tls": {
+        "server_name": "de.example.net",
+        "enabled": true
+      },
+      "tag": "DE 2",
+      "type": "hysteria2"
+    },
+    {
+      "server": "fi.example.net",
+      "password": "fake-password",
+      "server_port": 443,
+      "tls": {
+        "server_name": "fi.example.net",
+        "enabled": true
+      },
+      "tag": "FI 3",
+      "type": "trojan"
+    },
+    {
+      "server": "192.0.2.10",
+      "password": "fake-password",
+      "method": "chacha20-ietf-poly1305",
+      "server_port": 8388,
+      "tag": "SS 4",
+      "type": "shadowsocks"
+    },
+    {
+      "tag": "direct",
+      "type": "direct"
+    }
+  ],
+  "dns": {
+    "servers": [
+      {
+        "server": "9.9.9.9",
+        "domain_resolver": "dns-direct",
+        "detour": "select",
+        "tag": "dns-remote",
+        "type": "https"
+      },
+      {
+        "server": "9.9.9.9",
+        "path": "/dns-query",
+        "tag": "dns-direct",
+        "type": "https"
+      },
+      {
+        "inet6_range": "fc00::/18",
+        "inet4_range": "198.18.0.0/15",
+        "tag": "dns-fakeip",
+        "type": "fakeip"
+      },
+      {
+        "tag": "dns-hosts",
+        "type": "hosts",
+        "predefined": {
+          "nl.example.net": [
+            "192.0.2.100"
+          ],
+          "fi.example.net": [
+            "192.0.2.102"
+          ],
+          "de.example.net": [
+            "192.0.2.101"
+          ]
+        }
+      }
+    ],
+    "rules": [
+      {
+        "server": "dns-hosts",
+        "domain": [
+          "nl.example.net",
+          "de.example.net",
+          "fi.example.net"
+        ]
+      },
+      {
+        "server": "dns-direct",
+        "outbound": "any"
+      },
+      {
+        "action": "reject",
+        "query_type": [
+          "HTTPS",
+          "SVCB"
+        ]
+      },
+      {
+        "server": "dns-fakeip",
+        "query_type": [
+          "A",
+          "AAAA"
+        ]
+      }
+    ]
+  },
+  "experimental": {
+    "cache_file": {
+      "store_fakeip": true,
+      "enabled": true
+    }
+  },
+  "inbounds": [
+    {
+      "strict_route": true,
+      "stack": "mixed",
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "auto_route": true,
+      "tag": "tun-in",
+      "type": "tun"
+    }
+  ]
+}
