@@ -116,7 +116,10 @@ class ConfigGeneratorTest {
         assertFalse("no udp_over_tcp", outbound.has("udp_over_tcp"))
     }
 
-    private fun udpRules(config: JSONObject) = config.routeRules().filter { it.optString("network") == "udp" }
+    /** UDP rules other than the device's clock sync ([ConfigGenerator.ntpDirectRule]), which goes direct by design. */
+    private fun udpRules(config: JSONObject) = config.routeRules().filter { it.optString("network") == "udp" && !isNtp(it) }
+
+    private fun isNtp(rule: JSONObject) = rule.toString() == ConfigGenerator.ntpDirectRule().toString()
 
     /** Nothing sends UDP around the tunnel, and DNS goes through it. */
     private fun assertNoLeak(config: JSONObject) {
@@ -178,8 +181,10 @@ class ConfigGeneratorTest {
         val reject = udpRules(config).single()
         assertEquals("reject", reject.getString("action"))
         assertFalse(reject.has("outbound"))
-        // Right after the sniff / hijack-dns prelude, so DNS is hijacked first.
-        assertEquals(listOf("sniff", "hijack-dns", "reject"), rules.map { it.optString("action") })
+        // Right after the sniff / hijack-dns prelude, so DNS is hijacked first;
+        // only NTP goes ahead of it, direct.
+        assertEquals(listOf("sniff", "hijack-dns", "route", "reject"), rules.map { it.optString("action") })
+        assertTrue(isNtp(rules[2]))
         assertNoLeak(config)
         val remote = config.dnsServer("dns-remote")
         assertEquals("tcp", remote.getString("type"))
@@ -384,7 +389,8 @@ class ConfigGeneratorTest {
         for (proxies in listOf(listOf(olcrtc()), listOf(naive), listOf(olcrtc("O1"), naive))) {
             val config = generate(*proxies.toTypedArray())
             val rules = config.routeRules()
-            assertEquals(proxies.joinToString { it.tag }, listOf("sniff", "hijack-dns", "reject"), rules.map { it.optString("action") })
+            assertEquals(proxies.joinToString { it.tag }, listOf("sniff", "hijack-dns", "route", "reject"), rules.map { it.optString("action") })
+            assertTrue(isNtp(rules[rules.size - 2]))
             assertEquals(ConfigGenerator.udpRejectRule().toString(), rules.last().toString())
         }
     }

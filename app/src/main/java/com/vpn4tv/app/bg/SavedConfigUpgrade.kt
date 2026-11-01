@@ -39,9 +39,10 @@ object SavedConfigUpgrade {
     /**
      * Raised with every change of [ConfigUpgrade]: builds that share a version
      * code (test builds) run the new upgrade too. Recorded with the version
-     * code as versionCode * 100 + SHAPE.
+     * code as versionCode * 100 + SHAPE. 2: the xray bridge speaks VLESS with
+     * UDP, NTP goes direct where UDP is refused.
      */
-    private const val SHAPE = 1
+    private const val SHAPE = 2
 
     private val done = CountDownLatch(1)
 

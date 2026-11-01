@@ -104,6 +104,14 @@ object ConfigGenerator {
     internal fun udpRejectRule(): JSONObject = JSONObject().put("network", "udp").put("action", "reject")
 
     /**
+     * Where UDP is refused ([udpRejectRule]), the device's own clock sync
+     * (NTP, UDP 123) goes direct, just ahead of the refusal: a TV box whose
+     * clock is off fails every TLS handshake. Nothing in it is the user's.
+     */
+    internal fun ntpDirectRule(): JSONObject = JSONObject()
+        .put("network", "udp").put("port", 123).put("action", "route").put("outbound", "direct")
+
+    /**
      * The rule that resolves the names of UDP flows on the route, through
      * dns-remote (the tunnel), in a profile with FakeDNS and a TrustTunnel
      * outbound: see [resolvesUdpNames]. Right after hijack-dns.
@@ -603,8 +611,11 @@ object ConfigGenerator {
                     // outbound carries UDP).
                     put(udpResolveRule())
                 }
-                // Keep it the last rule: see udpRejectRule.
-                if (noUdp) put(udpRejectRule())
+                // Keep it the last rule: see udpRejectRule. NTP goes ahead of it.
+                if (noUdp) {
+                    put(ntpDirectRule())
+                    put(udpRejectRule())
+                }
             })
             put("auto_detect_interface", true)
             // Always route via the "select" group; ConfigGenerator builds it

@@ -20,9 +20,10 @@ import org.json.JSONObject
  *  3. dns-remote goes through "select", asked over TCP (udp → tcp,
  *     quic → tls, h3 → https) since the config can pick a bridge;
  *  4. where no proxy carries UDP even then (olcRTC only),
- *     {network: udp, action: reject} is the last rule; where one does, a
- *     refusal an earlier generator wrote goes (an xray-only config of a 5.4.0
- *     release candidate had one);
+ *     {network: udp, action: reject} is the last rule, with NTP direct just
+ *     ahead of it; where one does, a refusal an earlier generator wrote goes
+ *     (an xray-only config of a 5.4.0 release candidate had one), and so does
+ *     that NTP rule;
  *  5. the socks outbounds to the TrustTunnel bridge carry plain SOCKS5 UDP
  *     (no network limit; its relay takes this process's datagrams only), and
  *     a config with FakeDNS and such an outbound resolves the names of UDP
@@ -154,7 +155,8 @@ object ConfigUpgrade {
             }
         }
 
-        // 4. No proxy carries UDP: refuse it, last. One does: no refusal.
+        // 4. No proxy carries UDP: refuse it, last, with NTP direct just ahead
+        // of the refusal. One does: neither.
         if (objects(outbounds).none { ConfigGenerator.carriesUdp(it) }) {
             val at = (0 until rules.length()).firstOrNull { i -> rules.optJSONObject(i)?.let { RussiaDirect.isUdpReject(it) } == true }
             when {
@@ -167,11 +169,20 @@ object ConfigUpgrade {
                     changes += "UDP refusal moved last"
                 }
             }
+            if (objects(rules).none { isNtpDirect(it) }) {
+                insertInPlace(rules, rules.length() - 1, ConfigGenerator.ntpDirectRule())
+                changes += "NTP direct ahead of the UDP refusal"
+            }
         } else {
             for (i in rules.length() - 1 downTo 0) {
-                if (rules.optJSONObject(i)?.let { RussiaDirect.isUdpReject(it) } != true) continue
-                rules.remove(i)
-                changes += "UDP refusal removed (a proxy carries UDP)"
+                val rule = rules.optJSONObject(i) ?: continue
+                if (RussiaDirect.isUdpReject(rule)) {
+                    rules.remove(i)
+                    changes += "UDP refusal removed (a proxy carries UDP)"
+                } else if (isNtpDirect(rule)) {
+                    rules.remove(i)
+                    changes += "NTP rule removed (a proxy carries UDP)"
+                }
             }
         }
 
@@ -243,6 +254,22 @@ object ConfigUpgrade {
 
     private fun isUdpResolve(rule: JSONObject): Boolean =
         rule.optString("action") == "resolve" && rule.optString("network") == "udp"
+
+    /** Exactly [ConfigGenerator.ntpDirectRule]. */
+    private fun isNtpDirect(rule: JSONObject): Boolean =
+        rule.length() == 4 && rule.opt("network") == "udp" && rule.optInt("port", -1) == 123 &&
+            rule.opt("action") == "route" && rule.opt("outbound") == DIRECT
+
+    /** [insertAt] into [array] itself: later steps hold the same route.rules. */
+    private fun insertInPlace(array: JSONArray, index: Int, value: JSONObject) {
+        val items = (0 until array.length()).map { array.get(it) }
+        for (i in array.length() - 1 downTo 0) array.remove(i)
+        items.forEachIndexed { i, item ->
+            if (i == index) array.put(value)
+            array.put(item)
+        }
+        if (index >= items.size) array.put(value)
+    }
 
     private fun insertAt(array: JSONArray, index: Int, value: JSONObject): JSONArray {
         val out = JSONArray()

@@ -114,7 +114,10 @@ class ConfigUpgradeTest {
     private fun JSONObject.routeRules() = getJSONObject("route").getJSONArray("rules").objects()
     private fun JSONObject.dnsRemote() =
         getJSONObject("dns").getJSONArray("servers").objects().single { it.optString("tag") == "dns-remote" }
-    private fun udpRules(config: JSONObject) = config.routeRules().filter { it.optString("network") == "udp" }
+    /** UDP rules other than the device's clock sync ([ConfigGenerator.ntpDirectRule]), which goes direct by design. */
+    private fun udpRules(config: JSONObject) = config.routeRules().filter { it.optString("network") == "udp" && !isNtp(it) }
+
+    private fun isNtp(rule: JSONObject) = rule.toString() == ConfigGenerator.ntpDirectRule().toString()
 
     /** Order-insensitive for object keys, as the core reads JSON. */
     private fun canonical(value: Any?): String = when (value) {
@@ -477,5 +480,25 @@ class ConfigUpgradeTest {
         assertEquals(ConfigGenerator.udpRejectRule().toString(), config.routeRules().last().toString())
         assertEquals(1, udpRules(config).size)
         assertTrue(result.changes.toString(), result.changes.any { it.contains("moved last") })
+    }
+
+    @Test
+    fun ntpGoesDirectJustAheadOfTheRefusal() {
+        val config = JSONObject(ConfigUpgrade.upgrade(before("olcrtc-only"), sidecarsOf("olcrtc-only")).json!!)
+        val rules = config.routeRules()
+        assertEquals(ConfigGenerator.udpRejectRule().toString(), rules.last().toString())
+        assertTrue(isNtp(rules[rules.size - 2]))
+        assertEquals(1, rules.count { isNtp(it) })
+    }
+
+    @Test
+    fun theNtpRuleGoesWithTheRefusalWhereAProxyCarriesUdp() {
+        // A config whose proxies carry UDP, with both rules left over.
+        val upgraded = JSONObject(ConfigUpgrade.upgrade(before("xray-only"), sidecarsOf("xray-only")).json!!)
+        upgraded.getJSONObject("route").getJSONArray("rules").put(ConfigGenerator.ntpDirectRule()).put(ConfigGenerator.udpRejectRule())
+        val result = ConfigUpgrade.upgrade(upgraded.toString(), sidecarsOf("xray-only"))
+        val rules = JSONObject(result.json!!).routeRules()
+        assertTrue(rules.none { isNtp(it) || RussiaDirect.isUdpReject(it) })
+        assertTrue(result.changes.toString(), result.changes.any { it.contains("NTP rule removed") })
     }
 }
