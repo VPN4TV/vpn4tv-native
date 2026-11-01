@@ -35,8 +35,8 @@ android {
         applicationId = "com.vpn4tv.hiddify"
         minSdk = 23
         targetSdk = 36
-        versionCode = 53300
-        versionName = "5.3.3"
+        versionCode = 54000
+        versionName = "5.4.0"
         base.archivesName.set("VPN4TV-Native-${versionName}")
 
         // libbox.aar ships only armeabi-v7a + arm64-v8a; x86 variants would
