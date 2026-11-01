@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
@@ -47,6 +48,7 @@ fun HomeScreen(
     onNavigateLogs: () -> Unit = {},
     onNavigateSettings: () -> Unit = {},
     onNavigateAbout: () -> Unit = {},
+    onManualImport: () -> Unit = {},
 ) {
     val status by BoxService.globalStatus.observeAsState(Status.Stopped)
     val lastError by BoxService.lastError.observeAsState(null)
@@ -146,6 +148,9 @@ fun HomeScreen(
     val buttonHeight = if (isTV) 80.dp else 56.dp
     val buttonTextSize = if (isTV) 24.sp else 18.sp
     val iconSize = if (isTV) 24.dp else 20.dp
+    // A phone held upright gets "+" at the top right: the paste dialog that
+    // replaces the LAN import in its Settings. Landscape has no "+".
+    val pasteKeys = currentKeyImport() == KeyImport.Paste
 
     Column(
         modifier = Modifier
@@ -249,8 +254,8 @@ fun HomeScreen(
                 if (activeProfile != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         // The name yields, the refresh button does not: on a phone
-                        // the five icons on the right leave this column ~100 dp,
-                        // and an unweighted name took all of it — the button was
+                        // the icons on the right leave this column ~100 dp, and
+                        // an unweighted name took all of it — the button was
                         // measured at zero width and simply was not there.
                         Text(
                             activeProfile?.name ?: "",
@@ -351,19 +356,28 @@ fun HomeScreen(
                 }
             }
             Row {
-                IconButton(onClick = onNavigateServers) {
+                // Six 48 dp buttons would leave the title column ~40 dp on a
+                // 360 dp phone and break "VPN4TV" in two; at 40 dp the six take
+                // the width the five took. Landscape keeps the default size.
+                val action = if (pasteKeys) Modifier.size(40.dp) else Modifier
+                if (pasteKeys) {
+                    IconButton(onClick = onManualImport, modifier = action) {
+                        Icon(Icons.Default.Add, stringResource(R.string.manual_import_title), tint = Color.White, modifier = Modifier.size(iconSize))
+                    }
+                }
+                IconButton(onClick = onNavigateServers, modifier = action) {
                     Icon(Icons.Default.List, stringResource(R.string.nav_servers), tint = Color.White, modifier = Modifier.size(iconSize))
                 }
-                IconButton(onClick = onNavigateLogs) {
+                IconButton(onClick = onNavigateLogs, modifier = action) {
                     Icon(Icons.Default.Description, stringResource(R.string.title_logs), tint = Color.White, modifier = Modifier.size(iconSize))
                 }
-                IconButton(onClick = onNavigateProfiles) {
+                IconButton(onClick = onNavigateProfiles, modifier = action) {
                     Icon(Icons.Default.FolderOpen, stringResource(R.string.nav_profiles), tint = Color.White, modifier = Modifier.size(iconSize))
                 }
-                IconButton(onClick = onNavigateSettings) {
+                IconButton(onClick = onNavigateSettings, modifier = action) {
                     Icon(Icons.Default.Settings, stringResource(R.string.title_settings), tint = Color.White, modifier = Modifier.size(iconSize))
                 }
-                IconButton(onClick = onNavigateAbout) {
+                IconButton(onClick = onNavigateAbout, modifier = action) {
                     Icon(Icons.Default.Info, stringResource(R.string.title_about), tint = Color.White, modifier = Modifier.size(iconSize))
                 }
             }

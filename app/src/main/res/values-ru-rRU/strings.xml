@@ -586,6 +586,10 @@
     <string name="lan_import_done">Ключ добавлен — проверьте телевизор</string>
     <string name="add_lan_fallback_hint">Telegram недоступен? Добавьте ключ другим способом:</string>
     <string name="add_lan_fallback_button">Добавить по локальной сети</string>
+    <string name="manual_import_title">Ручной импорт</string>
+    <string name="setting_manual_import_desc">Добавить ключ или подписку, вставив ссылку</string>
+    <string name="manual_import_hint">Вставьте ссылку на подписку, ссылки серверов (vless://, ss://, …) или конфигурацию sing-box.</string>
+    <string name="manual_import_field">Конфигурация</string>
     <string name="proxy_mode_card_title">Прокси запущен</string>
     <string name="proxy_mode_card_hint">В SmartTube или другом приложении укажите SOCKS5-прокси: 127.0.0.1 порт 12334</string>
     <string name="session_traffic">Сессия</string>

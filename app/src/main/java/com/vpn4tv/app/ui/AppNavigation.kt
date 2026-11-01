@@ -8,6 +8,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.dialog
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.withContext
 
@@ -21,6 +22,7 @@ object Routes {
     const val PER_APP_PROXY = "per_app_proxy"
     const val ABOUT = "about"
     const val LAN_IMPORT = "lan_import"
+    const val MANUAL_IMPORT = "manual_import"
 }
 
 // TV remotes double-fire DPAD_CENTER / BACK. The RESUMED-lifecycle guard is
@@ -81,6 +83,7 @@ fun AppNavigation(
                 onNavigateLogs = { navController.navigateSafe(Routes.LOGS) },
                 onNavigateSettings = { navController.navigateSafe(Routes.SETTINGS) },
                 onNavigateAbout = { navController.navigateSafe(Routes.ABOUT) },
+                onManualImport = { navController.navigateSafe(Routes.MANUAL_IMPORT) },
             )
         }
         composable(Routes.PROFILES) {
@@ -101,7 +104,8 @@ fun AppNavigation(
             SettingsScreen(
                 onBack = { navController.popBackStackSafe() },
                 onPerAppProxy = { navController.navigateSafe(Routes.PER_APP_PROXY) },
-                onLanImport = { navController.navigateSafe(Routes.LAN_IMPORT) }
+                onLanImport = { navController.navigateSafe(Routes.LAN_IMPORT) },
+                onManualImport = { navController.navigateSafe(Routes.MANUAL_IMPORT) },
             )
         }
         composable(Routes.PER_APP_PROXY) {
@@ -111,6 +115,19 @@ fun AppNavigation(
             LanImportScreen(
                 onBack = { navController.popBackStackSafe() },
                 onImported = { navController.popBackStack(Routes.HOME, false) }
+            )
+        }
+        // Opened in portrait, from Home ("+") or Settings; turning the phone
+        // afterwards leaves it open. A dialog destination: the screen under it
+        // stays STARTED and resumes when it closes, so Home shows the new
+        // profile as after the other imports.
+        dialog(Routes.MANUAL_IMPORT) {
+            ManualImportDialog(
+                // Pops this dialog only: a second tap on Cancel finds nothing
+                // to pop instead of taking Home with it.
+                onDismiss = { navController.popBackStack(Routes.MANUAL_IMPORT, true) },
+                // As the LAN import: not lifecycle-guarded, fires after a delay.
+                onImported = { navController.popBackStack(Routes.HOME, false) },
             )
         }
         composable(Routes.ABOUT) {

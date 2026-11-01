@@ -20,7 +20,12 @@ import com.vpn4tv.app.constant.ServiceMode
 import com.vpn4tv.app.database.Settings
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}, onLanImport: () -> Unit = {}) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onPerAppProxy: () -> Unit = {},
+    onLanImport: () -> Unit = {},
+    onManualImport: () -> Unit = {},
+) {
     var autoConnect by remember { mutableStateOf(Settings.autoConnectOnBoot) }
     var proxyMode by remember { mutableStateOf(Settings.isProxyMode) }
     var bypassLan by remember { mutableStateOf(Settings.bypassLan) }
@@ -113,27 +118,24 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}, onLanImpo
             }
         )
 
-        // LAN import — bring-your-own-key over the local network. Deliberately
-        // tucked in Settings, not surfaced in the default onboarding, so the
-        // Telegram funnel (buy-or-bring-key) stays the primary path.
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-                .clickable { onLanImport() }
-                .focusable(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.lan_import_title), fontSize = 18.sp, color = Color.White)
-                    Text(stringResource(R.string.setting_lan_import_desc), fontSize = 13.sp, color = Color.Gray)
-                }
-                Text("›", fontSize = 20.sp, color = Color.Gray)
-            }
+        // Bring-your-own-key. Deliberately tucked in Settings, not surfaced in
+        // the default onboarding, so the Telegram funnel (buy-or-bring-key)
+        // stays the primary path. A phone held upright pastes the key in a
+        // dialog (the desktop's Manual Import, also behind "+" on Home);
+        // landscape — a TV, a tablet or phone on its side — imports over the
+        // local network, as before.
+        if (currentKeyImport() == KeyImport.Paste) {
+            SettingsLink(
+                title = stringResource(R.string.manual_import_title),
+                subtitle = stringResource(R.string.setting_manual_import_desc),
+                onClick = onManualImport,
+            )
+        } else {
+            SettingsLink(
+                title = stringResource(R.string.lan_import_title),
+                subtitle = stringResource(R.string.setting_lan_import_desc),
+                onClick = onLanImport,
+            )
         }
 
         // Advanced / niche — kept at the bottom below the everyday settings.
@@ -174,6 +176,30 @@ fun SettingsScreen(onBack: () -> Unit, onPerAppProxy: () -> Unit = {}, onLanImpo
             color = Color.Gray,
             modifier = Modifier.padding(top = 16.dp)
         )
+    }
+}
+
+/** A row that opens another screen or a dialog: title, subtitle, chevron. */
+@Composable
+private fun SettingsLink(title: String, subtitle: String, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable { onClick() }
+            .focusable(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontSize = 18.sp, color = Color.White)
+                Text(subtitle, fontSize = 13.sp, color = Color.Gray)
+            }
+            Text("›", fontSize = 20.sp, color = Color.Gray)
+        }
     }
 }
 

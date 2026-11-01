@@ -554,6 +554,10 @@
     <string name="lan_import_done">Key added — check your TV</string>
     <string name="add_lan_fallback_hint">Telegram not reachable? Add your key another way:</string>
     <string name="add_lan_fallback_button">Add over local network</string>
+    <string name="manual_import_title">Manual import</string>
+    <string name="setting_manual_import_desc">Add a key or subscription by pasting its link</string>
+    <string name="manual_import_hint">Paste a subscription link, server links (vless://, ss://, …), or a sing-box config.</string>
+    <string name="manual_import_field">Configuration</string>
     <string name="proxy_mode_card_title">Proxy running</string>
     <string name="proxy_mode_card_hint">Configure SmartTube or another app to use SOCKS5 proxy at 127.0.0.1:12334</string>
     <string name="session_traffic">Session</string>

@@ -13,15 +13,16 @@ import com.vpn4tv.app.ui.isGenericProxyTag
 import java.io.File
 
 /**
- * Shared "text → profile" import used by the LAN configurator. Accepts the
- * same inputs as the Telegram flow's processConfigs: a subscription URL
+ * Shared "text → profile" import used by the LAN configurator and the paste
+ * dialog (Manual import, ManualImportViewModel). Accepts the same inputs as
+ * the Telegram flow's processConfigs: a subscription URL
  * (https://…), one or more direct proxy links (vless://, naive+https://, …),
  * or a wg-quick / .conf body. Fetches subscriptions through HwidService so
  * the DNS-fallback + mirror chain applies, then parses, generates, and
  * creates the profile, selecting it as active.
  *
  * Returns Result.success(profileName) or Result.failure with a user-facing
- * message (surfaced verbatim in the phone browser).
+ * message (surfaced verbatim in the phone browser or the dialog).
  */
 object ProfileImporter {
     private const val TAG = "ProfileImporter"
