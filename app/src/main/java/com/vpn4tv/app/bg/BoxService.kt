@@ -57,7 +57,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         private const val STOP_WAITS_FOR_RELOAD_MS = 15_000L
 
         // How long a start waits for the one-time upgrade of the saved configs.
-        private const val CONFIG_UPGRADE_WAIT_MS = 5_000L
+        private const val CONFIG_UPGRADE_WAIT_MS = 10_000L
         val globalStatus = MutableLiveData(Status.Stopped)
         val lastError = MutableLiveData<String?>(null)
 
@@ -190,10 +190,12 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // The saved configs are upgraded once after an update, off the
             // main thread (SavedConfigUpgrade): a start at boot right after an
             // update must read the upgraded file. Normally long done; a stuck
-            // upgrade only costs this wait, then the file on disk is used as is.
+            // upgrade only costs this wait, then the file on disk is used as is
+            // and the service is reloaded once the upgrade has rewritten it.
             markStage("config-upgrade")
             if (!SavedConfigUpgrade.awaitDone(CONFIG_UPGRADE_WAIT_MS)) {
                 Log.w(TAG, "saved config upgrade not done after ${CONFIG_UPGRADE_WAIT_MS}ms, starting with the file as it is")
+                SavedConfigUpgrade.startedWithoutIt()
             }
 
             val selectedProfileId = Settings.selectedProfile

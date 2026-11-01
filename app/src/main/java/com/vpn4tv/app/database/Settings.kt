@@ -67,8 +67,9 @@ object Settings {
     var startedByUser by dataStore.boolean(SettingsKey.STARTED_BY_USER)
 
     /**
-     * The version code the saved configs were brought up to (SavedConfigUpgrade
-     * runs at the first launch of any other one). 0: never, e.g. 5.3.x and older.
+     * What the saved configs were brought up to, versionCode * 100 + the
+     * upgrade's shape (SavedConfigUpgrade runs at the first launch of any
+     * other). 0: never, e.g. 5.3.x and older.
      */
     var configUpgradeVersion by dataStore.int(SettingsKey.CONFIG_UPGRADE_VERSION) { 0 }
     var autoConnectOnBoot by dataStore.boolean(SettingsKey.AUTO_CONNECT_ON_BOOT) { true }

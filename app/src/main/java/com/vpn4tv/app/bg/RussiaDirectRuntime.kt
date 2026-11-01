@@ -105,7 +105,11 @@ object RussiaDirectRuntime {
         prepare0(context, base, profileId)
     } catch (t: Throwable) {
         Log.e(TAG, "not applied: ${t.message}", t)
-        Prepared(base, "off (error: ${t.javaClass.simpleName}: ${t.message})", warn = true)
+        try {
+            disarm(context, survived = false)
+        } catch (_: Throwable) {
+        }
+        Prepared(torrentsOnly(base, "error"), "off (error: ${t.javaClass.simpleName}: ${t.message})", warn = true)
     }
 
     /**
@@ -140,13 +144,16 @@ object RussiaDirectRuntime {
         )
         val warn = (result.applied && (sets == null || dnsRuFallback)) ||
             result.state.startsWith("off (legacy") || result.state.startsWith("off (error")
-        if (result.json == base) return Prepared(base, result.state, warn)
+        if (!result.applied) {
+            // The torrent rule alone cannot fail a start: no mark for it, and a
+            // mark an earlier start with the block left is not this config's.
+            disarm(context, survived = false)
+            return Prepared(result.json, result.state, warn)
+        }
         arm(context)
-        if (result.applied) {
-            checkProblem(context, result.json, base)?.let { problem ->
-                disarm(context, survived = false)
-                return Prepared(torrentsOnly(base, "check: $problem"), "off (check: $problem)", warn = true)
-            }
+        checkProblem(context, result.json, base)?.let { problem ->
+            disarm(context, survived = false)
+            return Prepared(torrentsOnly(base, "check: $problem"), "off (check: $problem)", warn = true)
         }
         return Prepared(result.json, result.state, warn, guarded = true, usesDnsRu = result.usesDnsRu)
     }

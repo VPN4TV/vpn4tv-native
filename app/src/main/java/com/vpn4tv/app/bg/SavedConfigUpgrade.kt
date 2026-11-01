@@ -10,14 +10,16 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Rewrites the saved configs once after an update (the owner's decision for
- * the 5.4.0 bridge-UDP fix): at the first launch of a new version code every
- * profile's config on disk is brought to the new generator's shape
- * ([ConfigUpgrade]), instead of transforming it at every start.
+ * the 5.4.0 bridge-UDP fix): at the first launch of a new version code, or of
+ * a new [SHAPE], every profile's config on disk is brought to the new
+ * generator's shape ([ConfigUpgrade]), instead of transforming it at every
+ * start.
  *
  * Application.onCreate starts it off the main thread; BoxService waits for it
  * (bounded) before it reads a profile, so the first connect after an update
- * already runs the upgraded file. A service that is somehow running meanwhile
- * is not restarted: the next start or reload reads the new file.
+ * already runs the upgraded file. A start that gave up waiting
+ * ([startedWithoutIt]) read its file as it was: once the upgrade has
+ * rewritten any file, the running service is reloaded.
  *
  * Each file is replaced atomically (a temporary file in the same directory,
  * then renameTo), under [ConfigGenerator.fileLock] so a refresh writing the
@@ -30,19 +32,44 @@ object SavedConfigUpgrade {
     private const val TAG = "ConfigUpgrade"
     private const val TEMP_SUFFIX = ".upgrade.tmp"
 
+    /**
+     * Raised with every change of [ConfigUpgrade]: builds that share a version
+     * code (test builds) run the new upgrade too. Recorded with the version
+     * code as versionCode * 100 + SHAPE.
+     */
+    private const val SHAPE = 1
+
     private val done = CountDownLatch(1)
+
+    // Whether a start went on without the upgrade, and whether the upgrade
+    // has finished and rewrote any file: whichever comes second reloads.
+    private val reloadLock = Any()
+    private var startWentOn = false
+    private var finished = false
+    private var rewrote = false
 
     /** False when the upgrade has not finished within [timeoutMs]. */
     fun awaitDone(timeoutMs: Long): Boolean = done.await(timeoutMs, TimeUnit.MILLISECONDS)
 
+    /** A start gave up waiting ([awaitDone] false) and reads the file as it is. */
+    fun startedWithoutIt() {
+        val reload = synchronized(reloadLock) {
+            startWentOn = true
+            finished && rewrote
+        }
+        if (reload) reloadForUpgrade()
+    }
+
     /** Once per process, from Application.onCreate, on a background thread. */
     suspend fun runIfVersionChanged() {
+        var upgraded = 0
         try {
-            val current = com.vpn4tv.app.BuildConfig.VERSION_CODE
+            val current = com.vpn4tv.app.BuildConfig.VERSION_CODE * 100 + SHAPE
             val last = com.vpn4tv.app.database.Settings.configUpgradeVersion
             if (last == current) return
             val profiles = com.vpn4tv.app.database.ProfileManager.list()
             val summary = upgradeFiles(profiles.map { it.typed.path }.filter { it.isNotEmpty() })
+            upgraded = summary.upgraded
             Log.i(TAG, "version $last → $current: $summary")
             if (summary.failed == 0) {
                 com.vpn4tv.app.database.Settings.configUpgradeVersion = current
@@ -52,8 +79,19 @@ object SavedConfigUpgrade {
         } catch (t: Throwable) {
             Log.e(TAG, "saved config upgrade failed: ${t.message}", t)
         } finally {
+            val reload = synchronized(reloadLock) {
+                finished = true
+                rewrote = upgraded > 0
+                startWentOn && rewrote
+            }
             done.countDown()
+            if (reload) reloadForUpgrade()
         }
+    }
+
+    private fun reloadForUpgrade() {
+        Log.i(TAG, "a start went on without the upgrade: reloading with the upgraded files")
+        BoxService.reloadIfRunning()
     }
 
     class Summary {
