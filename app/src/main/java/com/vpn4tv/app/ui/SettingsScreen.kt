@@ -117,6 +117,15 @@ fun SettingsScreen(
                 com.vpn4tv.app.bg.BoxService.reloadIfRunning()
             }
         )
+        // Plain BitTorrent goes direct in every mode, this one included; said in
+        // small print right under it — a TV scrolls with the focus, so a note at
+        // the very bottom of the screen might never come into view.
+        Text(
+            stringResource(R.string.settings_torrents_note),
+            fontSize = 11.sp,
+            color = Color.Gray,
+            modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
+        )
 
         // Bring-your-own-key. Deliberately tucked in Settings, not surfaced in
         // the default onboarding, so the Telegram funnel (buy-or-bring-key)
@@ -167,15 +176,6 @@ fun SettingsScreen(
                 }
             )
         }
-
-        // Plain BitTorrent goes direct in every mode, "Everything through VPN"
-        // included (Russia direct); said once, in small print, at the bottom.
-        Text(
-            stringResource(R.string.settings_torrents_note),
-            fontSize = 11.sp,
-            color = Color.Gray,
-            modifier = Modifier.padding(top = 16.dp)
-        )
     }
 }
 
