@@ -22,8 +22,12 @@ import java.security.SecureRandom
  * One random pair per process. The reload path rebuilds the sing-box config
  * from the profile but leaves the bridges running, so the pair has to outlive a
  * single start; a new process starts the bridges afresh with a new pair. The
- * xray inbound also loses UDP: SOCKS5 UDP carries no credentials, and sing-box
- * reaches every bridge over TCP only.
+ * xray inbound also loses UDP: SOCKS5 UDP carries no credentials. sing-box
+ * reaches xray, outline, wireproxy and olcrtc over TCP only (the UDP of the
+ * Outline and AmneziaWG bridges travels inside that TCP connection). The one
+ * exception is TrustTunnel, whose UDP goes by SOCKS5 UDP ASSOCIATE: our build
+ * of its library binds each association's relay to sing-box's own socket in
+ * this process, which is what the password cannot do for a datagram.
  */
 object BridgeAuth {
 

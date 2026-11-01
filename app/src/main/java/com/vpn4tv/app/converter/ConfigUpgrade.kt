@@ -18,8 +18,13 @@ import org.json.JSONObject
  *     TCP (no network limit, udp_over_tcp v2);
  *  3. dns-remote goes through "select", asked over TCP (udp → tcp,
  *     quic → tls, h3 → https) since the config can pick a bridge;
- *  4. where no proxy carries UDP even then (olcRTC, TrustTunnel, xray only),
- *     {network: udp, action: reject} is the last rule.
+ *  4. where no proxy carries UDP even then (olcRTC, xray only),
+ *     {network: udp, action: reject} is the last rule;
+ *  5. the socks outbounds to the TrustTunnel bridge carry plain SOCKS5 UDP
+ *     (no network limit; its relay takes this process's datagrams only), and
+ *     a config with FakeDNS and such an outbound resolves the names of UDP
+ *     flows on the route, right after hijack-dns (the relay takes addresses
+ *     only).
  * FakeDNS and the DNS strategy stay as they are.
  *
  * Only configs ConfigGenerator wrote are touched: our groups, DNS servers
@@ -90,6 +95,15 @@ object ConfigUpgrade {
             changes += "${outbound.optString("tag")}: UDP over TCP"
         }
 
+        // 5a. TrustTunnel carries plain SOCKS5 UDP: no udp_over_tcp, which the
+        // library does not speak.
+        val ttPorts = endpointPorts(sidecars.tt)
+        for (outbound in bridges) {
+            if (port(outbound) !in ttPorts || outbound.optString("network") != "tcp") continue
+            outbound.remove("network")
+            changes += "${outbound.optString("tag")}: UDP through TrustTunnel's relay"
+        }
+
         // 1. No UDP around the tunnel.
         val route = root.getJSONObject("route")
         val rules = route.optJSONArray("rules") ?: JSONArray().also { route.put("rules", it) }
@@ -131,8 +145,32 @@ object ConfigUpgrade {
             }
         }
 
+        // 5b. With FakeDNS, the names of UDP flows are resolved on the route
+        // before TrustTunnel gets them: its relay takes addresses only.
+        if (bridges.any { port(it) in ttPorts } && hasFakeDns(root) && objects(rules).none { isUdpResolve(it) }) {
+            val hijack = (0 until rules.length()).firstOrNull { rules.optJSONObject(it)?.optString("action") == "hijack-dns" }
+            route.put("rules", insertAt(rules, if (hijack == null) 0 else hijack + 1, ConfigGenerator.udpResolveRule()))
+            changes += "UDP names resolved on the route (TrustTunnel)"
+        }
+
         if (changes.isEmpty()) return Result(null, emptyList(), null)
         return Result(root.toString(2), changes, null)
+    }
+
+    private fun hasFakeDns(root: JSONObject): Boolean =
+        objects(root.optJSONObject("dns")?.optJSONArray("servers") ?: JSONArray()).any { it.optString("type") == "fakeip" }
+
+    private fun isUdpResolve(rule: JSONObject): Boolean =
+        rule.optString("action") == "resolve" && rule.optString("network") == "udp"
+
+    private fun insertAt(array: JSONArray, index: Int, value: JSONObject): JSONArray {
+        val out = JSONArray()
+        for (i in 0 until array.length()) {
+            if (i == index) out.put(value)
+            out.put(array.get(i))
+        }
+        if (index >= array.length()) out.put(value)
+        return out
     }
 
     /**

@@ -49,9 +49,10 @@ object ConfigGenerator {
 
     /**
      * Whether sing-box can send UDP through [outbound], one of a generated
-     * config's proxies. The socks outbounds to olcRTC, TrustTunnel and xray
-     * carry TCP only (network = tcp); Outline and AmneziaWG carry UDP over
-     * TCP; naive carries UDP only over TCP, when that is on; http never.
+     * config's proxies. The socks outbounds to olcRTC and xray carry TCP only
+     * (network = tcp); Outline and AmneziaWG carry UDP over TCP; TrustTunnel
+     * carries plain SOCKS5 UDP; naive carries UDP only over TCP, when that is
+     * on; http never.
      * Groups, direct and the like are not proxies and carry nothing here.
      */
     internal fun carriesUdp(outbound: JSONObject): Boolean = when (outbound.optString("type")) {
@@ -72,12 +73,20 @@ object ConfigGenerator {
     internal fun udpRejectRule(): JSONObject = JSONObject().put("network", "udp").put("action", "reject")
 
     /**
+     * The rule that resolves the names of UDP flows on the route, through
+     * dns-remote (the tunnel), in a profile with FakeDNS and a TrustTunnel
+     * outbound: see [resolvesUdpNames]. Right after hijack-dns.
+     */
+    internal fun udpResolveRule(): JSONObject = JSONObject()
+        .put("network", "udp").put("action", "resolve").put("server", "dns-remote").put("strategy", "prefer_ipv4")
+
+    /**
      * True when [root] (a generated config) can send DNS through one of our
      * bridges, i.e. has a socks outbound to the bridge host. Remote DNS then
-     * goes over TCP: olcRTC, TrustTunnel and xray carry nothing else (a UDP
-     * query fails with "UDP is not supported by outbound"), and over Outline
-     * and AmneziaWG the bridge's TCP path is the one known to work — UDP also
-     * needs the server's UDP relay and a network that lets it through.
+     * goes over TCP: olcRTC and xray carry nothing else (a UDP query fails
+     * with "UDP is not supported by outbound"), and over Outline, AmneziaWG
+     * and TrustTunnel the bridge's TCP path is the one known to work — UDP
+     * also needs the server's UDP relay and a network that lets it through.
      * BoxService checks it before it puts a UDP DNS server in.
      */
     fun dnsOverTcp(root: JSONObject): Boolean {
@@ -244,10 +253,16 @@ object ConfigGenerator {
         }
 
         // TrustTunnel: the link goes to the bridge whole (the library decodes it).
-        // The SOCKS listener resolves names itself through the tunnel, but
-        // ipv4_only keeps DNS on sing-box's side like the other bridges. TCP
-        // only: its SOCKS UDP relay (v1.1.5) takes datagrams from any local
-        // source, so the bridge password would not cover UDP.
+        // Its SOCKS listener takes names in CONNECT and resolves them through
+        // the tunnel. TCP and UDP. UDP goes by plain SOCKS5 UDP ASSOCIATE, not
+        // sing-box's UDP over TCP, which the library does not speak: the relay
+        // of an association sits on the loopback and, in our build of the
+        // library (branch vpn4tv-udp, libs/trusttunnel-client.aar), takes
+        // datagrams only from sing-box's own socket in this process, so the
+        // bridge password is not needed for them. The relay takes addresses
+        // only, no names: a profile made only of bridges sends it addresses
+        // (it has no FakeDNS), others resolve UDP names on the route
+        // ([resolvesUdpNames]).
         val ttUrls = mutableListOf<String>()
         val ttPortBase = portBase +
             com.vpn4tv.app.trusttunnel.TtConfigGenerator.TT_PORT_OFFSET
@@ -261,7 +276,8 @@ object ConfigGenerator {
                 put("server", host)
                 put("server_port", port)
                 put("version", "5")
-                put("network", "tcp")
+                remove("network")
+                remove("udp_over_tcp")
                 put("bind_interface", "lo")
                 put("domain_strategy", "ipv4_only")
             }
@@ -480,6 +496,22 @@ object ConfigGenerator {
         return !proxies.all { it.isBridged() }
     }
 
+    /**
+     * A UDP flow to a FakeDNS address reaches the outbound with the name, and
+     * sing-box's socks client writes that name into every datagram. The
+     * TrustTunnel relay drops such datagrams: the library's UDP stream to the
+     * endpoint carries addresses only. sing-box resolves nothing for a socks
+     * outbound by itself (domain_strategy there only applies to a server given
+     * by name), so a profile with FakeDNS and a TrustTunnel outbound resolves
+     * the names of its UDP flows on the route, before an outbound is picked:
+     * through dns-remote, i.e. through the tunnel, at the server the profile
+     * asks anyway. Whatever outbound then carries the flow gets an address;
+     * TCP keeps the names. A profile made only of bridges has no FakeDNS, so
+     * its UDP destinations are addresses already.
+     */
+    private fun resolvesUdpNames(proxies: List<ProxyConfig>): Boolean =
+        fakeDnsEnabled(proxies) && proxies.any { it.ttUrl != null }
+
     private fun buildOutbounds(proxies: List<ProxyConfig>): JSONArray {
         val outbounds = JSONArray()
 
@@ -526,9 +558,9 @@ object ConfigGenerator {
     private fun buildRoute(proxies: List<ProxyConfig>): JSONObject {
         // UDP never goes "direct" behind the user's back any more: that sent
         // QUIC, calls, WebRTC and the like around the tunnel with the real
-        // address. Outline and AmneziaWG carry UDP now. A profile where no
-        // proxy carries UDP (only olcRTC, TrustTunnel, xray — naive without
-        // UDP over TCP) refuses UDP outright, last: an answer apps take as
+        // address. Outline, AmneziaWG and TrustTunnel carry UDP now. A profile
+        // where no proxy carries UDP (only olcRTC, xray — naive without UDP
+        // over TCP) refuses UDP outright, last: an answer apps take as
         // "no QUIC" and fall back to TCP at once, where the selector would
         // only fail each flow with "UDP is not supported by outbound: select".
         // The outbounds are final here: the bridge loops above rewrote them.
@@ -544,6 +576,12 @@ object ConfigGenerator {
                     put("protocol", "dns")
                     put("action", "hijack-dns")
                 })
+                if (resolvesUdpNames(proxies)) {
+                    // Addresses, not names, in UDP to TrustTunnel; never in
+                    // the same profile as the refusal below (a TrustTunnel
+                    // outbound carries UDP).
+                    put(udpResolveRule())
+                }
                 // Keep it the last rule: see udpRejectRule.
                 if (noUdp) put(udpRejectRule())
             })

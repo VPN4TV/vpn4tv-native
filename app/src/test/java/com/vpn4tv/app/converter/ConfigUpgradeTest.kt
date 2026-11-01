@@ -172,17 +172,23 @@ class ConfigUpgradeTest {
         assertFalse(awg.has("network"))
         assertEquals("ipv4_only", awg.getString("domain_strategy"))
 
-        // olcRTC + TrustTunnel with UDP DNS: UDP refused last, DNS over TCP through the tunnel.
-        val tcpOnly = ConfigUpgrade.upgrade(before("tt-olcrtc-udpdns"), sidecarsOf("tt-olcrtc-udpdns"))
-        val config = JSONObject(tcpOnly.json!!)
-        assertEquals(listOf("sniff", "hijack-dns", "reject"), config.routeRules().map { it.optString("action") })
-        assertEquals(1, udpRules(config).size)
-        assertTrue(udpRules(config).none { it.has("outbound") })
+        // olcRTC + TrustTunnel with UDP DNS: TrustTunnel carries plain UDP, so nothing is
+        // refused; DNS over TCP through the tunnel; olcRTC stays TCP-only.
+        val ttOlc = ConfigUpgrade.upgrade(before("tt-olcrtc-udpdns"), sidecarsOf("tt-olcrtc-udpdns"))
+        val config = JSONObject(ttOlc.json!!)
+        assertEquals(listOf("sniff", "hijack-dns"), config.routeRules().map { it.optString("action") })
+        assertTrue("tt-olcrtc udp rules: ${udpRules(config)}", udpRules(config).isEmpty())
         assertEquals("tcp", config.dnsRemote().getString("type"))
         assertEquals("select", config.dnsRemote().getString("detour"))
-        assertEquals("tcp", config.outbound("TT 4").getString("network"))
+        assertFalse("TT 4: ${config.outbound("TT 4")}", config.outbound("TT 4").has("network"))
+        assertFalse(config.outbound("TT 4").has("udp_over_tcp"))
         assertEquals("tcp", config.outbound("OLC 4").getString("network"))
-        assertTrue(tcpOnly.changes.toString(), tcpOnly.changes.any { it.contains("udp → direct") })
+        assertTrue(ttOlc.changes.toString(), ttOlc.changes.any { it.contains("udp → direct") })
+        assertTrue("changes: ${ttOlc.changes}", ttOlc.changes.any { it.contains("TrustTunnel's relay") })
+
+        // olcRTC only: no proxy carries UDP, so UDP is refused, last.
+        val olc = JSONObject(ConfigUpgrade.upgrade(before("olcrtc-only"), sidecarsOf("olcrtc-only")).json!!)
+        assertEquals(ConfigGenerator.udpRejectRule().toString(), olc.routeRules().last().toString())
 
         // xray only: no leak to fix, but UDP is refused now, last.
         val xray = JSONObject(ConfigUpgrade.upgrade(before("xray-only"), sidecarsOf("xray-only")).json!!)
@@ -192,13 +198,20 @@ class ConfigUpgradeTest {
 
         // Mixed with a native proxy: nothing refused, bridges carry UDP where they can.
         val mixed = JSONObject(ConfigUpgrade.upgrade(before("mixed"), sidecarsOf("mixed")).json!!)
-        assertTrue(udpRules(mixed).isEmpty())
+        assertTrue("mixed udp rules: ${udpRules(mixed)}", udpRules(mixed).none { it.optString("action") == "reject" })
         assertFalse(mixed.outbound("OL 2").has("network"))
         assertFalse(mixed.outbound("AWG 2").has("network"))
         assertEquals("tcp", mixed.outbound("OLC 2").getString("network"))
-        assertEquals("tcp", mixed.outbound("TT 2").getString("network"))
+        assertFalse("TT 2: ${mixed.outbound("TT 2")}", mixed.outbound("TT 2").has("network"))
         // FakeDNS stays.
         assertTrue(mixed.has("experimental"))
+        // With FakeDNS and TrustTunnel, UDP names are resolved on the route right after hijack-dns:
+        // the TrustTunnel relay takes addresses only.
+        if (mixed.getJSONObject("dns").getJSONArray("servers").objects().any { it.optString("type") == "fakeip" }) {
+            val actions = mixed.routeRules().map { it.optString("action") }
+            assertEquals(listOf("sniff", "hijack-dns", "resolve"), actions.take(3))
+            assertEquals(ConfigGenerator.udpResolveRule().toString(), mixed.routeRules()[2].toString())
+        }
     }
 
     @Test
@@ -289,7 +302,7 @@ class ConfigUpgradeTest {
     @Test
     fun russiaDirectKeepsTheRefusalLastAfterTheUpgrade() {
         val sets = RussiaDirect.Sets(geosite = "/data/geosite-category-ru.srs", geoip = "/data/geoip-ru.srs")
-        for (name in listOf("olcrtc-only", "tt-only", "xray-only", "tt-olcrtc-udpdns")) {
+        for (name in listOf("olcrtc-only", "xray-only")) {
             val upgraded = ConfigUpgrade.upgrade(before(name), sidecarsOf(name)).json!!
             for (options in listOf(RussiaDirect.Options(sets = sets), RussiaDirect.Options(offReason = "user", sets = sets))) {
                 val out = JSONObject(RussiaDirect.apply(upgraded, options).json)

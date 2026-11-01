@@ -12,9 +12,9 @@ import org.junit.Test
 
 /**
  * UDP of the bridges in the generated sing-box config: Outline and AmneziaWG
- * carry it inside the TCP connection to the bridge (udp_over_tcp), olcRTC and
- * TrustTunnel carry TCP only, and no profile sends UDP or DNS around the
- * tunnel any more. Keys and hosts below are made up.
+ * carry it inside the TCP connection to the bridge (udp_over_tcp), TrustTunnel
+ * by plain UDP ASSOCIATE, olcRTC carries TCP only, and no profile sends UDP or
+ * DNS around the tunnel any more. Keys and hosts below are made up.
  */
 class ConfigGeneratorTest {
     private val savedDns = ProxyParser.lastDns
@@ -84,6 +84,16 @@ class ConfigGeneratorTest {
         assertEquals("socks", outbound.getString("type"))
         assertEquals("tcp", outbound.getString("network"))
         assertFalse(outbound.has("udp_over_tcp"))
+    }
+
+    /** TrustTunnel: UDP by plain SOCKS5 UDP ASSOCIATE — the library does not speak UDP over TCP. */
+    private fun assertCarriesPlainUdp(outbound: JSONObject) {
+        assertEquals("socks", outbound.getString("type"))
+        assertEquals("127.0.0.127", outbound.getString("server"))
+        assertEquals("lo", outbound.getString("bind_interface"))
+        assertEquals("5", outbound.getString("version"))
+        assertFalse("no network limit", outbound.has("network"))
+        assertFalse("no udp_over_tcp", outbound.has("udp_over_tcp"))
     }
 
     private fun udpRules(config: JSONObject) = config.routeRules().filter { it.optString("network") == "udp" }
@@ -159,11 +169,31 @@ class ConfigGeneratorTest {
     }
 
     @Test
-    fun trustTunnelOnlyRefusesUdp() {
+    fun trustTunnelOnlyCarriesUdpByPlainAssociate() {
+        ProxyParser.lastDns = SubscriptionDns(remoteDns = "udp://8.8.8.8", directDns = "9.9.9.9")
+        val config = generate(trustTunnel())
+        val outbound = config.outbound("TT")
+        assertCarriesPlainUdp(outbound)
+        assertEquals(34000, outbound.getInt("server_port"))
+        // No refusal: UDP goes to the bridge.
+        assertTrue(udpRules(config).isEmpty())
+        assertEquals(listOf("sniff", "hijack-dns"), config.routeRules().map { it.optString("action") })
+        assertNoLeak(config)
+        // DNS through the bridge still goes over its TCP path.
+        assertEquals("tcp", config.dnsServer("dns-remote").getString("type"))
+        // No FakeDNS for a profile made only of bridges: its UDP destinations
+        // are addresses, the only kind the TrustTunnel relay takes.
+        assertFalse(config.has("experimental"))
+        assertTrue(config.getJSONObject("dns").getJSONArray("servers").objects().none { it.optString("type") == "fakeip" })
+        assertEquals("ipv4_only", config.getJSONObject("dns").getString("strategy"))
+    }
+
+    @Test
+    fun trustTunnelLiftsTheRejectOfOlcrtc() {
         val config = generate(trustTunnel(), olcrtc())
-        assertTcpOnly(config.outbound("TT"))
+        assertCarriesPlainUdp(config.outbound("TT"))
         assertTcpOnly(config.outbound("OLC"))
-        assertEquals("reject", udpRules(config).single().getString("action"))
+        assertTrue(udpRules(config).isEmpty())
         assertNoLeak(config)
         // The default remote DNS is DoH, TCP already.
         assertEquals("https", config.dnsServer("dns-remote").getString("type"))
@@ -175,6 +205,7 @@ class ConfigGeneratorTest {
         val config = generate(outline(), olcrtc(), trustTunnel())
         assertCarriesUdp(config.outbound("OL"))
         assertTcpOnly(config.outbound("OLC"))
+        assertCarriesPlainUdp(config.outbound("TT"))
         assertTrue(udpRules(config).isEmpty())
         assertNoLeak(config)
         // A TCP-only bridge can still be picked by hand: DNS over TCP.
@@ -187,13 +218,62 @@ class ConfigGeneratorTest {
         assertCarriesUdp(config.outbound("OL"))
         assertCarriesUdp(config.outbound("AWG"))
         assertTcpOnly(config.outbound("OLC"))
-        assertTcpOnly(config.outbound("TT"))
+        assertCarriesPlainUdp(config.outbound("TT"))
         assertEquals("shadowsocks", config.outbound("SS").getString("type"))
         assertFalse(config.outbound("SS").has("udp_over_tcp"))
-        assertTrue(udpRules(config).isEmpty())
+        // TrustTunnel is in it: UDP names are resolved on the route, nothing refused.
+        assertEquals(listOf("resolve"), udpRules(config).map { it.getString("action") })
         assertNoLeak(config)
         assertTrue(config.getJSONObject("experimental").getJSONObject("cache_file").getBoolean("store_fakeip"))
         assertFalse(config.getJSONObject("dns").has("strategy"))
+    }
+
+    @Test
+    fun fakeDnsProfileWithTrustTunnelResolvesUdpNamesThroughTheTunnel() {
+        val config = generate(native(), trustTunnel())
+        assertCarriesPlainUdp(config.outbound("TT"))
+        // FakeDNS is on (a native outbound is in the profile): a UDP flow to a
+        // fake address would reach TrustTunnel with the name.
+        assertTrue(config.getJSONObject("experimental").getJSONObject("cache_file").getBoolean("store_fakeip"))
+        val rules = config.routeRules()
+        assertEquals(listOf("sniff", "hijack-dns", "resolve"), rules.map { it.optString("action") })
+        val resolve = rules[2]
+        assertEquals("udp", resolve.getString("network"))
+        assertEquals("dns-remote", resolve.getString("server"))
+        assertEquals("prefer_ipv4", resolve.getString("strategy"))
+        assertEquals(setOf("network", "action", "server", "strategy"), resolve.keys().asSequence().toSet())
+        // dns-remote goes through the tunnel.
+        assertEquals("select", config.dnsServer("dns-remote").getString("detour"))
+        assertNoLeak(config)
+    }
+
+    @Test
+    fun noResolveWithoutFakeDnsOrWithoutTrustTunnel() {
+        val profiles = listOf(
+            listOf(trustTunnel()),
+            listOf(trustTunnel(), olcrtc()),
+            listOf(trustTunnel(), outline(), awg()),
+            listOf(native()),
+            listOf(native(), outline(), awg(), olcrtc()),
+            listOf(native(), xray()),
+        )
+        for (profile in profiles) {
+            val config = generate(*profile.toTypedArray())
+            val tags = profile.joinToString { it.tag }
+            assertTrue(tags, config.routeRules().none { it.optString("action") == "resolve" })
+        }
+    }
+
+    @Test
+    fun russiaDirectKeepsTheResolveRuleInFront() {
+        val config = generate(native(), trustTunnel())
+        val result = com.vpn4tv.app.bg.RussiaDirect.apply(config.toString(), com.vpn4tv.app.bg.RussiaDirect.Options())
+        assertTrue(result.state, result.applied)
+        val rules = JSONObject(result.json).routeRules()
+        assertEquals(listOf("sniff", "hijack-dns", "resolve"), rules.take(3).map { it.optString("action") })
+        assertEquals(1, rules.count { it.optString("action") == "resolve" })
+        // Its own rules come after: the torrents and the Russian names go direct.
+        assertTrue(rules.drop(3).any { it.optString("outbound") == "direct" })
     }
 
     @Test
@@ -227,7 +307,7 @@ class ConfigGeneratorTest {
             tag = "NV", type = "naive", server = "192.0.2.50", serverPort = 443,
             outbound = JSONObject().put("type", "naive").put("tag", "NV").put("server", "192.0.2.50").put("server_port", 443),
         )
-        for (proxies in listOf(listOf(olcrtc()), listOf(trustTunnel()), listOf(xray()), listOf(naive), listOf(xray("X1"), olcrtc("O1"), trustTunnel("T1")))) {
+        for (proxies in listOf(listOf(olcrtc()), listOf(xray()), listOf(naive), listOf(xray("X1"), olcrtc("O1")))) {
             val config = generate(*proxies.toTypedArray())
             val rules = config.routeRules()
             assertEquals(proxies.joinToString { it.tag }, listOf("sniff", "hijack-dns", "reject"), rules.map { it.optString("action") })
@@ -242,9 +322,11 @@ class ConfigGeneratorTest {
             outbound = JSONObject().put("type", "naive").put("tag", "NU").put("server", "192.0.2.51").put("server_port", 443)
                 .put("udp_over_tcp", JSONObject().put("enabled", true)),
         )
-        for (proxies in listOf(listOf(xray(), native()), listOf(xray(), outline()), listOf(olcrtc(), awg()), listOf(naiveUot), listOf(native()))) {
+        for (proxies in listOf(listOf(xray(), native()), listOf(xray(), outline()), listOf(olcrtc(), awg()), listOf(naiveUot), listOf(native()),
+                listOf(trustTunnel()), listOf(xray("X1"), olcrtc("O1"), trustTunnel("T1")))) {
             val config = generate(*proxies.toTypedArray())
-            assertTrue(proxies.joinToString { it.tag }, udpRules(config).isEmpty())
+            // No refusal; a profile with FakeDNS and TrustTunnel resolves UDP names on the route instead.
+            assertTrue(proxies.joinToString { it.tag }, udpRules(config).none { it.optString("action") == "reject" })
         }
     }
 
@@ -303,9 +385,19 @@ class ConfigGeneratorTest {
     @Test
     fun regeneratingTheSameProxiesGivesTheSameOutbounds() {
         // generateFull rewrites ProxyConfig.outbound in place.
-        val proxies = listOf(outline(), olcrtc())
+        val proxies = listOf(outline(), olcrtc(), trustTunnel())
         val first = ConfigGenerator.generateFull(proxies, portBase = 30000).singboxJson
         val second = ConfigGenerator.generateFull(proxies, portBase = 30000).singboxJson
         assertEquals(JSONObject(first).getJSONArray("outbounds").toString(), JSONObject(second).getJSONArray("outbounds").toString())
+    }
+
+    @Test
+    fun trustTunnelOutboundWrittenTcpOnlyBeforeLosesTheLimit() {
+        // The same ProxyConfig, its outbound as the generator wrote it before.
+        val proxy = trustTunnel()
+        proxy.outbound.put("network", "tcp")
+        val config = generate(proxy)
+        assertCarriesPlainUdp(config.outbound("TT"))
+        assertTrue(udpRules(config).isEmpty())
     }
 }
