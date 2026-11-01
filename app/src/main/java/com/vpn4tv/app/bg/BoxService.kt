@@ -1368,8 +1368,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
      * only fail on the LAN ("network is unreachable"); through the proxy the
      * server recovers the domain from the request.
      * The rule is placed *after* the leading sniff and hijack-dns rules so
-     * DNS still goes through the tunnel, but *before* any fallback UDP-direct
-     * rule so LAN UDP is handled here explicitly.
+     * DNS still goes through the tunnel, but *before* the UDP reject rule of
+     * profiles made only of TCP-only bridges, so LAN UDP still goes direct.
      * Idempotent: checks for an existing ip_is_private rule (plain or inside
      * a logical rule) and returns the config unchanged if one is present.
      */
@@ -1481,6 +1481,10 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         val root = org.json.JSONObject(jsonText)
         val dns = root.optJSONObject("dns") ?: return jsonText
         val servers = dns.optJSONArray("servers") ?: return jsonText
+        // dns-remote goes through the tunnel; where it can go through one of
+        // our bridges, the fallback asks the same server over TCP instead of
+        // UDP (ConfigGenerator.dnsOverTcp).
+        val remoteOverTcp = com.vpn4tv.app.converter.ConfigGenerator.dnsOverTcp(root)
 
         for (i in 0 until servers.length()) {
             val server = servers.getJSONObject(i)
@@ -1497,9 +1501,10 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                         Log.i(TAG, "DNS: dns-remote → https $dohHost (probed)")
                     } else {
                         val udp = com.vpn4tv.app.utils.DnsProber.udpServer()
-                        server.put("type", "udp")
+                        val type = if (remoteOverTcp) "tcp" else "udp"
+                        server.put("type", type)
                         server.put("server", udp)
-                        Log.i(TAG, "DNS: dns-remote → udp $udp (DoH unavailable, fallback)")
+                        Log.i(TAG, "DNS: dns-remote → $type $udp (DoH unavailable, fallback)")
                     }
                 }
                 "dns-direct" -> {

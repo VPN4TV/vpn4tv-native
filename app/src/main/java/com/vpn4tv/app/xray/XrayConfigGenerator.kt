@@ -19,12 +19,12 @@ object XrayConfigGenerator {
     /**
      * @param xrayOutbounds outbounds in Xray JSON format (protocol/settings/streamSettings).
      *                     These come straight from the original Xray subscription JSON.
+     * @param portBase    first SOCKS5 port; ConfigGenerator passes its own
      * @return (json, portMap) where portMap[i] is the SOCKS5 port for xrayOutbounds[i]
      */
-    fun build(xrayOutbounds: List<JSONObject>): Pair<String, List<Int>> {
+    fun build(xrayOutbounds: List<JSONObject>, portBase: Int = XrayBridge.SOCKS_PORT_BASE): Pair<String, List<Int>> {
         require(xrayOutbounds.isNotEmpty()) { "at least one xray outbound required" }
 
-        val portBase = XrayBridge.SOCKS_PORT_BASE
         val portMap = xrayOutbounds.indices.map { portBase + it }
 
         val inboundsArr = JSONArray()

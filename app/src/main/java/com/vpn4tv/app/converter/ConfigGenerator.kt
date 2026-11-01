@@ -15,6 +15,65 @@ object ConfigGenerator {
     const val FAKEIP_INET4_RANGE = "198.18.0.0/15"
     const val FAKEIP_INET6_RANGE = "fc00::/18"
 
+    /**
+     * The bridges that carry TCP only: olcRTC by design, and TrustTunnel,
+     * whose SOCKS UDP relay takes datagrams from any local app (the bridge
+     * password would not cover them). Their socks outbounds keep
+     * network = tcp. Outline and AmneziaWG carry UDP inside the
+     * authenticated TCP connection ([udpOverTcp]).
+     */
+    private fun ProxyConfig.isTcpOnlyBridge(): Boolean = olcrtcUrl != null || ttUrl != null
+
+    /**
+     * Its outbound is a socks outbound to one of our local bridges (xray
+     * included). DNS through those goes over TCP, see [dnsOverTcp].
+     */
+    private fun ProxyConfig.reachesBridge(): Boolean =
+        xrayOutbound != null || outlineUrl != null || outlineDynamicUrl != null ||
+            awgIni != null || olcrtcUrl != null || ttUrl != null
+
+    /** Routed through a local bridge: what FakeDNS and the IPv4-only strategy look at. */
+    private fun ProxyConfig.isBridged(): Boolean =
+        outlineUrl != null || awgIni != null || olcrtcUrl != null || ttUrl != null
+
+    /**
+     * sing-box's UDP over TCP on the socks outbound to a bridge: the
+     * datagrams travel framed inside the same authenticated TCP connection
+     * (the core's bridges serve it since bridge-udp), so nothing listens for
+     * UDP on the shared loopback and the bridge password covers UDP as well.
+     */
+    private fun udpOverTcp(): JSONObject = JSONObject().put("enabled", true).put("version", 2)
+
+    /**
+     * True when [root] (a generated config) can send DNS through one of our
+     * bridges, i.e. has a socks outbound to the bridge host. Remote DNS then
+     * goes over TCP: olcRTC, TrustTunnel and xray carry nothing else (a UDP
+     * query fails with "UDP is not supported by outbound"), and over Outline
+     * and AmneziaWG the bridge's TCP path is the one known to work — UDP also
+     * needs the server's UDP relay and a network that lets it through.
+     * BoxService checks it before it puts a UDP DNS server in.
+     */
+    fun dnsOverTcp(root: JSONObject): Boolean {
+        val outbounds = root.optJSONArray("outbounds") ?: return false
+        return (0 until outbounds.length()).any { i ->
+            val outbound = outbounds.optJSONObject(i) ?: return@any false
+            outbound.optString("type") == "socks" &&
+                outbound.optString("server") == com.vpn4tv.app.xray.XrayBridge.SOCKS_HOST
+        }
+    }
+
+    /**
+     * The TCP form of a DNS server type, for DNS that must not go over UDP:
+     * plain DNS over TCP for udp, DNS over TLS for DNS over QUIC, DoH over
+     * HTTP/2 for DoH over HTTP/3. TCP types stay as they are.
+     */
+    internal fun tcpDnsType(type: String): String = when (type) {
+        "udp" -> "tcp"
+        "quic" -> "tls"
+        "h3" -> "https"
+        else -> type
+    }
+
     /** Result of [generate]. The sing-box JSON is always present; bridge
      *  sidecar JSONs are non-null only when that bridge is needed. */
     data class Result(
@@ -64,7 +123,14 @@ object ConfigGenerator {
         else if (f.exists()) f.delete()
     }
 
-    fun generateFull(proxies: List<ProxyConfig>): Result {
+    /**
+     * [portBase]: where the bridge ports start; the install's random base
+     * from Settings unless a test passes one (Settings needs the app).
+     */
+    fun generateFull(
+        proxies: List<ProxyConfig>,
+        portBase: Int = com.vpn4tv.app.xray.XrayBridge.SOCKS_PORT_BASE,
+    ): Result {
         if (proxies.isEmpty()) throw IllegalArgumentException("No proxies to configure")
 
         // sing-box passthrough — return native config as-is
@@ -76,7 +142,6 @@ object ConfigGenerator {
         // pointing at the local xray bridge. Each xray outbound gets its own port so
         // sing-box → xray routing is 1:1.
         val xrayOutbounds = mutableListOf<JSONObject>()
-        val portBase = com.vpn4tv.app.xray.XrayBridge.SOCKS_PORT_BASE
         val host = com.vpn4tv.app.xray.XrayBridge.SOCKS_HOST
         for (proxy in proxies) {
             val xrayOb = proxy.xrayOutbound ?: continue
@@ -99,7 +164,9 @@ object ConfigGenerator {
 
         // Same trick for outline-managed proxies (ss:// with SIP002 prefix). Their
         // ports start where xray's end, plus a fixed offset, so the two bridges
-        // never collide on the same install.
+        // never collide on the same install. TCP and UDP: UDP rides inside the
+        // TCP connection to the bridge (udp_over_tcp), and the bridge sends it
+        // to the Outline server as Shadowsocks UDP.
         val outlineUrls = mutableListOf<String>()
         val outlinePortBase = portBase +
             com.vpn4tv.app.outline.OutlineConfigGenerator.OUTLINE_PORT_OFFSET
@@ -114,12 +181,15 @@ object ConfigGenerator {
                 put("server", host)
                 put("server_port", port)
                 put("version", "5")
-                put("network", "tcp")
+                remove("network")
+                put("udp_over_tcp", udpOverTcp())
                 put("bind_interface", "lo")
             }
         }
 
         // And for AmneziaWG (awg 2.0) proxies: userspace WG via wireproxy-awg.
+        // TCP and UDP, UDP inside the TCP connection like Outline's; the
+        // bridge sends it through the tunnel's netstack.
         val wgInis = mutableListOf<String>()
         val wgPortBase = portBase +
             com.vpn4tv.app.wireproxy.WgConfigGenerator.WG_PORT_OFFSET
@@ -133,7 +203,8 @@ object ConfigGenerator {
                 put("server", host)
                 put("server_port", port)
                 put("version", "5")
-                put("network", "tcp")
+                remove("network")
+                put("udp_over_tcp", udpOverTcp())
                 put("bind_interface", "lo")
                 // Force sing-box to resolve domains locally before sending
                 // SOCKS CONNECT to the wireproxy bridge — netstack inside
@@ -147,7 +218,9 @@ object ConfigGenerator {
 
         // TrustTunnel: the link goes to the bridge whole (the library decodes it).
         // The SOCKS listener resolves names itself through the tunnel, but
-        // ipv4_only keeps DNS on sing-box's side like the other bridges.
+        // ipv4_only keeps DNS on sing-box's side like the other bridges. TCP
+        // only: its SOCKS UDP relay (v1.1.5) takes datagrams from any local
+        // source, so the bridge password would not cover UDP.
         val ttUrls = mutableListOf<String>()
         val ttPortBase = portBase +
             com.vpn4tv.app.trusttunnel.TtConfigGenerator.TT_PORT_OFFSET
@@ -169,7 +242,7 @@ object ConfigGenerator {
 
         // olcRTC: TCP over a WebRTC "call" on a whitelisted meeting service. The
         // link goes to the bridge whole; ipv4_only so the CONNECT names an IP —
-        // the far end dials exactly what it is asked for.
+        // the far end dials exactly what it is asked for. TCP only by design.
         val olcrtcUrls = mutableListOf<String>()
         val olcrtcPortBase = portBase +
             com.vpn4tv.app.olcrtc.OlcrtcConfigGenerator.OLCRTC_PORT_OFFSET
@@ -250,7 +323,7 @@ object ConfigGenerator {
         }
 
         val xrayJson = if (xrayOutbounds.isNotEmpty()) {
-            XrayConfigGenerator.build(xrayOutbounds).first
+            XrayConfigGenerator.build(xrayOutbounds, portBase).first
         } else null
 
         val outlineJson = if (outlineUrls.isNotEmpty()) {
@@ -273,13 +346,14 @@ object ConfigGenerator {
     }
 
     private fun buildDns(proxies: List<ProxyConfig>): JSONObject {
-        // ConfigGenerator always builds a "select" group, so DNS detour can
-        // unconditionally point at it. Exception: if every proxy is routed
-        // through a TCP-only socks bridge (outline or wireproxy), drop the
-        // detour entirely so DNS just resolves locally — otherwise sing-box
-        // errors with "UDP is not supported by outbound: select".
-        val allTcpBridged = proxies.all { it.outlineUrl != null || it.awgIni != null || it.olcrtcUrl != null || it.ttUrl != null }
-        val proxyTag: String? = if (allTcpBridged) null else "select"
+        // DNS goes through the tunnel ("select") for every profile. Profiles
+        // made only of bridges used to resolve without a detour, i.e. around
+        // the tunnel with the real address, because no bridge carried UDP.
+        // Where a bridge can be picked, the remote server is asked over TCP
+        // (the default DoH already is): see dnsOverTcp(root).
+        val allBridged = proxies.all { it.isBridged() }
+        val dnsOverTcp = proxies.any { it.reachesBridge() }
+        val proxyTag = "select"
         val dns = ProxyParser.lastDns
 
         // Parse "https://host/path" → ("https", "host")
@@ -297,7 +371,8 @@ object ConfigGenerator {
             }
         }
 
-        val (remoteType, remoteServer) = parseDnsUrl(dns.remoteDns)
+        val (parsedRemoteType, remoteServer) = parseDnsUrl(dns.remoteDns)
+        val remoteType = if (dnsOverTcp) tcpDnsType(parsedRemoteType) else parsedRemoteType
         val (directType, directServer) = parseDnsUrl(dns.directDns)
 
         val fakeDnsEnabled = fakeDnsEnabled(proxies)
@@ -309,7 +384,7 @@ object ConfigGenerator {
                     put("tag", "dns-remote")
                     put("server", remoteServer)
                     put("domain_resolver", "dns-direct")
-                    if (proxyTag != null) put("detour", proxyTag)
+                    put("detour", proxyTag)
                 })
                 put(JSONObject().apply {
                     put("type", directType)
@@ -352,7 +427,7 @@ object ConfigGenerator {
                     })
                 }
             })
-            if (allTcpBridged) {
+            if (allBridged) {
                 // Top-level default strategy as a belt-and-suspenders fallback
                 // in case an in-app DNS resolver bypasses the rules above.
                 put("strategy", "ipv4_only")
@@ -363,10 +438,11 @@ object ConfigGenerator {
     /**
      * FakeDNS is generated for profiles with at least one native sing-box /
      * xray outbound — those pass the sniffed domain through to the proxy
-     * server (remote resolution, full DNS-blocking bypass). It must stay OFF
-     * for outline/wireproxy-only profiles: their UDP traffic routes via
-     * "direct", so a fake IP handed to an app would leak into the raw
-     * network where nothing can map it back to a domain.
+     * server (remote resolution, full DNS-blocking bypass). It stays OFF for
+     * profiles made only of bridges, as before. (It was off because their UDP
+     * went "direct", where a fake IP means nothing; UDP now goes through the
+     * bridges or is refused, but turning FakeDNS on for them is a separate
+     * decision.)
      *
      * Deliberately ignores Settings.fakeDns: the user toggle is applied at
      * service start (BoxService.stripFakeDns), same as the proxy-mode and
@@ -374,7 +450,7 @@ object ConfigGenerator {
      * effect until the next subscription refresh regenerates this file.
      */
     private fun fakeDnsEnabled(proxies: List<ProxyConfig>): Boolean {
-        return !proxies.all { it.outlineUrl != null || it.awgIni != null || it.olcrtcUrl != null || it.ttUrl != null }
+        return !proxies.all { it.isBridged() }
     }
 
     private fun buildOutbounds(proxies: List<ProxyConfig>): JSONArray {
@@ -421,13 +497,14 @@ object ConfigGenerator {
     }
 
     private fun buildRoute(proxies: List<ProxyConfig>): JSONObject {
-        // For TCP-bridged profiles (outline, wireproxy), the proxy outbound
-        // (socks → bridge) does not speak SOCKS UDP, so any UDP traffic that
-        // ends up routed via "select" causes "UDP is not supported by
-        // outbound: select" errors. Bypass that by routing UDP through
-        // "direct" instead — privacy is weaker but the alternative is a
-        // broken connection.
-        val allTcpBridged = proxies.all { it.outlineUrl != null || it.awgIni != null || it.olcrtcUrl != null || it.ttUrl != null }
+        // UDP never goes "direct" behind the user's back any more: that sent
+        // QUIC, calls, WebRTC and the like around the tunnel with the real
+        // address. Outline and AmneziaWG carry UDP now. A profile made only of
+        // bridges that carry TCP only (olcRTC, TrustTunnel) refuses UDP
+        // outright — an answer apps take as "no QUIC" and fall back to TCP at
+        // once, where the selector would only fail each flow with "UDP is not
+        // supported by outbound: select".
+        val allTcpOnly = proxies.all { it.isTcpOnlyBridge() }
         return JSONObject().apply {
             put("rules", JSONArray().apply {
                 // sing-box 1.13+: sniff via rule action
@@ -439,10 +516,10 @@ object ConfigGenerator {
                     put("protocol", "dns")
                     put("action", "hijack-dns")
                 })
-                if (allTcpBridged) {
+                if (allTcpOnly) {
                     put(JSONObject().apply {
                         put("network", "udp")
-                        put("outbound", "direct")
+                        put("action", "reject")
                     })
                 }
             })
