@@ -1230,12 +1230,13 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // provider rotates servers behind them.
             val resolved = com.vpn4tv.app.outline.OutlineDynamicKeys.resolveAndPersist(file)
             // Credentials in memory only — resolveAndPersist writes the sidecar
-            // back, and the pair must never land on disk.
-            com.vpn4tv.app.outline.OutlineBridge.start(BridgeAuth.applyToEndpoints(resolved))
+            // back, and the pair must never land on disk. The DNS servers too:
+            // the bridge resolves its server by name with them, out of the tun.
+            com.vpn4tv.app.outline.OutlineBridge.start(BridgeDns.applyToEndpoints(BridgeAuth.applyToEndpoints(resolved)))
             resolved
         }
         "wireproxy" -> {
-            com.vpn4tv.app.wireproxy.WgBridge.start(BridgeAuth.applyToEndpoints(text))
+            com.vpn4tv.app.wireproxy.WgBridge.start(BridgeDns.applyToEndpoints(BridgeAuth.applyToEndpoints(text)))
             text
         }
         "olcrtc" -> {

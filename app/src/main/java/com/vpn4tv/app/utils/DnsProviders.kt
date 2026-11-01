@@ -90,6 +90,17 @@ object DnsProviders {
     val udpCandidates: List<String> =
         PROVIDERS.flatMap { it.udpIps }
 
+    /**
+     * Plain DNS the Outline and AmneziaWG bridges find their own servers by
+     * (the core's "dns" field, asked outside the tunnel; see BridgeDns): the
+     * leading provider's IPs, then one IP of each other provider, so a dead
+     * provider costs one step. Never a last-resort (RU) resolver: a bridge
+     * server's name is exactly the query not to hand it.
+     */
+    val bridgeDnsServers: List<String> =
+        PROVIDERS.filterNot { it.lastResort }.filter { it.udpIps.isNotEmpty() }
+            .flatMapIndexed { i, p -> if (i == 0) p.udpIps else p.udpIps.take(1) }
+
     /** IPs safe to use as a sing-box `https` DNS server address. */
     val dohCapableIps: Set<String> =
         PROVIDERS.filter { it.ipCertSan }
