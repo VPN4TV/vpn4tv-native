@@ -1,6 +1,7 @@
 package com.vpn4tv.app.converter
 
 import com.vpn4tv.app.bg.RussiaDirect
+import com.vpn4tv.app.xray.XrayConfigGenerator
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -18,31 +19,42 @@ import org.json.JSONObject
  *     TCP (no network limit, udp_over_tcp v2);
  *  3. dns-remote goes through "select", asked over TCP (udp → tcp,
  *     quic → tls, h3 → https) since the config can pick a bridge;
- *  4. where no proxy carries UDP even then (olcRTC, xray only),
- *     {network: udp, action: reject} is the last rule;
+ *  4. where no proxy carries UDP even then (olcRTC only),
+ *     {network: udp, action: reject} is the last rule; where one does, a
+ *     refusal an earlier generator wrote goes (an xray-only config of a 5.4.0
+ *     release candidate had one);
  *  5. the socks outbounds to the TrustTunnel bridge carry plain SOCKS5 UDP
  *     (no network limit; its relay takes this process's datagrams only), and
  *     a config with FakeDNS and such an outbound resolves the names of UDP
  *     flows on the route, right after hijack-dns (the relay takes addresses
- *     only).
+ *     only);
+ *  6. the socks outbounds to the xray bridge become vless outbounds to it
+ *     (ConfigGenerator.toXrayBridgeOutbound), and the SOCKS5 inbounds of the
+ *     xray sidecar VLESS ones (XrayConfigGenerator): UDP rides inside the
+ *     TCP connection as XUDP. The sidecar comes back in [Result.xray], to be
+ *     written next to the config.
  * FakeDNS and the DNS strategy stay as they are.
  *
  * Only configs ConfigGenerator wrote are touched: our groups, DNS servers
- * and route, and at least one socks outbound to the bridge host on a port a
- * sidecar next to the config serves. A bridge outbound counts as Outline or
- * AmneziaWG only by the port in that bridge's own sidecar, never by the port
- * alone. A foreign sing-box config (imported as is) comes back unchanged.
- * Idempotent: an upgraded or newly generated config gives no changes. Pure,
- * org.json only: the JVM tests run it as is.
+ * and route, and at least one outbound to the bridge host on a port a
+ * sidecar next to the config serves (socks; or vless, to a port of the xray
+ * sidecar). A bridge outbound counts as Outline, AmneziaWG or xray only by
+ * the port in that bridge's own sidecar, never by the port alone. A foreign
+ * sing-box config (imported as is) comes back unchanged. Each half of the
+ * xray change is made on its own, so a config and a sidecar left half done
+ * (one written, the other not) are completed the next time. Idempotent: an
+ * upgraded or newly generated config gives no changes. Pure, org.json only:
+ * the JVM tests run it as is.
  */
 object ConfigUpgrade {
     private const val SELECT = "select"
     private const val DIRECT = "direct"
     private const val DNS_REMOTE = "dns-remote"
     private const val DNS_DIRECT = "dns-direct"
-    private const val BRIDGE_HOST = com.vpn4tv.app.xray.XrayBridge.SOCKS_HOST
+    /** Tag prefix of the xray sidecar's SOCKS5 inbounds before 5.4.0. */
+    private const val OLD_XRAY_INBOUND_PREFIX = "socks-in-"
 
-    /** [Result.skipped] of a config without a socks outbound to a port its sidecars serve. */
+    /** [Result.skipped] of a config without a bridge outbound on a port its sidecars serve. */
     const val NO_BRIDGE = "no bridge outbound its sidecars serve"
 
     /** The bridge sidecars next to a config, as read from disk (null: no such file). */
@@ -55,11 +67,12 @@ object ConfigUpgrade {
     )
 
     /**
-     * [json]: the config to write back; null when nothing changes (already in
-     * shape, not ours, not JSON). [changes]: what changed, for the log, no
+     * [json]: the config to write back; null when it does not change (already
+     * in shape, not ours, not JSON). [xray]: the xray sidecar to write back,
+     * null when it does not change. [changes]: what changed, for the log, no
      * keys in it. [skipped]: why the config was left alone, null when ours.
      */
-    class Result(val json: String?, val changes: List<String>, val skipped: String?)
+    class Result(val json: String?, val changes: List<String>, val skipped: String?, val xray: String? = null)
 
     fun upgrade(text: String, sidecars: Sidecars): Result {
         val root = try {
@@ -78,18 +91,29 @@ object ConfigUpgrade {
         notOursReason(root)?.let { return Result(null, emptyList(), "not ours: $it") }
 
         val udpPorts = endpointPorts(sidecars.outline) + endpointPorts(sidecars.wg)
-        val bridgePorts = udpPorts + xrayPorts(sidecars.xray) + endpointPorts(sidecars.olcrtc) + endpointPorts(sidecars.tt)
+        val xrayPorts = xrayPorts(sidecars.xray)
+        val bridgePorts = udpPorts + xrayPorts + endpointPorts(sidecars.olcrtc) + endpointPorts(sidecars.tt)
         val outbounds = root.getJSONArray("outbounds")
-        val bridges = objects(outbounds).filter { isBridgeOutbound(it) && port(it) in bridgePorts }
+        val bridges = objects(outbounds).filter {
+            ConfigGenerator.isBridgeOutbound(it) && port(it) in (if (isSocks(it)) bridgePorts else xrayPorts)
+        }
         // No bridges: nothing of the leak to fix, and our frame alone does not
         // tell our config from a foreign one with the same tags.
         if (bridges.isEmpty()) return Result(null, emptyList(), NO_BRIDGE)
 
         val changes = mutableListOf<String>()
 
+        // 6a. xray: the vless outbound in place of the socks one. First, so the
+        // loops below, over socks outbounds, never take it for another bridge.
+        for (outbound in bridges) {
+            if (!isSocks(outbound) || port(outbound) !in xrayPorts) continue
+            ConfigGenerator.toXrayBridgeOutbound(outbound, port(outbound))
+            changes += "${outbound.optString("tag")}: VLESS to the xray bridge, UDP as XUDP"
+        }
+
         // 2. Outline and AmneziaWG carry UDP over TCP.
         for (outbound in bridges) {
-            if (port(outbound) !in udpPorts || hasUdpOverTcp(outbound)) continue
+            if (!isSocks(outbound) || port(outbound) !in udpPorts || hasUdpOverTcp(outbound)) continue
             outbound.remove("network")
             outbound.put("udp_over_tcp", ConfigGenerator.udpOverTcp())
             changes += "${outbound.optString("tag")}: UDP over TCP"
@@ -99,7 +123,7 @@ object ConfigUpgrade {
         // library does not speak.
         val ttPorts = endpointPorts(sidecars.tt)
         for (outbound in bridges) {
-            if (port(outbound) !in ttPorts || outbound.optString("network") != "tcp") continue
+            if (!isSocks(outbound) || port(outbound) !in ttPorts || outbound.optString("network") != "tcp") continue
             outbound.remove("network")
             changes += "${outbound.optString("tag")}: UDP through TrustTunnel's relay"
         }
@@ -130,7 +154,7 @@ object ConfigUpgrade {
             }
         }
 
-        // 4. No proxy carries UDP: refuse it, last.
+        // 4. No proxy carries UDP: refuse it, last. One does: no refusal.
         if (objects(outbounds).none { ConfigGenerator.carriesUdp(it) }) {
             val at = (0 until rules.length()).firstOrNull { i -> rules.optJSONObject(i)?.let { RussiaDirect.isUdpReject(it) } == true }
             when {
@@ -143,6 +167,12 @@ object ConfigUpgrade {
                     changes += "UDP refusal moved last"
                 }
             }
+        } else {
+            for (i in rules.length() - 1 downTo 0) {
+                if (rules.optJSONObject(i)?.let { RussiaDirect.isUdpReject(it) } != true) continue
+                rules.remove(i)
+                changes += "UDP refusal removed (a proxy carries UDP)"
+            }
         }
 
         // 5b. With FakeDNS, the names of UDP flows are resolved on the route
@@ -153,8 +183,59 @@ object ConfigUpgrade {
             changes += "UDP names resolved on the route (TrustTunnel)"
         }
 
+        // 6b. The xray sidecar: VLESS inbounds in place of SOCKS5 ones, once
+        // an outbound of this config reaches it by VLESS (6a, or written so).
+        val xray = if (bridges.any { !isSocks(it) }) upgradeXraySidecar(sidecars.xray) else null
+        val configChanged = changes.isNotEmpty()
+        if (xray != null) changes += "xray bridge: VLESS inbounds"
+
         if (changes.isEmpty()) return Result(null, emptyList(), null)
-        return Result(root.toString(2), changes, null)
+        return Result(if (configChanged) root.toString(2) else null, changes, null, xray)
+    }
+
+    /**
+     * The xray sidecar [text] with VLESS inbounds in place of its SOCKS5
+     * ones, as XrayConfigGenerator writes them: the placeholder client id
+     * (BridgeAuth fills it in at start), no encryption; listen address, port
+     * and sniffing stay. The tags "socks-in-N" become "vless-in-N", in the
+     * inbounds and in the routing rules that name them. Null when it has no
+     * SOCKS5 inbound, or is not an xray config.
+     */
+    internal fun upgradeXraySidecar(text: String?): String? {
+        if (text.isNullOrBlank()) return null
+        val root = try {
+            JSONObject(text)
+        } catch (_: Exception) {
+            return null
+        }
+        val inbounds = root.optJSONArray("inbounds") ?: return null
+        val tags = objects(inbounds).map { it.optString("tag") }.toMutableSet()
+        val renamed = mutableMapOf<String, String>()
+        var changed = false
+        for (inbound in objects(inbounds)) {
+            if (inbound.optString("protocol") != "socks") continue
+            inbound.put("protocol", "vless")
+            inbound.put("settings", XrayConfigGenerator.vlessInboundSettings())
+            changed = true
+            val tag = inbound.optString("tag")
+            val index = tag.removePrefix(OLD_XRAY_INBOUND_PREFIX).takeIf { tag.startsWith(OLD_XRAY_INBOUND_PREFIX) }?.toIntOrNull()
+            val newTag = index?.let { XrayConfigGenerator.inboundTag(it) } ?: continue
+            if (newTag in tags) continue
+            inbound.put("tag", newTag)
+            tags += newTag
+            renamed[tag] = newTag
+        }
+        if (!changed) return null
+        val rules = root.optJSONObject("routing")?.optJSONArray("rules") ?: JSONArray()
+        for (rule in objects(rules)) {
+            when (val inboundTag = rule.opt("inboundTag")) {
+                is String -> renamed[inboundTag]?.let { rule.put("inboundTag", it) }
+                is JSONArray -> for (i in 0 until inboundTag.length()) {
+                    (inboundTag.opt(i) as? String)?.let { renamed[it] }?.let { inboundTag.put(i, it) }
+                }
+            }
+        }
+        return root.toString()
     }
 
     private fun hasFakeDns(root: JSONObject): Boolean =
@@ -195,8 +276,7 @@ object ConfigUpgrade {
     private fun isUdpDirect(rule: JSONObject): Boolean =
         rule.length() == 2 && rule.opt("network") == "udp" && rule.opt("outbound") == DIRECT
 
-    private fun isBridgeOutbound(outbound: JSONObject): Boolean =
-        outbound.optString("type") == "socks" && outbound.optString("server") == BRIDGE_HOST
+    private fun isSocks(outbound: JSONObject): Boolean = outbound.optString("type") == "socks"
 
     private fun hasUdpOverTcp(outbound: JSONObject): Boolean {
         val uot = outbound.optJSONObject("udp_over_tcp") ?: return false
@@ -208,17 +288,21 @@ object ConfigUpgrade {
     /** Ports of an outline / wireproxy / olcrtc / TrustTunnel sidecar: {"endpoints": [{"port": n, …}]}. */
     private fun endpointPorts(text: String?): Set<Int> = ports(text, "endpoints")
 
-    /** Ports of the xray sidecar, an xray config: its socks inbounds. */
-    private fun xrayPorts(text: String?): Set<Int> = ports(text, "inbounds")
+    /**
+     * Ports of the xray sidecar, an xray config: its inbounds as the
+     * generators write them, SOCKS5 before 5.4.0, VLESS since.
+     */
+    private fun xrayPorts(text: String?): Set<Int> =
+        ports(text, "inbounds") { it.optString("protocol") == "socks" || it.optString("protocol") == "vless" }
 
-    private fun ports(text: String?, key: String): Set<Int> {
+    private fun ports(text: String?, key: String, filter: (JSONObject) -> Boolean = { true }): Set<Int> {
         if (text.isNullOrBlank()) return emptySet()
         val array = try {
             JSONObject(text).optJSONArray(key)
         } catch (_: Exception) {
             null
         } ?: return emptySet()
-        return objects(array).mapNotNull { it.optInt("port", -1).takeIf { port -> port > 0 } }.toSet()
+        return objects(array).filter(filter).mapNotNull { it.optInt("port", -1).takeIf { port -> port > 0 } }.toSet()
     }
 
     private fun objects(array: JSONArray): List<JSONObject> = (0 until array.length()).mapNotNull { array.optJSONObject(it) }

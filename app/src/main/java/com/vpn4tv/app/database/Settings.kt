@@ -36,7 +36,7 @@ object Settings {
     var selectedProfile by dataStore.long(SettingsKey.SELECTED_PROFILE) { -1L }
 
     /**
-     * Base port for the local xray SOCKS5 bridge. Randomized once on first
+     * Base port for the local xray bridge (and, offset, the other bridges). Randomized once on first
      * launch and persisted so scanners cannot rely on a fixed well-known port.
      * Range: 20000–59000 (high unprivileged, avoids common services).
      *

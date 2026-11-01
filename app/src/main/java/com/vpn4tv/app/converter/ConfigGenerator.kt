@@ -24,8 +24,8 @@ object ConfigGenerator {
     val fileLock = Any()
 
     /**
-     * Its outbound is a socks outbound to one of our local bridges (xray
-     * included). DNS through those goes over TCP, see [dnsOverTcp].
+     * Its outbound goes to one of our local bridges (xray included). DNS
+     * through those goes over TCP, see [dnsOverTcp].
      */
     private fun ProxyConfig.reachesBridge(): Boolean =
         xrayOutbound != null || outlineUrl != null || outlineDynamicUrl != null ||
@@ -48,11 +48,42 @@ object ConfigGenerator {
     internal fun udpOverTcp(): JSONObject = JSONObject().put("enabled", true).put("version", 2)
 
     /**
+     * An outbound to one of our local bridges as the generators write it: a
+     * socks outbound to the bridge host, or the vless outbound to the xray
+     * bridge (since 5.4.0). Which bridge it is, its port tells.
+     */
+    internal fun isBridgeOutbound(outbound: JSONObject): Boolean =
+        outbound.optString("server") == com.vpn4tv.app.xray.XrayBridge.SOCKS_HOST &&
+            outbound.optString("type").let { it == "socks" || it == "vless" }
+
+    /**
+     * Makes [outbound] sing-box's outbound to the xray bridge inbound on
+     * [port]; the tag stays the caller's. VLESS without TLS over the loopback
+     * (bind_interface "lo": route.auto_detect_interface would bind it to wlan0
+     * otherwise, where 127.0.0.127 is unreachable), with the UUID placeholder
+     * BridgeAuth replaces at start. UDP goes as XUDP inside the same TCP
+     * connection, which xray takes on through the outbound it was given; no
+     * network limit. Keys a socks outbound of an earlier generation had go.
+     * Shared with ConfigUpgrade, so an upgraded outbound is the one the
+     * generator writes.
+     */
+    internal fun toXrayBridgeOutbound(outbound: JSONObject, port: Int): JSONObject = outbound.apply {
+        for (key in listOf("version", "network", "username", "password", "udp_over_tcp", "domain_strategy")) remove(key)
+        put("type", "vless")
+        put("server", com.vpn4tv.app.xray.XrayBridge.SOCKS_HOST)
+        put("server_port", port)
+        put("uuid", com.vpn4tv.app.bg.BridgeAuth.UUID_PLACEHOLDER)
+        put("packet_encoding", "xudp")
+        put("bind_interface", "lo")
+    }
+
+    /**
      * Whether sing-box can send UDP through [outbound], one of a generated
-     * config's proxies. The socks outbounds to olcRTC and xray carry TCP only
-     * (network = tcp); Outline and AmneziaWG carry UDP over TCP; TrustTunnel
-     * carries plain SOCKS5 UDP; naive carries UDP only over TCP, when that is
-     * on; http never.
+     * config's proxies. The socks outbound to olcRTC carries TCP only
+     * (network = tcp), as did the socks outbounds to xray before 5.4.0; the
+     * vless outbound to the xray bridge carries XUDP; Outline and AmneziaWG
+     * carry UDP over TCP; TrustTunnel carries plain SOCKS5 UDP; naive carries
+     * UDP only over TCP, when that is on; http never.
      * Groups, direct and the like are not proxies and carry nothing here.
      */
     internal fun carriesUdp(outbound: JSONObject): Boolean = when (outbound.optString("type")) {
@@ -82,19 +113,18 @@ object ConfigGenerator {
 
     /**
      * True when [root] (a generated config) can send DNS through one of our
-     * bridges, i.e. has a socks outbound to the bridge host. Remote DNS then
-     * goes over TCP: olcRTC and xray carry nothing else (a UDP query fails
-     * with "UDP is not supported by outbound"), and over Outline, AmneziaWG
-     * and TrustTunnel the bridge's TCP path is the one known to work — UDP
-     * also needs the server's UDP relay and a network that lets it through.
-     * BoxService checks it before it puts a UDP DNS server in.
+     * bridges, i.e. has an outbound to the bridge host ([isBridgeOutbound]).
+     * Remote DNS then goes over TCP: olcRTC carries nothing else (a UDP query
+     * fails with "UDP is not supported by outbound"), and over Outline,
+     * AmneziaWG, TrustTunnel and xray the bridge's TCP path is the one known
+     * to work — UDP also needs the server's UDP relay (and, but for xray, a
+     * network that lets it through). BoxService checks it before it puts a
+     * UDP DNS server in.
      */
     fun dnsOverTcp(root: JSONObject): Boolean {
         val outbounds = root.optJSONArray("outbounds") ?: return false
         return (0 until outbounds.length()).any { i ->
-            val outbound = outbounds.optJSONObject(i) ?: return@any false
-            outbound.optString("type") == "socks" &&
-                outbound.optString("server") == com.vpn4tv.app.xray.XrayBridge.SOCKS_HOST
+            outbounds.optJSONObject(i)?.let { isBridgeOutbound(it) } == true
         }
     }
 
@@ -174,28 +204,18 @@ object ConfigGenerator {
             return Result(proxies[0].outbound.toString(2), null, null, null)
         }
 
-        // Replace xray-managed proxies (xhttp/splithttp) with sing-box socks outbounds
+        // Replace xray-managed proxies (xhttp/splithttp) with sing-box vless outbounds
         // pointing at the local xray bridge. Each xray outbound gets its own port so
-        // sing-box → xray routing is 1:1.
+        // sing-box → xray routing is 1:1. TCP and UDP: UDP rides inside the TCP
+        // connection to the bridge as XUDP (see toXrayBridgeOutbound).
         val xrayOutbounds = mutableListOf<JSONObject>()
         val host = com.vpn4tv.app.xray.XrayBridge.SOCKS_HOST
         for (proxy in proxies) {
             val xrayOb = proxy.xrayOutbound ?: continue
             val port = portBase + xrayOutbounds.size
             xrayOutbounds.add(xrayOb)
-            // Replace the empty outbound placeholder with a sing-box socks outbound.
-            // bind_interface="lo" forces this connection through loopback instead
-            // of the wlan0 auto-binding that route.auto_detect_interface sets
-            // globally, which would make 127.0.0.127 unreachable.
-            proxy.outbound.apply {
-                put("type", "socks")
-                put("tag", proxy.tag)
-                put("server", host)
-                put("server_port", port)
-                put("version", "5")
-                put("network", "tcp")
-                put("bind_interface", "lo")
-            }
+            // Replace the empty outbound placeholder with the outbound to the bridge.
+            toXrayBridgeOutbound(proxy.outbound, port).put("tag", proxy.tag)
         }
 
         // Same trick for outline-managed proxies (ss:// with SIP002 prefix). Their
@@ -507,7 +527,8 @@ object ConfigGenerator {
      * through dns-remote, i.e. through the tunnel, at the server the profile
      * asks anyway. Whatever outbound then carries the flow gets an address;
      * TCP keeps the names. A profile made only of bridges has no FakeDNS, so
-     * its UDP destinations are addresses already.
+     * its UDP destinations are addresses already. The xray bridge needs none
+     * of this: XUDP carries names, and xray hands them to its server.
      */
     private fun resolvesUdpNames(proxies: List<ProxyConfig>): Boolean =
         fakeDnsEnabled(proxies) && proxies.any { it.ttUrl != null }
@@ -558,8 +579,8 @@ object ConfigGenerator {
     private fun buildRoute(proxies: List<ProxyConfig>): JSONObject {
         // UDP never goes "direct" behind the user's back any more: that sent
         // QUIC, calls, WebRTC and the like around the tunnel with the real
-        // address. Outline, AmneziaWG and TrustTunnel carry UDP now. A profile
-        // where no proxy carries UDP (only olcRTC, xray — naive without UDP
+        // address. Outline, AmneziaWG, TrustTunnel and xray carry UDP now. A
+        // profile where no proxy carries UDP (only olcRTC — naive without UDP
         // over TCP) refuses UDP outright, last: an answer apps take as
         // "no QUIC" and fall back to TCP at once, where the selector would
         // only fail each flow with "UDP is not supported by outbound: select".

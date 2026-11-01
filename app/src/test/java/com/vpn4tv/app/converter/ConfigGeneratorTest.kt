@@ -12,9 +12,10 @@ import org.junit.Test
 
 /**
  * UDP of the bridges in the generated sing-box config: Outline and AmneziaWG
- * carry it inside the TCP connection to the bridge (udp_over_tcp), TrustTunnel
- * by plain UDP ASSOCIATE, olcRTC carries TCP only, and no profile sends UDP or
- * DNS around the tunnel any more. Keys and hosts below are made up.
+ * carry it inside the TCP connection to the bridge (udp_over_tcp), xray inside
+ * its VLESS connection (XUDP), TrustTunnel by plain UDP ASSOCIATE, olcRTC
+ * carries TCP only, and no profile sends UDP or DNS around the tunnel any
+ * more. Keys and hosts below are made up.
  */
 class ConfigGeneratorTest {
     private val savedDns = ProxyParser.lastDns
@@ -84,6 +85,25 @@ class ConfigGeneratorTest {
         assertEquals("socks", outbound.getString("type"))
         assertEquals("tcp", outbound.getString("network"))
         assertFalse(outbound.has("udp_over_tcp"))
+    }
+
+    /**
+     * xray: VLESS without TLS to the bridge on the loopback, UDP as XUDP, the
+     * UUID a placeholder BridgeAuth replaces at start. Nothing of a socks
+     * outbound left, which sing-box would refuse as unknown fields.
+     */
+    private fun assertXrayBridge(outbound: JSONObject, port: Int) {
+        assertEquals("vless", outbound.getString("type"))
+        assertEquals("127.0.0.127", outbound.getString("server"))
+        assertEquals(port, outbound.getInt("server_port"))
+        assertEquals("lo", outbound.getString("bind_interface"))
+        assertEquals(com.vpn4tv.app.bg.BridgeAuth.UUID_PLACEHOLDER, outbound.getString("uuid"))
+        assertEquals("xudp", outbound.getString("packet_encoding"))
+        assertFalse("no network limit", outbound.has("network"))
+        for (key in listOf("flow", "tls", "transport", "multiplex", "version", "username", "password", "udp_over_tcp", "domain_strategy")) {
+            assertFalse(key, outbound.has(key))
+        }
+        assertTrue(ConfigGenerator.carriesUdp(outbound))
     }
 
     /** TrustTunnel: UDP by plain SOCKS5 UDP ASSOCIATE — the library does not speak UDP over TCP. */
@@ -256,6 +276,8 @@ class ConfigGeneratorTest {
             listOf(native()),
             listOf(native(), outline(), awg(), olcrtc()),
             listOf(native(), xray()),
+            // FakeDNS on, but xray takes names in XUDP.
+            listOf(xray()),
         )
         for (profile in profiles) {
             val config = generate(*profile.toTypedArray())
@@ -286,19 +308,71 @@ class ConfigGeneratorTest {
     }
 
     @Test
-    fun xrayOnlyRefusesUdpLastAndAsksDnsOverTcp() {
+    fun xrayOnlyCarriesUdpAsXudpAndAsksDnsOverTcp() {
         ProxyParser.lastDns = SubscriptionDns(remoteDns = "quic://dns.example.net", directDns = "9.9.9.9")
         val config = generate(xray())
-        assertTcpOnly(config.outbound("XH"))
-        // The xray bridge carries TCP only: UDP is refused, so QUIC falls back
-        // to TCP at once. Russia direct still sees Russian UDP: it goes ahead
-        // of the refusal (RussiaDirect.keepUdpRejectLast).
-        assertEquals(ConfigGenerator.udpRejectRule().toString(), config.routeRules().last().toString())
-        assertEquals(1, udpRules(config).size)
+        assertXrayBridge(config.outbound("XH"), 30000)
+        // UDP goes to the bridge: nothing refused, nothing resolved on the route.
+        assertTrue(udpRules(config).isEmpty())
+        assertEquals(listOf("sniff", "hijack-dns"), config.routeRules().map { it.optString("action") })
         assertNoLeak(config)
+        // DNS through the bridge goes over its TCP path, as through the others.
         assertEquals("tls", config.dnsServer("dns-remote").getString("type"))
         // FakeDNS stays: xray passes the sniffed domain to the server.
         assertTrue(config.getJSONObject("experimental").getJSONObject("cache_file").getBoolean("store_fakeip"))
+        assertFalse(config.getJSONObject("dns").has("strategy"))
+    }
+
+    @Test
+    fun xrayOutboundsGetOnePortEachFromTheBase() {
+        val result = ConfigGenerator.generateFull(listOf(xray("X1"), native(), xray("X2"), outline()), portBase = 30000)
+        val config = JSONObject(result.singboxJson)
+        assertXrayBridge(config.outbound("X1"), 30000)
+        assertXrayBridge(config.outbound("X2"), 30001)
+        assertEquals(31000, config.outbound("OL").getInt("server_port"))
+        // The sidecar serves exactly those ports, by VLESS.
+        val inbounds = JSONObject(result.xrayJson!!).getJSONArray("inbounds").objects()
+        assertEquals(listOf(30000, 30001), inbounds.map { it.getInt("port") })
+        assertTrue(inbounds.all { it.getString("protocol") == "vless" })
+    }
+
+    @Test
+    fun xraySidecarHasVlessInboundsWithThePlaceholder() {
+        val xrayJson = ConfigGenerator.generateFull(listOf(xray("X1"), xray("X2")), portBase = 30000).xrayJson!!
+        val root = JSONObject(xrayJson)
+        val inbounds = root.getJSONArray("inbounds").objects()
+        assertEquals(2, inbounds.size)
+        for ((i, inbound) in inbounds.withIndex()) {
+            assertEquals("vless-in-$i", inbound.getString("tag"))
+            assertEquals("vless", inbound.getString("protocol"))
+            assertEquals("127.0.0.127", inbound.getString("listen"))
+            assertEquals(30000 + i, inbound.getInt("port"))
+            val settings = inbound.getJSONObject("settings")
+            assertEquals("none", settings.getString("decryption"))
+            val clients = settings.getJSONArray("clients").objects()
+            assertEquals(1, clients.size)
+            assertEquals(com.vpn4tv.app.bg.BridgeAuth.UUID_PLACEHOLDER, clients[0].getString("id"))
+            assertFalse(clients[0].has("flow"))
+            // Nothing of the SOCKS5 inbound: no UDP port, no auth fields.
+            for (key in listOf("udp", "auth", "accounts")) assertFalse(key, settings.has(key))
+            assertTrue(inbound.getJSONObject("sniffing").getBoolean("enabled"))
+        }
+        // Routing stays 1:1, inbound tag to outbound tag.
+        val rules = root.getJSONObject("routing").getJSONArray("rules").objects()
+        assertEquals(listOf("vless-in-0", "vless-in-1"), rules.map { it.getJSONArray("inboundTag").getString(0) })
+        assertEquals(listOf("proxy-0", "proxy-1"), rules.map { it.getString("outboundTag") })
+        assertFalse(xrayJson.contains("socks"))
+    }
+
+    @Test
+    fun xrayOutboundWrittenAsSocksBeforeBecomesVless() {
+        // The same ProxyConfig, its outbound as the generator wrote it before 5.4.0.
+        val proxy = xray()
+        proxy.outbound.put("type", "socks").put("tag", "XH").put("server", "127.0.0.127").put("server_port", 30000)
+            .put("version", "5").put("network", "tcp").put("bind_interface", "lo")
+        val config = generate(proxy)
+        assertXrayBridge(config.outbound("XH"), 30000)
+        assertTrue(udpRules(config).isEmpty())
     }
 
     @Test
@@ -307,7 +381,7 @@ class ConfigGeneratorTest {
             tag = "NV", type = "naive", server = "192.0.2.50", serverPort = 443,
             outbound = JSONObject().put("type", "naive").put("tag", "NV").put("server", "192.0.2.50").put("server_port", 443),
         )
-        for (proxies in listOf(listOf(olcrtc()), listOf(xray()), listOf(naive), listOf(xray("X1"), olcrtc("O1")))) {
+        for (proxies in listOf(listOf(olcrtc()), listOf(naive), listOf(olcrtc("O1"), naive))) {
             val config = generate(*proxies.toTypedArray())
             val rules = config.routeRules()
             assertEquals(proxies.joinToString { it.tag }, listOf("sniff", "hijack-dns", "reject"), rules.map { it.optString("action") })
@@ -323,7 +397,7 @@ class ConfigGeneratorTest {
                 .put("udp_over_tcp", JSONObject().put("enabled", true)),
         )
         for (proxies in listOf(listOf(xray(), native()), listOf(xray(), outline()), listOf(olcrtc(), awg()), listOf(naiveUot), listOf(native()),
-                listOf(trustTunnel()), listOf(xray("X1"), olcrtc("O1"), trustTunnel("T1")))) {
+                listOf(trustTunnel()), listOf(xray("X1"), olcrtc("O1"), trustTunnel("T1")), listOf(xray()), listOf(xray("X2"), olcrtc("O2")))) {
             val config = generate(*proxies.toTypedArray())
             // No refusal; a profile with FakeDNS and TrustTunnel resolves UDP names on the route instead.
             assertTrue(proxies.joinToString { it.tag }, udpRules(config).none { it.optString("action") == "reject" })
@@ -344,6 +418,9 @@ class ConfigGeneratorTest {
         assertTrue(ConfigGenerator.carriesUdp(ob("naive").put("udp_over_tcp", JSONObject().put("enabled", true))))
         assertFalse(ConfigGenerator.carriesUdp(ob("http")))
         for (type in listOf("selector", "urltest", "direct", "block", "dns")) assertFalse(type, ConfigGenerator.carriesUdp(ob(type)))
+        // The outbound to the xray bridge, and the socks one it replaces.
+        assertTrue(ConfigGenerator.carriesUdp(ConfigGenerator.toXrayBridgeOutbound(JSONObject(), 30000)))
+        assertFalse(ConfigGenerator.carriesUdp(ob("socks").put("server", "127.0.0.127").put("network", "tcp")))
     }
 
     @Test
@@ -353,10 +430,18 @@ class ConfigGeneratorTest {
             assertTrue(bridge.tag, ConfigGenerator.dnsOverTcp(generate(bridge)))
         }
         assertTrue(ConfigGenerator.dnsOverTcp(generate(native(), awg())))
+        assertTrue(ConfigGenerator.dnsOverTcp(generate(native(), xray())))
         // A config generated before UDP: every bridge outbound had network = tcp.
         val old = generate(outline())
         old.outbound("OL").apply { remove("udp_over_tcp"); put("network", "tcp") }
         assertTrue(ConfigGenerator.dnsOverTcp(old))
+        // A vless outbound to a server of its own is no bridge.
+        val vless = ProxyConfig(
+            tag = "VL", type = "vless", server = "192.0.2.60", serverPort = 443,
+            outbound = JSONObject().put("type", "vless").put("tag", "VL").put("server", "192.0.2.60").put("server_port", 443)
+                .put("uuid", "a3482e88-686a-4a58-8126-99c9df64b7bf").put("packet_encoding", "xudp"),
+        )
+        assertFalse(ConfigGenerator.dnsOverTcp(generate(vless)))
     }
 
     @Test
@@ -385,7 +470,7 @@ class ConfigGeneratorTest {
     @Test
     fun regeneratingTheSameProxiesGivesTheSameOutbounds() {
         // generateFull rewrites ProxyConfig.outbound in place.
-        val proxies = listOf(outline(), olcrtc(), trustTunnel())
+        val proxies = listOf(outline(), olcrtc(), trustTunnel(), xray())
         val first = ConfigGenerator.generateFull(proxies, portBase = 30000).singboxJson
         val second = ConfigGenerator.generateFull(proxies, portBase = 30000).singboxJson
         assertEquals(JSONObject(first).getJSONArray("outbounds").toString(), JSONObject(second).getJSONArray("outbounds").toString())

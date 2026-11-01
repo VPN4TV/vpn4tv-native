@@ -22,7 +22,8 @@ object XrayBridge {
     private const val TAG = "XrayBridge"
 
     /**
-     * Bind address for the local SOCKS5 bridge.
+     * Bind address for the bridge's local inbounds (VLESS since 5.4.0, see
+     * XrayConfigGenerator; the name stays: every bridge uses this host).
      *
      * We intentionally bind to 127.0.0.127 instead of 127.0.0.1 so that
      * government-mandated scanners in RU apps don't flag an open port on
@@ -32,7 +33,7 @@ object XrayBridge {
      */
     const val SOCKS_HOST = "127.0.0.127"
 
-    /** Base port for xray SOCKS5 inbounds. Randomized once per install. */
+    /** Base port for the xray inbounds. Randomized once per install. */
     val SOCKS_PORT_BASE: Int get() = com.vpn4tv.app.database.Settings.xrayPortBase
 
     /**
@@ -60,7 +61,7 @@ object XrayBridge {
         try {
             Libbox.startXrayInstance(configJson)
             running = true
-            Log.i(TAG, "xray started on SOCKS5 $SOCKS_HOST:$SOCKS_PORT_BASE+")
+            Log.i(TAG, "xray started on $SOCKS_HOST:$SOCKS_PORT_BASE+")
         } catch (e: Exception) {
             Log.e(TAG, "failed to start xray", e)
             throw e
