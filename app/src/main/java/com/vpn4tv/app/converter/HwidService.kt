@@ -311,6 +311,14 @@ tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1
          * old-Android Let's Encrypt fallback is lost; the system store keeps working.
          */
         val socketFactory: javax.net.ssl.SSLSocketFactory by lazy {
+            // Android 7.1 (API 25) and newer carry ISRG Root X1 themselves: the system factory as is,
+            // exactly the path 5.2.6 took. The wrapper's own trust manager is suspected of the white
+            // screen at launch on some TVs since 5.3.0 (the first API call waits on the whole system
+            // store there, which takes minutes on some of them), so it is kept to the old devices
+            // that need the bundled roots.
+            if (android.os.Build.VERSION.SDK_INT >= 25) {
+                return@lazy javax.net.ssl.HttpsURLConnection.getDefaultSSLSocketFactory()
+            }
             try {
                 val context = javax.net.ssl.SSLContext.getInstance("TLS")
                 context.init(null, arrayOf(trustManager), null)

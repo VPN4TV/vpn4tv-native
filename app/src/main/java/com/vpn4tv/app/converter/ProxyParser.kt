@@ -120,7 +120,11 @@ object ProxyParser {
             trimmed.startsWith("ssconf://") -> parseOutlineDynamicKey(trimmed)
             trimmed.startsWith("naive+https://") || trimmed.startsWith("naive+quic://") -> parseNaive(trimmed)
             trimmed.startsWith("wg://") -> parseWgUri(trimmed)
-            trimmed.startsWith("olcrtc://") -> parseOlcrtc(trimmed)
+            // olcRTC is out of the build (2026-11-02): such a key is left out, the rest of the profile works.
+            trimmed.startsWith("olcrtc://") -> {
+                android.util.Log.w("ProxyParser", "Skipping an olcrtc:// key: olcRTC is not supported")
+                null
+            }
             trimmed.startsWith("tt://") -> parseTrustTunnel(trimmed)
             else -> null
         }
