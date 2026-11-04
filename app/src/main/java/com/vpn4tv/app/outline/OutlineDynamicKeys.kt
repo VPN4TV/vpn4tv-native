@@ -69,6 +69,38 @@ object OutlineDynamicKeys {
         return if (changed) root.toString() else sidecarJson
     }
 
+    /**
+     * The sidecar without the endpoints that still have no key: a dynamic key
+     * that could not be fetched and never was before. Null when none is left.
+     * The core takes an empty url for no Shadowsocks at all, i.e. a plain
+     * direct dialer, so such an endpoint would carry traffic past the VPN with
+     * the real address, and 'auto' tends to pick it, the direct path being the
+     * fastest. Without its listener the socks outbound is refused and urltest
+     * marks it dead. Every endpoint names its own port, so dropping one moves
+     * no other.
+     */
+    fun dropUnresolved(sidecarJson: String): String? {
+        val root = try {
+            JSONObject(sidecarJson)
+        } catch (_: Exception) {
+            return sidecarJson
+        }
+        val endpoints = root.optJSONArray("endpoints") ?: return sidecarJson
+        val usable = org.json.JSONArray()
+        for (index in 0 until endpoints.length()) {
+            val endpoint = endpoints.optJSONObject(index) ?: continue
+            if (endpoint.optString("url").isBlank()) {
+                Log.w(TAG, "endpoint on port ${endpoint.optInt("port")} has no key yet, left out")
+            } else {
+                usable.put(endpoint)
+            }
+        }
+        if (usable.length() == 0) return null
+        if (usable.length() == endpoints.length()) return sidecarJson
+        root.put("endpoints", usable)
+        return root.toString()
+    }
+
     /** Resolve in place and persist, so the next connect starts from what worked. */
     fun resolveAndPersist(sidecar: File): String {
         val original = sidecar.readText()

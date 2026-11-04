@@ -36,8 +36,8 @@ android {
         applicationId = "com.vpn4tv.hiddify"
         minSdk = 23
         targetSdk = 36
-        versionCode = 54200
-        versionName = "5.4.2"
+        versionCode = 54300
+        versionName = "5.4.3"
         base.archivesName.set("VPN4TV-Native-${versionName}")
 
         // libbox.aar ships only armeabi-v7a + arm64-v8a; x86 variants would
@@ -248,13 +248,18 @@ val checkTrustTunnelAar by tasks.registering {
 // The same for libbox: the configs need the core of the bridge-udp branch. An older one skips
 // the dns field of the Outline and AmneziaWG bridges without a word (their servers' names then
 // go to the tunnel's own DNS, a loop in bridge-only profiles), keeps UDP ASSOCIATE on and has
-// no cap on UDP sessions.
+// no cap on UDP sessions. And since 5.4.3 the core leaves out an Outline endpoint without a key:
+// an older one makes it a direct dialer past the VPN (the app drops such endpoints too).
 val checkLibboxAar by tasks.registering {
-    description = "Fails unless libs/libbox.aar is a core with the bridges' own DNS resolver."
+    description = "Fails unless libs/libbox.aar is a core with the bridges' own DNS resolver and the Outline key guard."
     val aar = layout.projectDirectory.file("libs/libbox.aar")
     inputs.file(aar)
     doLast {
-        val marker = "is not a usable server" // a log line of that resolver, in every ABI
+        // Log lines of the resolver and of the guard, in every ABI.
+        val markers = mapOf(
+            "is not a usable server" to "without the bridges' DNS resolver",
+            "no key, left out" to "without the guard against an Outline endpoint with no key",
+        )
         val wanted = setOf("arm64-v8a", "armeabi-v7a")
         val found = mutableSetOf<String>()
         ZipFile(aar.asFile).use { zip ->
@@ -262,9 +267,11 @@ val checkLibboxAar by tasks.registering {
                 val abi = Regex("jni/([^/]+)/libbox\\.so")
                     .matchEntire(entry.name)?.groupValues?.get(1) ?: continue
                 val so = String(zip.getInputStream(entry).use { it.readBytes() }, Charsets.ISO_8859_1)
-                if (!so.contains(marker)) throw GradleException(
-                    "libs/libbox.aar ($abi) is an older core, without the bridges' DNS resolver: " +
-                        "rebuild it from the core's bridge-udp branch")
+                for ((marker, problem) in markers) {
+                    if (!so.contains(marker)) throw GradleException(
+                        "libs/libbox.aar ($abi) is an older core, $problem: " +
+                            "rebuild it from the core's bridge-udp branch")
+                }
                 found += abi
             }
         }

@@ -1225,7 +1225,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     runningBridgeSidecars.remove(kind)
                 } else {
                     Log.d(TAG, "Starting the $kind bridge from ${file.name}")
-                    runningBridgeSidecars[kind] = startBridge(kind, file, text)
+                    // Not remembered when it did not start, so the next sync tries again.
+                    val started = startBridge(kind, file, text)
+                    if (started != null) runningBridgeSidecars[kind] = started else runningBridgeSidecars.remove(kind)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "$kind bridge failed to start: ${e.message}", e)
@@ -1236,8 +1238,13 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         null
     }
 
-    /** Start one bridge (a start replaces a running one). Returns the sidecar text to remember. */
-    private fun startBridge(kind: String, file: File, text: String): String = when (kind) {
+    /**
+     * Start one bridge (a start replaces a running one). Returns the sidecar
+     * text to remember, or null when there was nothing to start: an Outline
+     * sidecar whose every key is still unknown (OutlineDynamicKeys.dropUnresolved).
+     * The old bridge of that kind is stopped then, and the tunnel goes on without it.
+     */
+    private fun startBridge(kind: String, file: File, text: String): String? = when (kind) {
         "xray" -> {
             com.vpn4tv.app.xray.XrayBridge.start(service.applicationContext, BridgeAuth.applyToXray(text))
             text
@@ -1246,11 +1253,19 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // Dynamic keys (ssconf://) are fetched now, not at import: the
             // provider rotates servers behind them.
             val resolved = com.vpn4tv.app.outline.OutlineDynamicKeys.resolveAndPersist(file)
-            // Credentials in memory only — resolveAndPersist writes the sidecar
-            // back, and the pair must never land on disk. The DNS servers too:
-            // the bridge resolves its server by name with them, out of the tun.
-            com.vpn4tv.app.outline.OutlineBridge.start(BridgeDns.applyToEndpoints(BridgeAuth.applyToEndpoints(resolved)))
-            resolved
+            // An endpoint with no key yet would be a direct dialer in the core.
+            val usable = com.vpn4tv.app.outline.OutlineDynamicKeys.dropUnresolved(resolved)
+            if (usable == null) {
+                Log.w(TAG, "No Outline key yet: the outline bridge is left out until one comes")
+                stopBridge("outline")
+                null
+            } else {
+                // Credentials in memory only — resolveAndPersist writes the sidecar
+                // back, and the pair must never land on disk. The DNS servers too:
+                // the bridge resolves its server by name with them, out of the tun.
+                com.vpn4tv.app.outline.OutlineBridge.start(BridgeDns.applyToEndpoints(BridgeAuth.applyToEndpoints(usable)))
+                resolved
+            }
         }
         "wireproxy" -> {
             com.vpn4tv.app.wireproxy.WgBridge.start(BridgeDns.applyToEndpoints(BridgeAuth.applyToEndpoints(text)))
