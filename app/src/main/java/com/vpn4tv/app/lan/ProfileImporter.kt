@@ -38,7 +38,12 @@ object ProfileImporter {
 
             // Treat each non-blank line independently: a URL is fetched, a
             // direct link is taken verbatim. Mirrors processConfigs.
-            for (line in raw.lines().map { it.trim() }.filter { it.isNotEmpty() }) {
+            // Our own vpn4tv:// link is unwrapped first: it carries a subscription
+            // URL or keys, and a URL inside must be fetched like a pasted one.
+            val lines = raw.lines().map { it.trim() }.filter { it.isNotEmpty() }
+                .flatMap { (ProxyParser.decodeVpn4tvLink(it) ?: it).lines() }
+                .map { it.trim() }.filter { it.isNotEmpty() }
+            for (line in lines) {
                 if (line.startsWith("http://") || line.startsWith("https://")) {
                     val sub = HwidService.fetchSubscription(context, line)
                     allContent.appendLine(sub.body)
