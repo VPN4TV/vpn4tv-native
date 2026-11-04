@@ -1635,6 +1635,18 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         for (i in 0 until oldRules.length()) newRules.put(oldRules.get(i))
         dns.put("rules", newRules)
 
+        // The DNS rule above only answers queries; an outbound dials its server
+        // through its own domain_resolver, else route.default_domain_resolver
+        // (dns-direct), and never asks dns.rules. So the pins reach the proxies
+        // only named on them: without this a blocked dns-direct left every
+        // server addressed by name unreachable, pins or not.
+        for (i in 0 until outbounds.length()) {
+            val outbound = outbounds.getJSONObject(i)
+            if (outbound.optString("server", "") in resolved && !outbound.has("domain_resolver")) {
+                outbound.put("domain_resolver", "dns-hosts")
+            }
+        }
+
         Log.i(TAG, "DNS: pinned ${resolved.size}/${hosts.distinct().size} outbound hostnames via DoH chain")
         return root.toString()
     }
