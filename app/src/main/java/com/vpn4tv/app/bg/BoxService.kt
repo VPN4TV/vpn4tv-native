@@ -1579,7 +1579,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     /**
      * Pre-resolve every outbound server hostname through the app-level DoH
      * fallback chain ([HwidService.preResolveHosts]: Quad9 → AdGuard → Google
-     * → Cloudflare, wireformat+JSON, cached 6h with stale fallback) and pin
+     * → Cloudflare, wireformat+JSON, asked again on every start, the last
+     * known answer when the chain is silent) and pin
      * the answers into the config as a sing-box `hosts` DNS server:
      *
      *   servers += {type: "hosts", tag: "dns-hosts", predefined: {host: [ips]}}

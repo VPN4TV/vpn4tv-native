@@ -552,14 +552,18 @@ tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1
     // ---------------------------------------------------------------------
 
     private const val DNS_CACHE_PREFS = "dns_prefetch"
-    private const val DNS_FRESH_MS = 6L * 3600 * 1000  // 6h: skips re-resolving on every reconnect
+    // With a stored answer for every name, the chain gets this long: the start
+    // waits for it at most this, and a slow or blocked chain leaves the stored one.
+    private const val DNS_REFRESH_BUDGET_MS = 2000L
 
     /**
      * Resolve [hosts] via the DoH chain, in parallel, within [budgetMs].
-     * Fresh cache hits skip the network; failures fall back to the last
-     * known-good answer regardless of age (a stale server IP usually still
-     * works — VPN server IPs rarely move — while a blocked resolver returns
-     * nothing at all). Never throws; returns whatever subset resolved.
+     * Every start asks again: a provider moves a blocked server to a new
+     * address by changing its A record, and a reconnect must pick that up.
+     * A name the chain does not answer in time gets its last known answer,
+     * whatever its age (a blocked resolver returns nothing at all). With an
+     * answer stored for every name, the chain gets [DNS_REFRESH_BUDGET_MS] at
+     * most. Never throws; returns whatever subset resolved.
      */
     fun preResolveHosts(context: Context, hosts: List<String>, budgetMs: Long = 6000): Map<String, List<String>> {
         val unique = hosts.distinct()
@@ -568,27 +572,19 @@ tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1
         val now = System.currentTimeMillis()
         val result = HashMap<String, List<String>>()
 
-        fun cached(host: String): Pair<List<String>, Long>? {
+        // Stored as "ip,ip|<ms>"; the time is no longer read.
+        fun cached(host: String): List<String>? {
             val raw = prefs.getString(host, null) ?: return null
-            val ips = raw.substringBefore('|').split(',').filter { it.isNotBlank() }
-            val ts = raw.substringAfter('|', "0").toLongOrNull() ?: 0L
-            return if (ips.isEmpty()) null else ips to ts
+            return raw.substringBefore('|').split(',').filter { it.isNotBlank() }.ifEmpty { null }
         }
 
-        val toResolve = mutableListOf<String>()
-        for (host in unique) {
-            val c = cached(host)
-            if (c != null && now - c.second < DNS_FRESH_MS) result[host] = c.first
-            else toResolve.add(host)
-        }
-        if (toResolve.isEmpty()) return result
-
-        val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(4, toResolve.size))
+        val budget = if (unique.all { cached(it) != null }) minOf(budgetMs, DNS_REFRESH_BUDGET_MS) else budgetMs
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(4, unique.size))
         try {
-            val futures = toResolve.map { host ->
+            val futures = unique.map { host ->
                 host to pool.submit<List<String>> { resolveAllViaDoH(host) }
             }
-            val deadline = now + budgetMs
+            val deadline = now + budget
             for ((host, future) in futures) {
                 val left = deadline - System.currentTimeMillis()
                 try {
@@ -603,10 +599,11 @@ tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1
             pool.shutdownNow()
         }
         // Stale fallback for anything the chain could not resolve in budget.
-        for (host in toResolve) {
-            if (host !in result) cached(host)?.let { result[host] = it.first }
+        val answered = result.size
+        for (host in unique) {
+            if (host !in result) cached(host)?.let { result[host] = it }
         }
-        android.util.Log.i("HwidService", "preResolveHosts: ${result.size}/${unique.size} resolved (${toResolve.size} queried)")
+        android.util.Log.i("HwidService", "preResolveHosts: ${result.size}/${unique.size} resolved (${answered} answered, ${budget} ms)")
         return result
     }
 
