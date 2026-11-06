@@ -81,12 +81,30 @@ object HwidService {
     }
 
     private const val MAX_ATTEMPTS = 10
+    private const val TIMEOUT_MS = 30000
+
+    /** api.vpn4tv.com, when bell mirrors it, gets two short tries: where it is
+     *  blocked (TSPU drops the SYN or the TLS handshake) the full 10 × 30 s
+     *  kept the home screen on "loading" for minutes before the mirror, which
+     *  answers at once on the same networks (6 Nov 2026: 29 of 33 such launches
+     *  never reached it within an hour). The mirror keeps the full budget. */
+    private const val PRIMARY_ATTEMPTS = 2
+    private const val PRIMARY_TIMEOUT_MS = 5000
+
+    /** Ends a quick try at [PRIMARY_TIMEOUT_MS] whatever the connection is
+     *  doing: connect/read timeouts count per address and per read, and the
+     *  HTTP stack moves on to the next of api's addresses (two IPv4, two IPv6)
+     *  after each, so a dropped handshake would cost a multiple of them. */
+    private val quickDeadlines = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "subscription-deadline").apply { isDaemon = true }
+    }
 
     data class RetryProgress(val attempt: Int, val maxAttempts: Int, val mirror: Boolean)
 
     /**
      * Download subscription content + honour the Hiddify metadata headers.
-     * Retries each endpoint on SocketTimeoutException (up to [MAX_ATTEMPTS])
+     * Retries each endpoint on SocketTimeoutException (up to [MAX_ATTEMPTS];
+     * api.vpn4tv.com before its mirror [PRIMARY_ATTEMPTS] × [PRIMARY_TIMEOUT_MS])
      * and falls back to the bell.a4e.ar mirror if api.vpn4tv.com is
      * unreachable from the user's network (ISP blocks, TSPU interference).
      * `onProgress` fires on every attempt so the UI can show a counter.
@@ -100,14 +118,17 @@ object HwidService {
         var lastError: Exception? = null
         for ((endpointIdx, endpoint) in endpoints.withIndex()) {
             val isMirror = endpointIdx > 0
-            for (attempt in 1..MAX_ATTEMPTS) {
-                onProgress?.invoke(RetryProgress(attempt, MAX_ATTEMPTS, isMirror))
+            val quick = !isMirror && endpoints.size > 1
+            val attempts = if (quick) PRIMARY_ATTEMPTS else MAX_ATTEMPTS
+            val timeoutMs = if (quick) PRIMARY_TIMEOUT_MS else TIMEOUT_MS
+            for (attempt in 1..attempts) {
+                onProgress?.invoke(RetryProgress(attempt, attempts, isMirror))
                 try {
-                    return fetchSubscriptionOnce(context, endpoint)
+                    return fetchSubscriptionOnce(context, endpoint, timeoutMs, hardDeadline = quick)
                 } catch (e: java.net.SocketTimeoutException) {
                     lastError = e
-                    android.util.Log.w("HwidService", "fetchSubscription timeout ${attempt}/${MAX_ATTEMPTS} @ $endpoint")
-                    if (attempt < MAX_ATTEMPTS) Thread.sleep(1000L)
+                    android.util.Log.w("HwidService", "fetchSubscription timeout ${attempt}/${attempts} @ $endpoint")
+                    if (attempt < attempts) Thread.sleep(1000L)
                 } catch (e: java.io.IOException) {
                     // Non-timeout IO (reset, 5xx) — jump to mirror without retries
                     lastError = e
@@ -119,8 +140,28 @@ object HwidService {
         throw lastError ?: java.net.SocketTimeoutException("all subscription endpoints exhausted")
     }
 
-    private fun fetchSubscriptionOnce(context: Context, url: String): SubscriptionResponse {
+    private fun fetchSubscriptionOnce(context: Context, url: String, timeoutMs: Int, hardDeadline: Boolean): SubscriptionResponse {
         val conn = openConnectionWithDnsFallback(url)
+        if (!hardDeadline) return readSubscription(context, conn, timeoutMs)
+        val expired = java.util.concurrent.atomic.AtomicBoolean(false)
+        val deadline = quickDeadlines.schedule(
+            { expired.set(true); conn.disconnect() },
+            timeoutMs.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS,
+        )
+        try {
+            return readSubscription(context, conn, timeoutMs)
+        } catch (e: java.io.IOException) {
+            // disconnect() surfaces as "socket closed"/"canceled": still a timeout to the retry loop.
+            if (expired.get() && e !is java.net.SocketTimeoutException) {
+                throw java.net.SocketTimeoutException("no answer from $url in $timeoutMs ms").apply { initCause(e) }
+            }
+            throw e
+        } finally {
+            deadline.cancel(false)
+        }
+    }
+
+    private fun readSubscription(context: Context, conn: HttpURLConnection, timeoutMs: Int): SubscriptionResponse {
         conn.setRequestProperty("x-hwid", getHwid(context))
         conn.setRequestProperty("x-device-os", "Android")
         conn.setRequestProperty("x-ver-os", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
@@ -133,8 +174,8 @@ object HwidService {
         conn.setRequestProperty("x-app-ver", BuildConfig.VERSION_NAME)
         conn.setRequestProperty("x-app-build", BuildConfig.VERSION_CODE.toString())
         conn.setRequestProperty("User-Agent", "VPN4TV-Native/${BuildConfig.VERSION_NAME}")
-        conn.connectTimeout = 30000
-        conn.readTimeout = 30000
+        conn.connectTimeout = timeoutMs
+        conn.readTimeout = timeoutMs
         // Cap body at 2 MB — a real subscription is at most a few hundred
         // KB. Without this, a misconfigured server returning a huge
         // response (or an accidental redirect to a binary file) blows up
