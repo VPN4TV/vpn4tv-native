@@ -7,6 +7,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -109,167 +112,94 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
         )
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
-        // Header
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            IconButton(onClick = { saveAndBack() }) {
-                Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
-            }
-            Text(
-                stringResource(R.string.title_per_app_proxy),
-                fontSize = 28.sp,
-                color = Color.White,
-                modifier = Modifier.weight(1f).padding(start = 16.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Enable toggle
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { enabled = !enabled }
-                .focusable(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+    val colors = MaterialTheme.colorScheme
+    val toggle: (String, Boolean) -> Unit = { pkg, on ->
+        selectedApps = selectedApps.toMutableSet().apply { if (on) add(pkg) else remove(pkg) }
+    }
+    ScreenScaffold(title = stringResource(R.string.title_per_app_proxy), onBack = { saveAndBack() }) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = if (Device.isTv) 0.dp else 16.dp)) {
+            // Enable toggle: the whole row toggles, one focus stop on TV.
+            Surface(
+                modifier = Modifier.fillMaxWidth()
+                    .toggleable(value = enabled, role = Role.Switch, onValueChange = { enabled = it })
+                    .tvFocus(RoundedCornerShape(12.dp), TV_ROW_SCALE),
+                shape = RoundedCornerShape(12.dp),
+                color = colors.surfaceContainerHigh,
             ) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        stringResource(R.string.setting_per_app_enabled),
+                        fontSize = if (Device.isTv) 20.sp else 16.sp, color = colors.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(checked = enabled, onCheckedChange = null)
+                }
+            }
+
+            if (enabled) {
+                Spacer(Modifier.height(12.dp))
+                // Mode: a Material 3 segmented button, one of two.
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    val options = listOf(
+                        Settings.PER_APP_PROXY_EXCLUDE to stringResource(R.string.mode_exclude),
+                        Settings.PER_APP_PROXY_INCLUDE to stringResource(R.string.mode_include),
+                    )
+                    options.forEachIndexed { index, (value, label) ->
+                        SegmentedButton(
+                            selected = mode == value,
+                            onClick = { mode = value },
+                            shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                            modifier = Modifier.tvFocus(RoundedCornerShape(20.dp), 1.05f),
+                        ) { Text(label) }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
                 Text(
-                    stringResource(R.string.setting_per_app_enabled),
-                    fontSize = 18.sp,
-                    color = Color.White,
-                    modifier = Modifier.weight(1f)
+                    if (mode == Settings.PER_APP_PROXY_EXCLUDE) stringResource(R.string.mode_exclude_desc)
+                    else stringResource(R.string.mode_include_desc),
+                    style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant,
                 )
-                Switch(checked = enabled, onCheckedChange = { enabled = it })
-            }
-        }
 
-        if (enabled) {
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Mode selector
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                val excludeSelected = mode == Settings.PER_APP_PROXY_EXCLUDE
-                Card(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { mode = Settings.PER_APP_PROXY_EXCLUDE }
-                        .focusable(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (excludeSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                        else MaterialTheme.colorScheme.surfaceVariant
-                    )
+                Row(
+                    Modifier
+                        .toggleable(value = showSystem, role = Role.Checkbox, onValueChange = { showSystem = it })
+                        .tvFocus(RoundedCornerShape(8.dp), 1.05f)
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        stringResource(R.string.mode_exclude),
-                        fontSize = 14.sp,
-                        color = if (excludeSelected) MaterialTheme.colorScheme.primary else Color.White,
-                        modifier = Modifier.padding(12.dp).align(Alignment.CenterHorizontally)
-                    )
+                    Checkbox(checked = showSystem, onCheckedChange = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.show_system_apps), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
                 }
-                Card(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { mode = Settings.PER_APP_PROXY_INCLUDE }
-                        .focusable(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (!excludeSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                        else MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Text(
-                        stringResource(R.string.mode_include),
-                        fontSize = 14.sp,
-                        color = if (!excludeSelected) MaterialTheme.colorScheme.primary else Color.White,
-                        modifier = Modifier.padding(12.dp).align(Alignment.CenterHorizontally)
-                    )
-                }
-            }
+                Text(
+                    String.format(stringResource(R.string.selected_count), selectedApps.size),
+                    style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Mode description
-            Text(
-                if (mode == Settings.PER_APP_PROXY_EXCLUDE)
-                    stringResource(R.string.mode_exclude_desc)
-                else stringResource(R.string.mode_include_desc),
-                fontSize = 12.sp,
-                color = Color.Gray
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Show system apps toggle
-            Row(
-                modifier = Modifier
-                    .clickable { showSystem = !showSystem }
-                    .focusable()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Checkbox(checked = showSystem, onCheckedChange = { showSystem = it })
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(stringResource(R.string.show_system_apps), fontSize = 14.sp, color = Color.Gray)
-            }
-
-            Text(
-                String.format(stringResource(R.string.selected_count), selectedApps.size),
-                fontSize = 13.sp,
-                color = Color.Gray
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // App list
-            if (isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(filteredApps, key = { it.packageName }) { app ->
-                        val checked = app.packageName in selectedApps
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 1.dp)
-                                .clickable {
-                                    selectedApps = selectedApps.toMutableSet().apply {
-                                        if (checked) remove(app.packageName) else add(app.packageName)
-                                    }
-                                }
-                                .focusable(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (checked)
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
-                                else Color.Transparent
-                            )
-                        ) {
+                if (isLoading) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                } else {
+                    LazyColumn(
+                        Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(if (Device.isTv) 4.dp else 0.dp),
+                    ) {
+                        items(filteredApps, key = { it.packageName }) { app ->
+                            val checked = app.packageName in selectedApps
+                            // The whole row toggles; the checkbox only shows the state.
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                Modifier
+                                    .fillMaxWidth()
+                                    .toggleable(value = checked, role = Role.Checkbox, onValueChange = { toggle(app.packageName, it) })
+                                    .tvFocus(RoundedCornerShape(10.dp), TV_ROW_SCALE)
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Checkbox(
-                                    checked = checked,
-                                    onCheckedChange = {
-                                        selectedApps = selectedApps.toMutableSet().apply {
-                                            if (it) add(app.packageName) else remove(app.packageName)
-                                        }
-                                    }
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(app.label, fontSize = 15.sp, color = Color.White)
-                                    Text(app.packageName, fontSize = 11.sp, color = Color.Gray)
+                                Checkbox(checked = checked, onCheckedChange = null)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(app.label, fontSize = if (Device.isTv) 17.sp else 15.sp, color = colors.onSurface)
+                                    Text(app.packageName, fontSize = if (Device.isTv) 13.sp else 12.sp, color = colors.onSurfaceVariant)
                                 }
                             }
                         }

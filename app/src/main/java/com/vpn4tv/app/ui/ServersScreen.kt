@@ -1,36 +1,35 @@
 package com.vpn4tv.app.ui
 
+import android.content.Context
 import android.util.Log
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
-import android.content.Context
+import com.vpn4tv.app.ui.theme.LocalStateColors
 import com.vpn4tv.app.utils.CommandClient
 import io.nekohasekai.libbox.OutboundGroup
-import io.nekohasekai.libbox.OutboundGroupItem
-import io.nekohasekai.libbox.StatusMessage
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
-fun ServersScreen(onBack: () -> Unit) {
+fun ServersScreen(onBack: (() -> Unit)?) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var groups by remember { mutableStateOf<List<GroupData>>(emptyList()) }
@@ -50,18 +49,9 @@ fun ServersScreen(onBack: () -> Unit) {
                             val itemIter = group.items
                             while (itemIter.hasNext()) {
                                 val item = itemIter.next()
-                                items.add(ServerItem(
-                                    tag = item.tag,
-                                    type = item.type,
-                                    delay = item.urlTestDelay.toInt()
-                                ))
+                                items.add(ServerItem(tag = item.tag, type = item.type, delay = item.urlTestDelay.toInt()))
                             }
-                            GroupData(
-                                tag = group.tag,
-                                type = group.type,
-                                selected = group.selected,
-                                items = items
-                            )
+                            GroupData(tag = group.tag, type = group.type, selected = group.selected, items = items)
                         }
                 }
             }
@@ -73,142 +63,143 @@ fun ServersScreen(onBack: () -> Unit) {
         onDispose { commandClient.disconnect() }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
-            }
-            Text(
-                stringResource(R.string.title_servers),
-                fontSize = 28.sp,
-                color = Color.White,
-                modifier = Modifier.weight(1f).padding(start = 16.dp)
-            )
-            IconButton(onClick = {
-                if (!isTestRunning) {
-                    isTestRunning = true
-                    scope.launch(Dispatchers.IO) {
-                        groups.filter { it.type == "urltest" || it.type == "selector" }.forEach { group ->
-                            try {
-                                val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
-                                client.urlTest(group.tag)
-                                client.disconnect()
-                            } catch (e: Exception) {
-                                Log.w("Servers", "urlTest ${group.tag}: ${e.message}")
-                            }
-                        }
-                        // Wait for results to propagate
-                        delay(2000)
-                        withContext(Dispatchers.Main) { isTestRunning = false }
+    val testAll: () -> Unit = {
+        if (!isTestRunning) {
+            isTestRunning = true
+            scope.launch(Dispatchers.IO) {
+                groups.filter { it.type == "urltest" || it.type == "selector" }.forEach { group ->
+                    try {
+                        val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
+                        client.urlTest(group.tag)
+                        client.disconnect()
+                    } catch (e: Exception) {
+                        Log.w("Servers", "urlTest ${group.tag}: ${e.message}")
                     }
                 }
-            }) {
-                if (isTestRunning) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.Refresh, stringResource(R.string.action_test_all), tint = Color.White)
-                }
+                // Wait for results to propagate
+                delay(2000)
+                withContext(Dispatchers.Main) { isTestRunning = false }
             }
         }
+    }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        if (groups.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.servers_empty), color = Color.Gray, fontSize = 18.sp)
+    ScreenScaffold(
+        title = stringResource(R.string.title_servers),
+        onBack = onBack,
+        actions = {
+            // Nothing to test until the tunnel lists its servers.
+            if (groups.isNotEmpty()) {
+                IconButton(onClick = testAll, modifier = Modifier.tvFocus(CircleShape)) {
+                    if (isTestRunning) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Refresh, stringResource(R.string.action_test_all))
+                    }
+                }
             }
-        } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                groups.forEach { group ->
-                    items(group.items, key = { "${group.tag}_${it.tag}" }) { server ->
-                        ServerCard(
-                            server = server,
-                            isSelected = server.tag == group.selected,
-                            onClick = {
-                                Log.d("Servers", "Clicked ${server.tag}")
-                                scope.launch(Dispatchers.IO) {
-                                    try {
-                                        val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
-                                        client.selectOutbound(group.tag, server.tag)
-                                        client.disconnect()
-                                        // Remember selection
-                                        saveSelectedServer(context, server.tag)
-                                        Log.d("Servers", "Selected ${server.tag} in ${group.tag}")
-                                    } catch (e: Exception) {
-                                        Log.e("Servers", "select failed: ${e.message}")
-                                    }
+        },
+    ) { padding ->
+        if (groups.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Text(
+                    stringResource(R.string.servers_empty),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 18.sp,
+                )
+            }
+            return@ScreenScaffold
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = if (Device.isTv) PaddingValues(vertical = 8.dp) else padding,
+            verticalArrangement = Arrangement.spacedBy(if (Device.isTv) 6.dp else 0.dp),
+        ) {
+            groups.forEach { group ->
+                items(group.items, key = { "${group.tag}_${it.tag}" }) { server ->
+                    ServerRow(
+                        server = server,
+                        isSelected = server.tag == group.selected,
+                        onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
+                                    client.selectOutbound(group.tag, server.tag)
+                                    client.disconnect()
+                                    // Remember selection
+                                    saveSelectedServer(context, server.tag)
+                                    Log.d("Servers", "Selected ${server.tag} in ${group.tag}")
+                                } catch (e: Exception) {
+                                    Log.e("Servers", "select failed: ${e.message}")
                                 }
                             }
-                        )
-                    }
+                        },
+                    )
                 }
             }
         }
     }
 }
 
+/** The selected server carries a check mark; on TV the outline is the focus only. */
 @Composable
-private fun ServerCard(server: ServerItem, isSelected: Boolean, onClick: () -> Unit) {
-    var isFocused by remember { mutableStateOf(false) }
-    val borderColor = when {
-        isSelected -> Color.Green
-        isFocused -> MaterialTheme.colorScheme.primary
-        else -> Color.Transparent
+private fun ServerRow(server: ServerItem, isSelected: Boolean, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val mark: @Composable () -> Unit = {
+        Box(Modifier.width(32.dp)) {
+            if (isSelected) {
+                Icon(
+                    Icons.Default.Check, stringResource(R.string.server_selected),
+                    tint = LocalStateColors.current.connected, modifier = Modifier.size(22.dp),
+                )
+            }
+        }
     }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp)
-            .border(BorderStroke(2.dp, borderColor), shape = MaterialTheme.shapes.small)
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
-            .focusable(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected)
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    if (!Device.isTv) {
+        ListItem(
+            modifier = Modifier.clickable(onClick = onClick),
+            leadingContent = mark,
+            headlineContent = { Text(server.tag) },
+            trailingContent = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(server.type, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                    Spacer(Modifier.width(12.dp))
+                    DelayText(server.delay, 14.sp)
+                }
+            },
         )
+        return
+    }
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(10.dp), TV_ROW_SCALE),
+        shape = RoundedCornerShape(10.dp),
+        color = colors.surfaceContainerHigh,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                server.tag,
-                fontSize = 16.sp,
-                color = Color.White,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                server.type,
-                fontSize = 12.sp,
-                color = Color.Gray,
-                modifier = Modifier.padding(end = 16.dp)
-            )
-            DelayChip(server.delay)
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            mark()
+            Text(server.tag, fontSize = 18.sp, color = colors.onSurface, modifier = Modifier.weight(1f))
+            Text(server.type, fontSize = 14.sp, color = colors.onSurfaceVariant, modifier = Modifier.padding(end = 16.dp))
+            DelayText(server.delay, 16.sp)
         }
     }
 }
 
 @Composable
-private fun DelayChip(delay: Int) {
+private fun DelayText(delay: Int, size: androidx.compose.ui.unit.TextUnit) {
+    val state = LocalStateColors.current
     val text = when {
         delay == 0 -> "—"
         delay < 0 -> "✕"
-        else -> "${delay}ms"
+        else -> "$delay ${stringResource(R.string.unit_ms)}"
     }
     val color = when {
-        delay == 0 -> Color.Gray
-        delay < 0 -> Color.Red
-        delay < 300 -> Color.Green
-        delay < 600 -> Color.Yellow
-        else -> Color(0xFFFF6600) // orange
+        delay == 0 -> MaterialTheme.colorScheme.onSurfaceVariant
+        delay < 0 -> state.danger
+        delay < 300 -> state.fast
+        delay < 600 -> state.medium
+        else -> state.slow
     }
-    Text(text, fontSize = 14.sp, color = color)
+    Text(text, fontSize = size, color = color)
 }
 
 data class GroupData(

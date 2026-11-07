@@ -1,46 +1,48 @@
 package com.vpn4tv.app.ui
 
 import android.util.Log
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
 import com.vpn4tv.app.database.Profile
 import com.vpn4tv.app.database.ProfileManager
 import com.vpn4tv.app.database.Settings
 import com.vpn4tv.app.database.TypedProfile
+import com.vpn4tv.app.ui.theme.LocalStateColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
-fun ProfilesScreen(onBack: () -> Unit, onAddViaTelegram: () -> Unit = {}) {
+fun ProfilesScreen(
+    onBack: (() -> Unit)?,
+    onAddViaTelegram: () -> Unit = {},
+    onPasteKey: () -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     var profiles by remember { mutableStateOf<List<Profile>>(emptyList()) }
     var selectedId by remember { mutableStateOf(Settings.selectedProfile) }
     var isLoading by remember { mutableStateOf(false) }
+    var actionsFor by remember { mutableStateOf<Profile?>(null) }
+    var deleteAsked by remember { mutableStateOf<Profile?>(null) }
 
     fun reload() {
         scope.launch(Dispatchers.IO) {
@@ -55,161 +57,203 @@ fun ProfilesScreen(onBack: () -> Unit, onAddViaTelegram: () -> Unit = {}) {
 
     LaunchedEffect(Unit) { reload() }
 
-    Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
-        // Header
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
-            }
-            Text(
-                stringResource(R.string.title_subscriptions),
-                fontSize = 28.sp,
-                color = Color.White,
-                modifier = Modifier.weight(1f).padding(start = 16.dp)
-            )
+    val select: (Profile) -> Unit = { profile ->
+        scope.launch(Dispatchers.IO) {
+            Settings.selectedProfile = profile.id
+            withContext(Dispatchers.Main) { selectedId = profile.id }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        if (isLoading) {
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-            Spacer(modifier = Modifier.height(8.dp))
+    }
+    val update: (Profile) -> Unit = { profile ->
+        scope.launch {
+            isLoading = true
+            val err = withContext(Dispatchers.IO) { updateProfile(profile) }
+            isLoading = false
+            reload()
+            // Route through the shared lastError LiveData so HomeScreen shows
+            // it as a red line the next time the user lands there.
+            com.vpn4tv.app.bg.BoxService.lastError.postValue(err?.let { com.vpn4tv.app.Application.application.getString(R.string.subscription_update_failed, it) })
         }
+    }
+    val delete: (Profile) -> Unit = { profile ->
+        scope.launch(Dispatchers.IO) {
+            ProfileManager.delete(profile)
+            runCatching { File(profile.typed.path).delete() }
+            if (selectedId == profile.id) Settings.selectedProfile = -1
+            withContext(Dispatchers.Main) { reload() }
+        }
+    }
 
-        // Profile list
-        LazyColumn(modifier = Modifier.weight(1f)) {
-            items(profiles, key = { it.id }) { profile ->
-                ProfileItem(
-                    profile = profile,
-                    isSelected = profile.id == selectedId,
-                    onSelect = {
-                        scope.launch(Dispatchers.IO) {
-                            Settings.selectedProfile = profile.id
-                            withContext(Dispatchers.Main) { selectedId = profile.id }
-                        }
-                    },
-                    onUpdate = {
-                        scope.launch {
-                            isLoading = true
-                            val err = withContext(Dispatchers.IO) { updateProfile(profile) }
-                            isLoading = false
-                            reload()
-                            // Route through the shared lastError LiveData so
-                            // HomeScreen shows it as a red line the next time
-                            // the user lands there.
-                            com.vpn4tv.app.bg.BoxService.lastError.postValue(
-                                err?.let { "Обновление подписки: $it" }
-                            )
-                        }
-                    },
-                    onDelete = {
-                        scope.launch(Dispatchers.IO) {
-                            ProfileManager.delete(profile)
-                            runCatching { File(profile.typed.path).delete() }
-                            if (selectedId == profile.id) Settings.selectedProfile = -1
-                            withContext(Dispatchers.Main) { reload() }
-                        }
-                    }
+    ScreenScaffold(
+        title = stringResource(R.string.title_subscriptions),
+        onBack = onBack,
+        actions = {
+            if (!Device.isTv) {
+                IconButton(onClick = onPasteKey) {
+                    Icon(Icons.Default.ContentPaste, stringResource(R.string.action_paste_key))
+                }
+            }
+        },
+        floatingActionButton = {
+            if (!Device.isTv) {
+                ExtendedFloatingActionButton(
+                    onClick = onAddViaTelegram,
+                    icon = { Icon(Icons.Default.Add, null) },
+                    text = { Text(stringResource(R.string.action_add)) },
                 )
             }
-        }
-
-        // Add via Telegram button
-        Spacer(modifier = Modifier.height(16.dp))
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onAddViaTelegram() }
-                .focusable(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+        },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            if (isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                // Phone: room for the floating button under the last row.
+                contentPadding = if (Device.isTv) PaddingValues(vertical = 8.dp) else PaddingValues(bottom = 88.dp),
+                verticalArrangement = Arrangement.spacedBy(if (Device.isTv) 8.dp else 0.dp),
             ) {
-                Icon(Icons.Default.Add, stringResource(R.string.icon_add), modifier = Modifier.size(24.dp))
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(stringResource(R.string.action_add_telegram), fontSize = 18.sp)
+                items(profiles, key = { it.id }) { profile ->
+                    val selected = profile.id == selectedId
+                    if (Device.isTv) {
+                        TvProfileRow(profile, selected, onClick = { actionsFor = profile })
+                    } else {
+                        PhoneProfileRow(
+                            profile, selected,
+                            onSelect = { select(profile) },
+                            onUpdate = { update(profile) },
+                            onDelete = { deleteAsked = profile },
+                        )
+                    }
+                }
+            }
+            if (Device.isTv) {
+                // The screen's one primary action: a wide button, as the TV buttons guide asks.
+                Button(
+                    onClick = onAddViaTelegram,
+                    modifier = Modifier.fillMaxWidth().height(64.dp).tvFocus(RoundedCornerShape(32.dp), 1.03f),
+                ) {
+                    Icon(Icons.Default.Add, null, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(stringResource(R.string.action_add_telegram), fontSize = 20.sp)
+                }
+            }
+        }
+    }
+
+    // TV: a row is one control; its actions open here.
+    actionsFor?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { actionsFor = null },
+            title = { Text(profile.name) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (profile.id != selectedId) {
+                        DialogAction(stringResource(R.string.profile_action_select)) { actionsFor = null; select(profile) }
+                    }
+                    if (profile.typed.type == TypedProfile.Type.Remote) {
+                        DialogAction(stringResource(R.string.profile_action_update)) { actionsFor = null; update(profile) }
+                    }
+                    DialogAction(stringResource(R.string.profile_action_delete)) { actionsFor = null; deleteAsked = profile }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { actionsFor = null }, modifier = Modifier.tvFocus(CircleShape)) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
+    deleteAsked?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { deleteAsked = null },
+            title = { Text(stringResource(R.string.profile_delete_title)) },
+            text = { Text(stringResource(R.string.profile_delete_text, profile.name)) },
+            confirmButton = {
+                TextButton(
+                    onClick = { deleteAsked = null; delete(profile) },
+                    modifier = Modifier.tvFocus(CircleShape),
+                ) { Text(stringResource(R.string.profile_action_delete), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteAsked = null }, modifier = Modifier.tvFocus(CircleShape)) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun DialogAction(label: String, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().tvFocus(CircleShape, 1.05f)) {
+        Text(label, fontSize = 18.sp)
+    }
+}
+
+private fun Profile.host(): String =
+    if (typed.type == TypedProfile.Type.Remote) runCatching { java.net.URL(typed.remoteURL).host }.getOrDefault("") else ""
+
+/** TV: the whole row is one focusable; the selection is a check mark, not a colour. */
+@Composable
+private fun TvProfileRow(profile: Profile, selected: Boolean, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(12.dp), TV_ROW_SCALE),
+        shape = RoundedCornerShape(12.dp),
+        color = colors.surfaceContainerHigh,
+    ) {
+        Row(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            SelectionMark(selected)
+            Column(Modifier.weight(1f)) {
+                Text(profile.name, fontSize = 20.sp, color = colors.onSurface)
+                val host = profile.host()
+                if (host.isNotEmpty()) Text(host, fontSize = 14.sp, color = colors.onSurfaceVariant)
             }
         }
     }
 }
 
+/** Phone: a Material 3 list row; trailing icon buttons are fine in a touch list. */
 @Composable
-private fun ProfileItem(
+private fun PhoneProfileRow(
     profile: Profile,
-    isSelected: Boolean,
+    selected: Boolean,
     onSelect: () -> Unit,
     onUpdate: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    var isFocused by remember { mutableStateOf(false) }
-    val borderColor = when {
-        isSelected -> Color.Green
-        isFocused -> MaterialTheme.colorScheme.primary
-        else -> Color.Transparent
-    }
-
-    // Card is a passive container. Each interactive element inside the row
-    // owns its own focusable: the text area (select), Refresh, Delete.
-    // D-pad LEFT/RIGHT navigates between them, UP/DOWN jumps rows. We can't
-    // use Card(onClick=…) plus inner IconButtons — Compose ends up with
-    // nested focusables that swallow the first OK press.
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .border(BorderStroke(2.dp, borderColor), shape = MaterialTheme.shapes.medium),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected)
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-            else MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Text / select target — this is the row-selection focusable.
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .onFocusChanged { isFocused = it.isFocused }
-                    .clickable { onSelect() }
-                    .focusable()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (isSelected) {
-                    Icon(Icons.Default.Check, stringResource(R.string.selected), tint = Color.Green, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                }
-
-                Column {
-                    Text(profile.name, fontSize = 18.sp, color = Color.White)
-                    if (profile.typed.type == TypedProfile.Type.Remote) {
-                        val host = try {
-                            java.net.URL(profile.typed.remoteURL).host
-                        } catch (_: Exception) { "" }
-                        if (host.isNotEmpty()) {
-                            Text(host, fontSize = 12.sp, color = Color.Gray)
-                        }
+    val host = profile.host()
+    val supporting: (@Composable () -> Unit)? = if (host.isNotEmpty()) { { Text(host) } } else null
+    ListItem(
+        modifier = Modifier.clickable(onClick = onSelect),
+        leadingContent = { SelectionMark(selected) },
+        headlineContent = { Text(profile.name) },
+        supportingContent = supporting,
+        trailingContent = {
+            Row {
+                if (profile.typed.type == TypedProfile.Type.Remote) {
+                    IconButton(onClick = onUpdate) {
+                        Icon(Icons.Default.Refresh, stringResource(R.string.action_update_subscription))
                     }
                 }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, stringResource(R.string.profile_action_delete))
+                }
             }
+        },
+    )
+}
 
-            IconButton(onClick = onUpdate, modifier = Modifier.padding(end = 4.dp)) {
-                Icon(Icons.Default.Refresh, stringResource(R.string.action_update_subscription), tint = Color.White)
-            }
-            IconButton(onClick = onDelete, modifier = Modifier.padding(end = 8.dp)) {
-                Icon(Icons.Default.Delete, stringResource(R.string.action_clear), tint = Color.Red.copy(alpha = 0.7f))
-            }
+@Composable
+private fun SelectionMark(selected: Boolean) {
+    Box(Modifier.width(36.dp)) {
+        if (selected) {
+            Icon(
+                Icons.Default.Check, stringResource(R.string.profile_selected),
+                tint = LocalStateColors.current.connected, modifier = Modifier.size(24.dp),
+            )
         }
     }
 }

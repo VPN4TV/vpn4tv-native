@@ -1,18 +1,19 @@
 package com.vpn4tv.app.ui
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
@@ -21,10 +22,12 @@ import com.vpn4tv.app.database.Settings
 
 @Composable
 fun SettingsScreen(
-    onBack: () -> Unit,
+    onBack: (() -> Unit)?,
     onPerAppProxy: () -> Unit = {},
     onLanImport: () -> Unit = {},
     onManualImport: () -> Unit = {},
+    onLogs: () -> Unit = {},
+    onAbout: () -> Unit = {},
 ) {
     var autoConnect by remember { mutableStateOf(Settings.autoConnectOnBoot) }
     var proxyMode by remember { mutableStateOf(Settings.isProxyMode) }
@@ -32,174 +35,120 @@ fun SettingsScreen(
     var fakeDns by remember { mutableStateOf(Settings.fakeDns) }
     var allThroughVpn by remember { mutableStateOf(Settings.allThroughVpn) }
 
-    // verticalScroll: the settings list outgrew one screen once FakeDNS + LAN
-    // import were added — on short-height TVs (Mi Box) those last rows were
-    // pushed below the fold and unreachable by D-pad. Scrolling brings them
-    // back; Compose follows D-pad focus into view automatically.
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
+    ScreenScaffold(title = stringResource(R.string.title_settings), onBack = onBack) { padding ->
+        // verticalScroll: the list is longer than one screen; on short-height
+        // TVs (Mi Box) Compose follows D-pad focus into view.
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(vertical = if (Device.isTv) 8.dp else 0.dp),
+            verticalArrangement = Arrangement.spacedBy(if (Device.isTv) 8.dp else 0.dp),
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
-            }
-            Text(
-                stringResource(R.string.title_settings),
-                fontSize = 28.sp,
-                color = Color.White,
-                modifier = Modifier.padding(start = 16.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Per-app proxy
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-                .clickable { onPerAppProxy() }
-                .focusable(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.title_per_app_proxy), fontSize = 18.sp, color = Color.White)
-                    Text(
-                        if (Settings.perAppProxyEnabled)
-                            "${if (Settings.perAppProxyMode == Settings.PER_APP_PROXY_EXCLUDE) stringResource(R.string.mode_exclude) else stringResource(R.string.mode_include)}: ${Settings.perAppProxyList.size} apps"
-                        else stringResource(R.string.setting_disabled),
-                        fontSize = 13.sp,
-                        color = Color.Gray
-                    )
-                }
-                Text("›", fontSize = 20.sp, color = Color.Gray)
-            }
-        }
-
-        // Auto-connect on boot
-        SettingsToggle(
-            title = stringResource(R.string.setting_auto_connect),
-            subtitle = stringResource(R.string.setting_auto_connect_desc),
-            checked = autoConnect,
-            onCheckedChange = {
-                autoConnect = it
-                Settings.autoConnectOnBoot = it
-            }
-        )
-
-        // FakeDNS — DNS-blocking bypass. Takes effect on next connect
-        // (config is regenerated at every service start).
-        SettingsToggle(
-            title = stringResource(R.string.setting_fake_dns),
-            subtitle = stringResource(R.string.setting_fake_dns_desc),
-            checked = fakeDns,
-            onCheckedChange = {
-                fakeDns = it
-                Settings.fakeDns = it
-            }
-        )
-
-        // "Everything through VPN" — off: Russian sites and services go
-        // direct ("Russia direct"). Shown in both modes; unlike the toggles
-        // above it applies at once, through a reload of the running service.
-        SettingsToggle(
-            title = stringResource(R.string.setting_all_through_vpn),
-            subtitle = stringResource(R.string.setting_all_through_vpn_desc),
-            checked = allThroughVpn,
-            onCheckedChange = {
-                allThroughVpn = it
-                Settings.allThroughVpn = it
-                com.vpn4tv.app.bg.BoxService.reloadIfRunning()
-            }
-        )
-        // Plain BitTorrent goes direct in every mode, this one included; said in
-        // small print right under it — a TV scrolls with the focus, so a note at
-        // the very bottom of the screen might never come into view.
-        Text(
-            stringResource(R.string.settings_torrents_note),
-            fontSize = 11.sp,
-            color = Color.Gray,
-            modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
-        )
-
-        // Bring-your-own-key. Deliberately tucked in Settings, not surfaced in
-        // the default onboarding, so the Telegram funnel (buy-or-bring-key)
-        // stays the primary path. A phone held upright pastes the key in a
-        // dialog (the desktop's Manual Import, also behind "+" on Home);
-        // landscape — a TV, a tablet or phone on its side — imports over the
-        // local network, as before.
-        if (currentKeyImport() == KeyImport.Paste) {
             SettingsLink(
-                title = stringResource(R.string.manual_import_title),
-                subtitle = stringResource(R.string.setting_manual_import_desc),
-                onClick = onManualImport,
+                title = stringResource(R.string.title_per_app_proxy),
+                subtitle = if (Settings.perAppProxyEnabled)
+                    "${if (Settings.perAppProxyMode == Settings.PER_APP_PROXY_EXCLUDE) stringResource(R.string.mode_exclude) else stringResource(R.string.mode_include)}: ${Settings.perAppProxyList.size}"
+                else stringResource(R.string.setting_disabled),
+                onClick = onPerAppProxy,
             )
-        } else {
-            SettingsLink(
-                title = stringResource(R.string.lan_import_title),
-                subtitle = stringResource(R.string.setting_lan_import_desc),
-                onClick = onLanImport,
-            )
-        }
 
-        // Advanced / niche — kept at the bottom below the everyday settings.
-
-        // Proxy mode — exposes sing-box as a local SOCKS5 listener on
-        // 127.0.0.1:12334 instead of creating a VPN tunnel. For devices
-        // where the system VPN permission dialog is missing.
-        SettingsToggle(
-            title = stringResource(R.string.setting_proxy_mode),
-            subtitle = stringResource(R.string.setting_proxy_mode_desc),
-            checked = proxyMode,
-            onCheckedChange = {
-                proxyMode = it
-                Settings.serviceMode = if (it) ServiceMode.PROXY else ServiceMode.VPN
-            }
-        )
-
-        // LAN bypass only applies in VPN mode. In proxy mode sing-box never
-        // sees LAN traffic in the first place — apps route to 127.0.0.1:12334
-        // explicitly — so the toggle would be a no-op and just adds noise.
-        if (!proxyMode) {
             SettingsToggle(
-                title = stringResource(R.string.setting_bypass_lan),
-                subtitle = stringResource(R.string.setting_bypass_lan_desc),
-                checked = bypassLan,
-                onCheckedChange = {
-                    bypassLan = it
-                    Settings.bypassLan = it
-                }
+                title = stringResource(R.string.setting_auto_connect),
+                subtitle = stringResource(R.string.setting_auto_connect_desc),
+                checked = autoConnect,
+                onCheckedChange = { autoConnect = it; Settings.autoConnectOnBoot = it },
             )
+
+            // FakeDNS — DNS-blocking bypass. Takes effect on next connect
+            // (config is regenerated at every service start).
+            SettingsToggle(
+                title = stringResource(R.string.setting_fake_dns),
+                subtitle = stringResource(R.string.setting_fake_dns_desc),
+                checked = fakeDns,
+                onCheckedChange = { fakeDns = it; Settings.fakeDns = it },
+            )
+
+            // "Everything through VPN" — off: Russian sites and services go
+            // direct ("Russia direct"). Applies at once, through a reload of
+            // the running service.
+            SettingsToggle(
+                title = stringResource(R.string.setting_all_through_vpn),
+                subtitle = stringResource(R.string.setting_all_through_vpn_desc),
+                checked = allThroughVpn,
+                onCheckedChange = {
+                    allThroughVpn = it
+                    Settings.allThroughVpn = it
+                    com.vpn4tv.app.bg.BoxService.reloadIfRunning()
+                },
+            )
+            // Plain BitTorrent goes direct in every mode; said right under the
+            // toggle — a TV scrolls with the focus, so a note at the very
+            // bottom might never come into view.
+            Text(
+                stringResource(R.string.settings_torrents_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+
+            // Bring-your-own-key, tucked in Settings so the Telegram funnel
+            // stays the primary path. A phone held upright pastes the key; a
+            // TV, tablet or phone on its side imports over the local network.
+            if (currentKeyImport() == KeyImport.Paste) {
+                SettingsLink(
+                    title = stringResource(R.string.manual_import_title),
+                    subtitle = stringResource(R.string.setting_manual_import_desc),
+                    onClick = onManualImport,
+                )
+            } else {
+                SettingsLink(
+                    title = stringResource(R.string.lan_import_title),
+                    subtitle = stringResource(R.string.setting_lan_import_desc),
+                    onClick = onLanImport,
+                )
+            }
+
+            // Proxy mode — sing-box as a local SOCKS5 listener instead of a
+            // VPN tunnel, for devices without the system VPN permission dialog.
+            SettingsToggle(
+                title = stringResource(R.string.setting_proxy_mode),
+                subtitle = stringResource(R.string.setting_proxy_mode_desc),
+                checked = proxyMode,
+                onCheckedChange = {
+                    proxyMode = it
+                    Settings.serviceMode = if (it) ServiceMode.PROXY else ServiceMode.VPN
+                },
+            )
+
+            // LAN bypass only applies in VPN mode: in proxy mode sing-box never
+            // sees LAN traffic in the first place.
+            if (!proxyMode) {
+                SettingsToggle(
+                    title = stringResource(R.string.setting_bypass_lan),
+                    subtitle = stringResource(R.string.setting_bypass_lan_desc),
+                    checked = bypassLan,
+                    onCheckedChange = { bypassLan = it; Settings.bypassLan = it },
+                )
+            }
+
+            // Phone: logs and About live here (the navigation bar holds the
+            // primary destinations); on TV they are icons on Home.
+            if (!Device.isTv) {
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                SettingsLink(title = stringResource(R.string.title_logs), subtitle = null, onClick = onLogs)
+                SettingsLink(title = stringResource(R.string.title_about), subtitle = null, onClick = onAbout)
+            }
         }
     }
 }
 
-/** A row that opens another screen or a dialog: title, subtitle, chevron. */
+/** A row that opens another screen or a dialog. */
 @Composable
-private fun SettingsLink(title: String, subtitle: String, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clickable { onClick() }
-            .focusable(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontSize = 18.sp, color = Color.White)
-                Text(subtitle, fontSize = 13.sp, color = Color.Gray)
-            }
-            Text("›", fontSize = 20.sp, color = Color.Gray)
-        }
+private fun SettingsLink(title: String, subtitle: String?, onClick: () -> Unit) {
+    SettingsRow(title, subtitle, Modifier.clickable(onClick = onClick), onClick) {
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -210,26 +159,52 @@ private fun SettingsToggle(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clickable { onCheckedChange(!checked) }
-            .focusable(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    // The whole row toggles; the switch only shows the state (one focus stop on TV).
+    SettingsRow(
+        title, subtitle,
+        Modifier.toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange),
+        onClick = { onCheckedChange(!checked) },
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontSize = 18.sp, color = Color.White)
-                Text(subtitle, fontSize = 13.sp, color = Color.Gray)
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+/**
+ * Phone: a Material 3 list row. TV: a card-like row with the shared focus
+ * mark, larger type for the 10-foot distance.
+ */
+@Composable
+private fun SettingsRow(
+    title: String,
+    subtitle: String?,
+    phoneModifier: Modifier,
+    onClick: () -> Unit,
+    trailing: @Composable () -> Unit,
+) {
+    if (!Device.isTv) {
+        val supporting: (@Composable () -> Unit)? = if (subtitle != null) { { Text(subtitle) } } else null
+        ListItem(
+            modifier = phoneModifier,
+            headlineContent = { Text(title) },
+            supportingContent = supporting,
+            trailingContent = trailing,
+        )
+        return
+    }
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(12.dp), TV_ROW_SCALE),
+        shape = RoundedCornerShape(12.dp),
+        color = colors.surfaceContainerHigh,
+    ) {
+        Row(Modifier.padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 20.sp, color = colors.onSurface)
+                if (subtitle != null) Text(subtitle, fontSize = 15.sp, color = colors.onSurfaceVariant)
             }
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange
-            )
+            Spacer(Modifier.width(16.dp))
+            trailing()
         }
     }
 }

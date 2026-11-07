@@ -2,22 +2,21 @@ package com.vpn4tv.app.ui
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import com.vpn4tv.app.BuildConfig
 import com.vpn4tv.app.R
 
@@ -26,146 +25,86 @@ fun AboutScreen(onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     fun openUrl(url: String) {
         val full = if (url.startsWith("http")) url else "https://$url"
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(full)).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        })
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(full)).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            })
+        }
     }
     var showLicenses by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
 
     if (showLicenses) {
-        Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+        androidx.activity.compose.BackHandler { showLicenses = false }
+        ScreenScaffold(title = stringResource(R.string.about_licenses), onBack = { showLicenses = false }) { padding ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = if (Device.isTv) PaddingValues(vertical = 8.dp) else padding,
+                verticalArrangement = Arrangement.spacedBy(if (Device.isTv) 8.dp else 0.dp),
             ) {
-                IconButton(onClick = { showLicenses = false }) {
-                    Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
-                }
-                Text(
-                    stringResource(R.string.about_licenses),
-                    fontSize = 28.sp,
-                    color = Color.White,
-                    modifier = Modifier.padding(start = 16.dp)
-                )
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(ossLibraries) { lib ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .then(if (lib.url.isNotEmpty()) Modifier.clickable { openUrl(lib.url) }.focusable() else Modifier),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(lib.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text(lib.license, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-                            if (lib.url.isNotEmpty()) {
-                                Text(lib.url, fontSize = 12.sp, color = Color.Gray)
-                            }
+                    val content: @Composable () -> Unit = {
+                        Column(Modifier.padding(16.dp)) {
+                            Text(lib.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colors.onSurface)
+                            Text(lib.license, fontSize = 14.sp, color = colors.primary)
+                            Text(lib.url, fontSize = 13.sp, color = colors.onSurfaceVariant)
                         }
                     }
+                    Surface(
+                        onClick = { openUrl(lib.url) },
+                        modifier = Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(12.dp), TV_ROW_SCALE),
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (Device.isTv) colors.surfaceContainerHigh else colors.background,
+                        content = content,
+                    )
                 }
             }
         }
         return
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
-            }
-            Text(
-                stringResource(R.string.title_about),
-                fontSize = 28.sp,
-                color = Color.White,
-                modifier = Modifier.padding(start = 16.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(48.dp))
-
+    // TV: the whole page fits in one screen inside the safe area; scrolled,
+    // the focused button pulled the name out of view.
+    val tv = Device.isTv
+    ScreenScaffold(title = stringResource(R.string.title_about), onBack = onBack) { padding ->
         Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding)
+                .padding(if (tv) 0.dp else 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(
-                "VPN4TV Native",
-                fontSize = 36.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                fontSize = 18.sp,
-                color = Color.Gray
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                "sing-box core",
-                fontSize = 14.sp,
-                color = Color.Gray
-            )
+            Spacer(Modifier.height(if (tv) 0.dp else 24.dp))
+            Text("VPN4TV Native", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = colors.onBackground)
+            Spacer(Modifier.height(8.dp))
+            Text("v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", fontSize = 18.sp, color = colors.onSurfaceVariant)
+            Spacer(Modifier.height(4.dp))
+            Text("sing-box core", fontSize = 14.sp, color = colors.onSurfaceVariant)
 
-            Spacer(modifier = Modifier.height(48.dp))
-
-            Text(
-                stringResource(R.string.about_license),
-                fontSize = 14.sp,
-                color = Color.Gray
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(if (tv) 20.dp else 40.dp))
+            Text(stringResource(R.string.about_license), fontSize = 14.sp, color = colors.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
             // Plain text, NOT a link. Source attribution only. We must not
             // provide an in-app path to any off-Play APK download — the repo's
             // README offers a direct APK, so a clickable link here would be a
             // transitive "link to a noncompliant APK" (Device & Network Abuse).
-            Text(
-                "github.com/VPN4TV/vpn4tv-native",
-                fontSize = 14.sp,
-                color = Color.Gray
-            )
+            Text("github.com/VPN4TV/vpn4tv-native", fontSize = 14.sp, color = colors.onSurfaceVariant)
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            TextButton(
-                onClick = { showLicenses = true },
-                modifier = Modifier.focusable(),
-            ) {
-                Text(
-                    stringResource(R.string.about_licenses),
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 14.sp,
-                )
+            Spacer(Modifier.height(if (tv) 12.dp else 24.dp))
+            TextButton(onClick = { showLicenses = true }, modifier = Modifier.tvFocus(CircleShape)) {
+                Text(stringResource(R.string.about_licenses), fontSize = 16.sp)
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(Modifier.height(if (tv) 8.dp else 24.dp))
+            Text(stringResource(R.string.about_telegram), fontSize = 16.sp, color = colors.onBackground)
+            TextButton(onClick = { openUrl("https://telegram.me/VPN4TV") }, modifier = Modifier.tvFocus(CircleShape)) {
+                Text("@VPN4TV", fontSize = 16.sp)
+            }
 
-            Text(
-                stringResource(R.string.about_telegram),
-                fontSize = 16.sp,
-                color = Color.White
-            )
-            Text(
-                "@VPN4TV",
-                fontSize = 16.sp,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clickable { openUrl("https://telegram.me/VPN4TV") }
-                    .focusable()
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-
+            Spacer(Modifier.height(if (tv) 12.dp else 32.dp))
+            // The device id support asks for.
             Text(
                 com.vpn4tv.app.converter.HwidService.getHwid(context),
-                fontSize = 10.sp,
-                color = Color.Gray.copy(alpha = 0.4f),
+                fontSize = 12.sp,
+                color = colors.onSurfaceVariant,
             )
         }
     }

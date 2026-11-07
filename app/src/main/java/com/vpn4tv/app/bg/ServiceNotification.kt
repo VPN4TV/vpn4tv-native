@@ -37,6 +37,7 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
     companion object {
         private const val notificationId = 1
         private const val notificationChannel = "service"
+        private const val STATUS_UPDATE_MS = 3_000L
         val flags =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
 
@@ -144,7 +145,10 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
     }
 
     suspend fun start() {
-        if (Settings.dynamicNotification && checkPermission()) {
+        // No live speed on TV: nobody sees the notification there, and the
+        // update every second was a steady load on weak TV boxes (seen in
+        // the system log of a TCL set, 2026-11-07).
+        if (Settings.dynamicNotification && checkPermission() && !com.vpn4tv.app.ui.Device.isTv) {
             commandClient.connect()
             withContext(Dispatchers.Main) {
                 registerReceiver()
@@ -163,7 +167,13 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
         receiverRegistered = true
     }
 
+    private var lastStatusUpdate = 0L
+
     override fun updateStatus(status: StatusMessage) {
+        // Status arrives every second; the notification follows every few.
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastStatusUpdate < STATUS_UPDATE_MS) return
+        lastStatusUpdate = now
         val content =
             Libbox.formatBytes(status.uplink).unwrap + "/s ↑\t" + Libbox.formatBytes(status.downlink).unwrap + "/s ↓"
         Application.notificationManager.notify(

@@ -318,6 +318,9 @@
     <string name="error_empty_file">Empty file</string>
     <string name="error_import_too_large">File is too large to import — did you pick the right file?</string>
     <string name="refreshing_expired_subscription">Subscription expired — refreshing…</string>
+    <string name="subscription_until">until %1$s</string>
+    <string name="subscription_expired">expired</string>
+    <string name="subscription_update_failed">Subscription update: %1$s</string>
     <string name="error_decode_profile">Failed to decode profile: %s</string>
     <string name="error_invalid_configuration">Invalid sing-box configuration: %s</string>
     <string name="error_start_command_server">Start command server</string>
@@ -530,6 +533,7 @@
     <string name="title_logs">Logs</string>
     <string name="title_about">About</string>
     <string name="logs_empty">Connect VPN to see logs</string>
+    <string name="logs_none_at_level">No entries at this level yet</string>
     <string name="action_clear">Clear</string>
     <string name="about_license">GPLv3 • Based on sing-box by SagerNet\nXray-core (MPLv2) • Outline SDK (Apache 2.0) • AmneziaWG (MIT)</string>
     <string name="about_licenses">Open Source Licenses</string>
@@ -537,13 +541,13 @@
     <string name="setting_auto_connect">Auto-connect on boot</string>
     <string name="setting_auto_connect_desc">Restore VPN connection when device starts</string>
     <string name="setting_proxy_mode">Proxy mode (SOCKS5)</string>
-    <string name="setting_proxy_mode_desc">Run as a local SOCKS5 on 127.0.0.1:12334. For devices without the VPN permission dialog (SberBox etc.); configure SmartTube or other apps manually.</string>
+    <string name="setting_proxy_mode_desc">Local SOCKS5 on 127.0.0.1:12334 for devices that can\'t run a VPN (SberBox and similar). Set the proxy in SmartTube by hand.</string>
     <string name="setting_bypass_lan">Bypass LAN</string>
-    <string name="setting_bypass_lan_desc">Local network traffic skips the tunnel — Chromecast, Plex/Jellyfin on NAS, router admin, printers keep working while VPN is on.</string>
+    <string name="setting_bypass_lan_desc">Local network bypasses the VPN: Chromecast, media servers, router and printers keep working.</string>
     <string name="setting_fake_dns">DNS blocking bypass (FakeDNS)</string>
-    <string name="setting_fake_dns_desc">Resolve domains on the VPN server so your ISP can\'t block or spoof DNS. Experimental — on some TVs/routers it can stop the VPN from connecting; leave off if connection hangs.</string>
+    <string name="setting_fake_dns_desc">Site addresses are looked up on the VPN server, so your ISP can\'t spoof them. Turn off if connecting hangs.</string>
     <string name="setting_all_through_vpn">Everything through VPN</string>
-    <string name="setting_all_through_vpn_desc">Off: Russian sites and services (.ru, .рф, Yandex, VK, banks, Gosuslugi) open directly, bypassing the VPN. On: everything goes through the VPN.</string>
+    <string name="setting_all_through_vpn_desc">Off: Russian sites, banks and Gosuslugi open directly. On: everything goes through the VPN.</string>
     <string name="settings_torrents_note">Torrents always go direct, outside the VPN, under the terms of use.</string>
     <string name="setting_lan_import_desc">Add a key or subscription from your phone\'s browser over the local network</string>
     <string name="lan_import_title">Import over local network</string>
@@ -586,7 +590,7 @@
     <string name="status_disconnected">Disconnected</string>
     <string name="action_connect">Connect</string>
     <string name="action_disconnect">Disconnect</string>
-    <string name="label_server">Server: </string>
+    <string name="label_server">Server:</string>
     <string name="nav_servers">Servers</string>
     <string name="nav_profiles">Profiles</string>
     <string name="action_update_subscription">Update key</string>
@@ -612,4 +616,31 @@
     <string name="add_waiting_sub">Waiting for subscription…</string>
     <string name="error_no_subscription">No subscription configured</string>
     <string name="error_vpn_denied">VPN permission denied</string>
+    <!-- 2026-11 UI guidelines pass -->
+    <string name="action_back">Back</string>
+    <string name="unit_bytes">B</string>
+    <string name="unit_kb">KB</string>
+    <string name="unit_mb">MB</string>
+    <string name="unit_gb">GB</string>
+    <string name="action_cancel_connect">Cancel</string>
+    <string name="log_filter_all">All</string>
+    <string name="log_filter_info">Info</string>
+    <string name="log_filter_warn">Warnings</string>
+    <string name="log_filter_error">Errors</string>
+    <string name="profile_action_select">Use this subscription</string>
+    <string name="profile_action_update">Update</string>
+    <string name="profile_action_delete">Delete</string>
+    <string name="profile_delete_title">Delete subscription?</string>
+    <string name="profile_delete_text">“%1$s” will be removed from this device.</string>
+    <string name="profile_selected">Selected</string>
+    <string name="action_copy_code">Copy code</string>
+    <string name="code_copied">Code copied</string>
+    <string name="action_show_qr">Show QR code for another device</string>
+    <string name="action_hide_qr">Hide QR code</string>
+    <string name="phone_add_hint">Send this code to the bot in Telegram. The key will appear here by itself.</string>
+    <string name="action_add">Add</string>
+    <string name="action_paste_key">Paste key</string>
+    <string name="server_selected">Selected</string>
+    <string name="unit_ms">ms</string>
+    <string name="action_share_logs">Share log</string>
 </resources>

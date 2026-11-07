@@ -1,35 +1,39 @@
 package com.vpn4tv.app.ui
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
+import androidx.annotation.StringRes
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
+import com.vpn4tv.app.bg.BoxService
+import com.vpn4tv.app.constant.Status
+import com.vpn4tv.app.ui.theme.LocalStateColors
 import com.vpn4tv.app.utils.CommandClient
-import io.nekohasekai.libbox.OutboundGroup
-import kotlinx.coroutines.launch
 
-private enum class LogLevel(val label: String, val priority: Int) {
-    ALL("All", 0),
-    INFO("Info+", 1),
-    WARN("Warn+", 2),
-    ERROR("Error", 3);
+private enum class LogLevel(@StringRes val label: Int, val priority: Int) {
+    ALL(R.string.log_filter_all, 0),
+    INFO(R.string.log_filter_info, 1),
+    WARN(R.string.log_filter_warn, 2),
+    ERROR(R.string.log_filter_error, 3);
 }
 
 private val errorPattern = Regex("\\bERROR\\b|\\bFATAL\\b")
@@ -52,6 +56,7 @@ fun LogsScreen(onBack: () -> Unit) {
     // problem, not reviewing steady-state traffic.
     var filterLevel by remember { mutableStateOf(LogLevel.WARN) }
     val listState = rememberLazyListState()
+    val status by BoxService.globalStatus.observeAsState(Status.Stopped)
 
     val filteredLogs = remember(allLogs, filterLevel) {
         if (filterLevel == LogLevel.ALL) allLogs
@@ -64,17 +69,14 @@ fun LogsScreen(onBack: () -> Unit) {
             listOf(CommandClient.ConnectionType.Log),
             object : CommandClient.Handler {
                 override fun appendLogs(messages: List<String>) {
-                    val updated = (allLogs + messages).takeLast(500)
-                    allLogs = updated
+                    allLogs = (allLogs + messages).takeLast(500)
                 }
             }
         )
     }
 
     LaunchedEffect(filteredLogs.size) {
-        if (filteredLogs.isNotEmpty()) {
-            listState.animateScrollToItem(filteredLogs.size - 1)
-        }
+        if (filteredLogs.isNotEmpty()) listState.animateScrollToItem(filteredLogs.size - 1)
     }
 
     DisposableEffect(Unit) {
@@ -82,79 +84,101 @@ fun LogsScreen(onBack: () -> Unit) {
         onDispose { commandClient.disconnect() }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
-        // Header
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
-            }
-            Text(
-                stringResource(R.string.title_logs),
-                fontSize = 28.sp,
-                color = Color.White,
-                modifier = Modifier.weight(1f).padding(start = 16.dp)
-            )
-            IconButton(onClick = { allLogs = emptyList() }) {
-                Icon(Icons.Default.Delete, stringResource(R.string.action_clear), tint = Color.White)
-            }
-        }
-
-        // Filter chips
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            LogLevel.entries.forEach { level ->
-                val selected = filterLevel == level
-                val bgColor = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                    else MaterialTheme.colorScheme.surfaceVariant
-                Card(
-                    modifier = Modifier
-                        .clickable { filterLevel = level }
-                        .focusable(),
-                    colors = CardDefaults.cardColors(containerColor = bgColor)
-                ) {
-                    Text(
-                        level.label,
-                        fontSize = 14.sp,
-                        color = if (selected) MaterialTheme.colorScheme.primary else Color.White,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
+    val colors = MaterialTheme.colorScheme
+    val state = LocalStateColors.current
+    val context = LocalContext.current
+    ScreenScaffold(
+        title = stringResource(R.string.title_logs),
+        onBack = onBack,
+        actions = {
+            // Phone: hand the log to Telegram, mail, Files… for support.
+            if (!Device.isTv) {
+                IconButton(onClick = { shareLogs(context, allLogs) }, enabled = allLogs.isNotEmpty()) {
+                    Icon(Icons.Default.Share, stringResource(R.string.action_share_logs))
                 }
             }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        if (filteredLogs.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.logs_empty), color = Color.Gray, fontSize = 16.sp)
+            IconButton(onClick = { allLogs = emptyList() }, modifier = Modifier.tvFocus(CircleShape)) {
+                Icon(Icons.Default.Delete, stringResource(R.string.action_clear))
             }
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize()
+        },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = if (Device.isTv) 0.dp else 16.dp)) {
+            // Filter chips: the selected one carries a check mark, not only a colour.
+            // TV: room inside the scrolling row for the focused chip's
+            // enlarged outline, which the scroll would clip at the edges.
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                    .padding(vertical = 4.dp, horizontal = if (Device.isTv) 8.dp else 0.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(filteredLogs) { line ->
-                    val level = logLineLevel(line)
-                    val color = when (level) {
-                        3 -> Color(0xFFEF5350)
-                        2 -> Color(0xFFFFA726)
-                        0 -> Color(0xFF666666)
-                        else -> Color(0xFFCCCCCC)
-                    }
-                    Text(
-                        line,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = color,
-                        modifier = Modifier.padding(vertical = 1.dp)
+                LogLevel.entries.forEach { level ->
+                    val selected = filterLevel == level
+                    val checkIcon: @Composable () -> Unit = { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
+                    FilterChip(
+                        selected = selected,
+                        onClick = { filterLevel = level },
+                        label = { Text(stringResource(level.label), fontSize = if (Device.isTv) 16.sp else 14.sp) },
+                        leadingIcon = if (selected) checkIcon else null,
+                        modifier = Modifier.tvFocus(RoundedCornerShape(8.dp)),
                     )
                 }
             }
+            if (filteredLogs.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    // Connected: the filter hides what there is, or nothing came yet.
+                    val empty = if (status == Status.Started) R.string.logs_none_at_level else R.string.logs_empty
+                    Text(stringResource(empty), color = colors.onSurfaceVariant, fontSize = 16.sp)
+                }
+            } else {
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                    items(filteredLogs) { line ->
+                        Text(
+                            line,
+                            fontSize = if (Device.isTv) 14.sp else 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = when (logLineLevel(line)) {
+                                3 -> state.danger
+                                2 -> state.slow
+                                0 -> colors.onSurfaceVariant
+                                else -> colors.onSurface
+                            },
+                            modifier = Modifier.padding(vertical = 1.dp),
+                        )
+                    }
+                }
+            }
         }
+    }
+}
+
+private val ansi = Regex("\u001B\\[[;\\d]*m")
+
+/**
+ * The log as a text file, offered to the system share sheet. All levels,
+ * whatever the filter shows: support wants the lines around an error too.
+ * The header names the build and the device id support asks for.
+ */
+private fun shareLogs(context: android.content.Context, lines: List<String>) {
+    val dir = java.io.File(context.cacheDir, "logs").apply { mkdirs() }
+    dir.listFiles()?.forEach { it.delete() }
+    val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+    val file = java.io.File(dir, "vpn4tv-log-$stamp.txt")
+    file.bufferedWriter().use { out ->
+        out.write("VPN4TV ${com.vpn4tv.app.BuildConfig.VERSION_NAME} (${com.vpn4tv.app.BuildConfig.VERSION_CODE})\n")
+        out.write("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, Android ${android.os.Build.VERSION.RELEASE}\n")
+        out.write("ID ${com.vpn4tv.app.converter.HwidService.getHwid(context)}\n\n")
+        lines.forEach { out.write(ansi.replace(it, "")); out.write("\n") }
+    }
+    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.cache", file)
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+        .setType("text/plain")
+        .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        .putExtra(android.content.Intent.EXTRA_SUBJECT, file.name)
+        .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    runCatching {
+        context.startActivity(
+            android.content.Intent.createChooser(send, context.getString(R.string.action_share_logs))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
     }
 }

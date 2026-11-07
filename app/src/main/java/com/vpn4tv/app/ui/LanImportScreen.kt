@@ -115,19 +115,10 @@ fun LanImportScreen(onBack: () -> Unit, onImported: () -> Unit) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
-            }
-            Text(
-                stringResource(R.string.lan_import_title),
-                fontSize = 28.sp, color = Color.White,
-                modifier = Modifier.padding(start = 16.dp),
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
+    val colors = MaterialTheme.colorScheme
+    ScreenScaffold(title = stringResource(R.string.lan_import_title), onBack = onBack) { padding ->
+    Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = if (Device.isTv) 0.dp else 16.dp)) {
+        Spacer(modifier = Modifier.height(16.dp))
 
         when {
             imported -> {
@@ -140,7 +131,7 @@ fun LanImportScreen(onBack: () -> Unit, onImported: () -> Unit) {
                     Text(
                         importedName?.let { stringResource(R.string.lan_import_added, it) }
                             ?: stringResource(R.string.lan_import_done),
-                        fontSize = 20.sp, color = Color.White, textAlign = TextAlign.Center,
+                        fontSize = 20.sp, color = colors.onSurface, textAlign = TextAlign.Center,
                     )
                 }
             }
@@ -150,7 +141,7 @@ fun LanImportScreen(onBack: () -> Unit, onImported: () -> Unit) {
                 if (probedOnce) {
                     Text(
                         stringResource(R.string.lan_import_no_network),
-                        fontSize = 16.sp, color = Color.Gray, textAlign = TextAlign.Center,
+                        fontSize = 16.sp, color = colors.onSurfaceVariant, textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
                     )
                 }
@@ -172,25 +163,26 @@ fun LanImportScreen(onBack: () -> Unit, onImported: () -> Unit) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             stringResource(R.string.lan_import_step1),
-                            fontSize = 16.sp, color = Color.White,
+                            fontSize = 16.sp, color = colors.onSurface,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                             Text(
                                 importUrl ?: "",
                                 fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace, color = Color.White,
+                                fontFamily = FontFamily.Monospace, color = colors.onSurface,
                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
                             )
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             stringResource(R.string.lan_import_step2),
-                            fontSize = 14.sp, color = Color.Gray,
+                            fontSize = 14.sp, color = colors.onSurfaceVariant,
                         )
                     }
                 }
             }
         }
+    }
     }
 }

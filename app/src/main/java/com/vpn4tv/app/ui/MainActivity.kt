@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
+import androidx.activity.enableEdgeToEdge
 import android.util.Log
 import android.view.KeyEvent
 import android.widget.Toast
@@ -50,7 +51,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // First thing: a launch that never gets to the home screen gets its thread stacks reported.
         com.vpn4tv.app.utils.StartupWatchdog.arm { profileReady.value == true }
-        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        // Edge-to-edge with system bar icons that follow the light/dark theme
+        // (enforced for targetSdk 35+ on Android 15+ anyway).
+        enableEdgeToEdge()
 
         // Fire-and-forget Play in-app update check. Will only actually
         // prompt when Play Store has a release with priority >= 4 and

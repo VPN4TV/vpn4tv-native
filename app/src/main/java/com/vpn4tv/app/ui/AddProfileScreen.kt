@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -166,170 +169,167 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit, onLanImport
         onDispose { job.cancel() }
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Header
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
+    // QR encoding + ICU charset init can block main thread >5s on slow
+    // TV SoCs (Xiaomi MiTV ANR, vc50307). Generate off-thread.
+    val qrBitmap by produceState<Bitmap?>(initialValue = null, uuid) {
+        value = withContext(Dispatchers.Default) {
+            generateQrBitmap("https://telegram.me/VPN4TV_Bot?start=$uuid", 200)
+        }
+    }
+    val colors = MaterialTheme.colorScheme
+    val state = com.vpn4tv.app.ui.theme.LocalStateColors.current
+    var showQr by remember { mutableStateOf(false) }
+
+    ScreenScaffold(title = stringResource(R.string.title_add_subscription), onBack = onBack) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding)
+                .padding(horizontal = if (Device.isTv) 0.dp else 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = Color.White)
-            }
-            Text(
-                stringResource(R.string.title_add_subscription),
-                fontSize = 28.sp,
-                color = Color.White,
-                modifier = Modifier.padding(start = 16.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Detect phone vs TV
-        val isTV = remember {
-            context.packageManager.hasSystemFeature("android.software.leanback")
-        }
-
-        // QR encoding + ICU charset init can block main thread >5s on slow
-        // TV SoCs (Xiaomi MiTV ANR, vc50307). Generate off-thread.
-        val qrBitmap by produceState<Bitmap?>(initialValue = null, uuid) {
-            value = withContext(Dispatchers.Default) {
-                generateQrBitmap("https://telegram.me/VPN4TV_Bot?start=$uuid", 200)
-            }
-        }
-
-        if (isTV) {
-            // TV: QR + Code side by side
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                qrBitmap?.let { bmp ->
-                    Image(
-                        bitmap = bmp.asImageBitmap(),
-                        contentDescription = "QR Code",
-                        modifier = Modifier.size(200.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(48.dp))
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(stringResource(R.string.add_send_code), fontSize = 18.sp, color = Color.White)
-                    Text("@VPN4TV_Bot", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                        Text(formattedCode, fontSize = 40.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
-                            color = Color.White, textAlign = TextAlign.Center, letterSpacing = 3.sp,
-                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp))
+            Spacer(Modifier.height(16.dp))
+            if (Device.isTv) {
+                // TV: the code is typed in Telegram on a phone, or the QR is
+                // scanned with it — side by side.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    qrBitmap?.let { bmp ->
+                        Image(bitmap = bmp.asImageBitmap(), contentDescription = "QR", modifier = Modifier.size(200.dp))
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(stringResource(R.string.add_scan_qr), fontSize = 14.sp, color = Color.Gray)
-                    Text(stringResource(R.string.add_enter_on_web), fontSize = 14.sp, color = Color.Gray)
+                    Spacer(Modifier.width(48.dp))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stringResource(R.string.add_send_code), fontSize = 20.sp, color = colors.onBackground)
+                        Text("@VPN4TV_Bot", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = colors.primary)
+                        Spacer(Modifier.height(16.dp))
+                        CodeCard(formattedCode, 40.sp)
+                        Spacer(Modifier.height(12.dp))
+                        Text(stringResource(R.string.add_scan_qr), fontSize = 16.sp, color = colors.onSurfaceVariant)
+                        Text(stringResource(R.string.add_enter_on_web), fontSize = 16.sp, color = colors.onSurfaceVariant)
+                    }
                 }
-            }
-        } else {
-            // Phone: vertical layout, Telegram button
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(stringResource(R.string.add_send_code), fontSize = 18.sp, color = Color.White)
-                Text("@VPN4TV_Bot", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                    Text(formattedCode, fontSize = 28.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
-                        color = Color.White, textAlign = TextAlign.Center, letterSpacing = 2.sp,
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
+            } else {
+                // Phone: the bot opens right here; a QR on this very screen
+                // could only be scanned by another device, so it waits behind
+                // a button.
+                Text(stringResource(R.string.add_send_code), style = MaterialTheme.typography.titleMedium,
+                    color = colors.onBackground, textAlign = TextAlign.Center)
+                Text("@VPN4TV_Bot", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = colors.primary)
+                Spacer(Modifier.height(16.dp))
+                CodeCard(formattedCode, 28.sp)
+                TextButton(onClick = {
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("VPN4TV", code10))
+                    // Android 13+ confirms a copy itself.
+                    if (android.os.Build.VERSION.SDK_INT < 33) {
+                        android.widget.Toast.makeText(context, R.string.code_copied, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }) {
+                    Icon(Icons.Default.ContentCopy, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.action_copy_code))
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Open Telegram button (phone only)
+                Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://telegram.me/VPN4TV_Bot?start=$uuid"))
-                        context.startActivity(intent)
+                        runCatching {
+                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse("https://telegram.me/VPN4TV_Bot?start=$uuid")))
+                        }
                     },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp)
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
                 ) {
                     Text(stringResource(R.string.open_telegram_bot), fontSize = 16.sp)
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                qrBitmap?.let { bmp ->
-                    Text(stringResource(R.string.add_scan_qr), fontSize = 14.sp, color = Color.Gray)
-                    Text(stringResource(R.string.add_enter_on_web), fontSize = 14.sp, color = Color.Gray)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Image(bitmap = bmp.asImageBitmap(), contentDescription = "QR Code", modifier = Modifier.size(150.dp))
+                Spacer(Modifier.height(12.dp))
+                Text(stringResource(R.string.phone_add_hint), style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurfaceVariant, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { showQr = !showQr }) {
+                    Text(stringResource(if (showQr) R.string.action_hide_qr else R.string.action_show_qr))
+                }
+                if (showQr) {
+                    qrBitmap?.let { bmp ->
+                        Image(bitmap = bmp.asImageBitmap(), contentDescription = "QR", modifier = Modifier.size(180.dp))
+                    }
+                    Text(stringResource(R.string.add_enter_on_web), style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant, textAlign = TextAlign.Center)
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(24.dp))
+            Spacer(Modifier.height(24.dp))
 
-        // Status
-        if (isAdding) {
-            CircularProgressIndicator(modifier = Modifier.size(32.dp))
-            Spacer(modifier = Modifier.height(8.dp))
-            retryInfo?.let { p ->
-                if (p.attempt > 1) {
-                    val src = if (p.mirror) stringResource(R.string.add_retry_mirror)
-                              else stringResource(R.string.add_retry_primary)
-                    Text(
-                        "${stringResource(R.string.add_retry_prefix)} ${p.attempt}/${p.maxAttempts} ($src)",
-                        fontSize = 14.sp,
-                        color = Color.Red,
-                        textAlign = TextAlign.Center,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+            // Status
+            if (isAdding) {
+                CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                Spacer(Modifier.height(8.dp))
+                retryInfo?.let { p ->
+                    if (p.attempt > 1) {
+                        val src = if (p.mirror) stringResource(R.string.add_retry_mirror)
+                                  else stringResource(R.string.add_retry_primary)
+                        Text(
+                            "${stringResource(R.string.add_retry_prefix)} ${p.attempt}/${p.maxAttempts} ($src)",
+                            fontSize = 14.sp, color = state.danger, textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
                 }
             }
-        }
-        val statusText = when {
-            status == "" -> stringResource(R.string.add_waiting)
-            status == "adding" -> stringResource(R.string.add_adding)
-            status == "done" -> stringResource(R.string.add_success)
-            status == "failed" -> stringResource(R.string.add_failed)
-            status.startsWith("error:") -> status.removePrefix("error:")
-            else -> status // user name from Telegram
-        }
-        Text(
-            statusText,
-            fontSize = 16.sp,
-            color = when {
-                isDone -> Color.Green
-                status.startsWith("error:") || status == "failed" -> Color.Red
-                userName != null -> MaterialTheme.colorScheme.primary
-                else -> Color.Gray
-            },
-            textAlign = TextAlign.Center
-        )
-
-        // LAN-import fallback: appears only after repeated failures to reach
-        // our control server (ISP blocking the bot API / DNS). The Telegram
-        // funnel stays primary; this is the escape hatch so a blocked user
-        // isn't dead-ended on the very first screen.
-        if (showLanFallback && !isAdding && !isDone) {
-            Spacer(modifier = Modifier.height(24.dp))
+            val statusText = when {
+                status == "" -> stringResource(R.string.add_waiting)
+                status == "adding" -> stringResource(R.string.add_adding)
+                status == "done" -> stringResource(R.string.add_success)
+                status == "failed" -> stringResource(R.string.add_failed)
+                status.startsWith("error:") -> status.removePrefix("error:")
+                else -> status // user name from Telegram
+            }
             Text(
-                stringResource(R.string.add_lan_fallback_hint),
-                fontSize = 14.sp, color = Color.Gray, textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
+                statusText,
+                fontSize = if (Device.isTv) 18.sp else 16.sp,
+                color = when {
+                    isDone -> state.connected
+                    status.startsWith("error:") || status == "failed" -> state.danger
+                    userName != null -> colors.primary
+                    else -> colors.onSurfaceVariant
+                },
+                textAlign = TextAlign.Center,
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onLanImport,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
-            ) {
-                Text(stringResource(R.string.add_lan_fallback_button), fontSize = 16.sp)
+
+            // LAN-import fallback: appears only after repeated failures to reach
+            // our control server (ISP blocking the bot API / DNS). The Telegram
+            // funnel stays primary; this is the escape hatch so a blocked user
+            // isn't dead-ended on the very first screen.
+            if (showLanFallback && !isAdding && !isDone) {
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    stringResource(R.string.add_lan_fallback_hint),
+                    fontSize = 14.sp, color = colors.onSurfaceVariant, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onLanImport,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp)
+                        .tvFocus(androidx.compose.foundation.shape.CircleShape, 1.03f),
+                ) {
+                    Text(stringResource(R.string.add_lan_fallback_button), fontSize = 16.sp)
+                }
             }
+            Spacer(Modifier.height(16.dp))
         }
+    }
+}
+
+@Composable
+private fun CodeCard(code: String, size: androidx.compose.ui.unit.TextUnit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Text(
+            code, fontSize = size, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center, letterSpacing = 2.sp,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+        )
     }
 }
 

@@ -72,17 +72,29 @@
             </intent-filter>
             <!-- Import wg-quick / AmneziaWG .conf files from the filesystem.
                  Used by adb (`am start -a VIEW -d file:///data/local/tmp/x.conf`)
-                 and by file-picker flows. -->
+                 and by file-picker flows. A file:// path is matched by its name. -->
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="file" />
-                <data android:scheme="content" />
-                <data android:mimeType="*/*" />
+                <data android:host="*" />
                 <data android:pathPattern=".*\\.conf" />
                 <data android:pathPattern=".*\\.wg" />
                 <data android:pathPattern=".*\\.vpn" />
+            </intent-filter>
+            <!-- content:// carries no file name to match, only a type. With
+                 "*/*" this filter took any content link — a calendar date
+                 offered "Open with VPN4TV". The types file managers give a
+                 .conf / .wg / .vpn file: -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/x-wireguard-config" />
             </intent-filter>
         </activity>
 
