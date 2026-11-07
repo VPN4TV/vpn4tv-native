@@ -25,6 +25,8 @@ import java.io.File
 object SubscriptionUpdater {
 
     private const val TAG = "SubscriptionUpdater"
+    /** Longer than the connect watchdog's 45 s, which ends any start stuck in Starting. */
+    private const val START_WAIT_MS = 60_000L
 
     class Outcome(
         /** The sing-box config on disk changed. */
@@ -80,6 +82,12 @@ object SubscriptionUpdater {
     fun applyToRunningService(profile: Profile, outcome: Outcome): Boolean {
         if (!outcome.changed) return false
         if (profile.id != Settings.selectedProfile) return false
+        // Connect can be pressed while the refresh at launch runs: that start
+        // may have read the old files. Let it finish, then reload it as well.
+        val until = android.os.SystemClock.elapsedRealtime() + START_WAIT_MS
+        while (BoxService.globalStatus.value == Status.Starting && android.os.SystemClock.elapsedRealtime() < until) {
+            Thread.sleep(200)
+        }
         if (BoxService.globalStatus.value != Status.Started) return false
         return try {
             val client = Libbox.newStandaloneCommandClient()

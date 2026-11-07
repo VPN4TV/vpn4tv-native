@@ -53,6 +53,7 @@ fun HomeScreen(
     val status by BoxService.globalStatus.observeAsState(Status.Stopped)
     val lastError by BoxService.lastError.observeAsState(null)
     val ready by MainActivity.profileReady.observeAsState(false)
+    val refreshed by MainActivity.profileRefreshed.observeAsState(0)
     val connectFocus = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -222,9 +223,10 @@ fun HomeScreen(
         // catches the "user just added a new subscription" case, where
         // AddProfileScreen bumps Settings.selectedProfile and pops back here.
         // Without the lifecycle observer the name stays stale until process
-        // restart.
+        // restart. A new observer is told ON_RESUME at once, so the refresh
+        // at launch finishing ([refreshed]) re-reads it too.
         val homeLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-        DisposableEffect(homeLifecycleOwner, ready) {
+        DisposableEffect(homeLifecycleOwner, ready, refreshed) {
             val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                 if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && ready) {
                     scope.launch(Dispatchers.IO) {

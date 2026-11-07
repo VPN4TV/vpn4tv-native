@@ -32,6 +32,8 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "MainActivity"
         val profileReady = MutableLiveData(false)
+        /** Bumped when the refresh at launch has finished: the home screen re-reads the profile's name and expiry. */
+        val profileRefreshed = MutableLiveData(0)
     }
 
     private val vpnPermissionLauncher = registerForActivityResult(
@@ -56,10 +58,17 @@ class MainActivity : ComponentActivity() {
         // installs this is a no-op by design (see PlayUpdateChecker).
         com.vpn4tv.app.utils.PlayUpdateChecker.maybePromptImmediate(this)
 
-        // Load profiles in background
+        // Load profiles in background. A profile whose config is already on
+        // disk can connect at once: its subscription is refreshed behind the
+        // home screen, not before it: the screen used to say "loading" for as
+        // long as the fetch took, minutes where api.vpn4tv.com is blocked.
         GlobalScope.launch(Dispatchers.IO) {
-            ensureDefaultProfile()
+            val refresh = ensureDefaultProfile()
             profileReady.postValue(true)
+            if (refresh != null) launch {
+                updateProfileConfig(refresh)
+                profileRefreshed.postValue((profileRefreshed.value ?: 0) + 1)
+            }
             handleImportIntent(intent)
         }
 
@@ -272,7 +281,12 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, getString(R.string.error_no_vpn_dialog), Toast.LENGTH_LONG).show()
     }
 
-    private suspend fun ensureDefaultProfile() {
+    /**
+     * Returns the active profile when it still has to be refreshed from its
+     * subscription and has a config on disk to connect with meanwhile. One
+     * without a config is fetched here, before the home screen.
+     */
+    private suspend fun ensureDefaultProfile(): Profile? {
         try {
             // Check for migrated profiles from hiddify fork
             val migrationPrefs = applicationContext.getSharedPreferences("migration", android.content.Context.MODE_PRIVATE)
@@ -298,6 +312,7 @@ class MainActivity : ComponentActivity() {
                 }
                 val active = profiles.find { it.id == Settings.selectedProfile } ?: profiles.first()
                 if (active.typed.remoteURL.isNotEmpty()) {
+                    if (File(active.typed.path).length() > 0) return active
                     updateProfileConfig(active)
                 }
             }
@@ -305,6 +320,7 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to init profiles", e)
         }
+        return null
     }
 
     private suspend fun createProfile(name: String, url: String) {
