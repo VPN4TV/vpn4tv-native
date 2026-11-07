@@ -35,6 +35,8 @@ class MainActivity : ComponentActivity() {
         val profileReady = MutableLiveData(false)
         /** Bumped when the refresh at launch has finished: the home screen re-reads the profile's name and expiry. */
         val profileRefreshed = MutableLiveData(0)
+        /** Bumped when a link or file opened with the app became a profile: the add screen closes. */
+        val profileImported = MutableLiveData(0)
     }
 
     private val vpnPermissionLauncher = registerForActivityResult(
@@ -164,7 +166,11 @@ class MainActivity : ComponentActivity() {
         if (unwrapped.trim().matches(Regex("^https?://\\S+$"))) {
             try {
                 createProfile(Uri.parse(unwrapped.trim()).host ?: "VPN4TV", unwrapped.trim())
-                Toast.makeText(this, getString(R.string.profile_imported), Toast.LENGTH_SHORT).show()
+                profileImported.postValue((profileImported.value ?: 0) + 1)
+                // This runs on an IO thread, where a toast throws.
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, getString(R.string.profile_imported), Toast.LENGTH_SHORT).show()
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to import subscription from link", e)
             }
@@ -204,6 +210,7 @@ class MainActivity : ComponentActivity() {
                 }
             )
             Settings.selectedProfile = profile.id
+            profileImported.postValue((profileImported.value ?: 0) + 1)
             Log.d(TAG, "Imported profile via intent: $name (${proxies.size} proxies)")
         } catch (e: Exception) {
             Log.e(TAG, "Import intent failed", e)

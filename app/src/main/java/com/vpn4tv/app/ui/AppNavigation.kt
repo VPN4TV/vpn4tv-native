@@ -81,6 +81,15 @@ private fun NavController.openTab(route: String) {
     }
 }
 
+// The import count when the add screen was opened. Taken then, not at the
+// screen's first frame: a link that opened the app may finish its import in
+// between, and that one has to close the screen too.
+private var importsBeforeAddProfile = 0
+
+private fun markAddProfileOpened() {
+    importsBeforeAddProfile = MainActivity.profileImported.value ?: 0
+}
+
 @Composable
 fun AppNavigation(
     onConnect: () -> Unit,
@@ -100,6 +109,7 @@ fun AppNavigation(
             com.vpn4tv.app.database.ProfileManager.list()
         }
         if (profiles.isEmpty()) {
+            markAddProfileOpened()
             navController.navigate(Routes.ADD_PROFILE) {
                 popUpTo(Routes.HOME)
             }
@@ -161,7 +171,7 @@ private fun Graph(
                 onDisconnect = onDisconnect,
                 onNavigateProfiles = { navController.navigateSafe(Routes.PROFILES) },
                 onNavigateServers = { if (tv) navController.navigateSafe(Routes.SERVERS) else navController.openTab(Routes.SERVERS) },
-                onAddProfile = { navController.navigateSafe(Routes.ADD_PROFILE) },
+                onAddProfile = { markAddProfileOpened(); navController.navigateSafe(Routes.ADD_PROFILE) },
                 onNavigateLogs = { navController.navigateSafe(Routes.LOGS) },
                 onNavigateSettings = { navController.navigateSafe(Routes.SETTINGS) },
                 onNavigateAbout = { navController.navigateSafe(Routes.ABOUT) },
@@ -171,7 +181,7 @@ private fun Graph(
         composable(Routes.PROFILES) {
             ProfilesScreen(
                 onBack = tabBack,
-                onAddViaTelegram = { navController.navigateSafe(Routes.ADD_PROFILE) },
+                onAddViaTelegram = { markAddProfileOpened(); navController.navigateSafe(Routes.ADD_PROFILE) },
                 onPasteKey = { navController.navigateSafe(Routes.MANUAL_IMPORT) },
             )
         }
@@ -217,6 +227,13 @@ private fun Graph(
             AboutScreen(onBack = { navController.popBackStackSafe() })
         }
         composable(Routes.ADD_PROFILE) {
+            // A link or file opened with the app while this screen waits
+            // (vpn4tv://, a key, a .conf) adds a profile as surely as the
+            // bot's answer does: back to Home then too.
+            val imported by MainActivity.profileImported.observeAsState(0)
+            LaunchedEffect(imported) {
+                if (imported != importsBeforeAddProfile) navController.popBackStack(Routes.HOME, false)
+            }
             AddProfileScreen(
                 onBack = { navController.popBackStackSafe() },
                 onProfileAdded = {
