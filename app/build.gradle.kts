@@ -36,7 +36,7 @@ android {
         applicationId = "com.vpn4tv.hiddify"
         minSdk = 23
         targetSdk = 36
-        versionCode = 55001
+        versionCode = 55002
         versionName = "5.5.0"
         base.archivesName.set("VPN4TV-Native-${versionName}")
 
