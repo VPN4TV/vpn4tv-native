@@ -117,7 +117,7 @@ object QuickConnectChannel {
     private const val WORK = "QuickConnectChannel"
 
     /** Bump when the card pictures change: the launcher caches every picture by its address. */
-    private const val ART_VERSION = 3
+    private const val ART_VERSION = 4
 
     fun supported(context: Context): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Device.isTv &&
@@ -386,10 +386,12 @@ object QuickConnectChannel {
         return bitmap
     }
 
-    // Drawn for a 4K launcher too: a card there is about 880 px wide, the
-    // logo 160 dp. Smaller art was stretched to twice its size (v2: 512×288).
-    private const val ART_WIDTH = 1024
-    private const val ART_HEIGHT = 576
+    // 512×288: the country card draws its flag as an emoji at 62 % of the
+    // height, and Android 9 does not draw a colour emoji above about 256 px:
+    // at 1024×576 (5.6.0 build 1) the cards came out empty. The logo is a
+    // vector and stays sharp at 320.
+    private const val ART_WIDTH = 512
+    private const val ART_HEIGHT = 288
     private const val LOGO_SIZE = 320
     private val BRAND = Color.rgb(0x6A, 0x3D, 0xE8)
     private val CARD_BACKGROUND = Color.rgb(0x25, 0x25, 0x25)
