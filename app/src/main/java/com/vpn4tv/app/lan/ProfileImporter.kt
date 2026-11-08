@@ -90,9 +90,9 @@ object ProfileImporter {
                 firstHost.isNotEmpty() && firstTag.isNotEmpty() -> "$firstTag ($firstHost)"
                 firstHost.isNotEmpty() -> firstHost
                 firstTag.isNotEmpty() -> firstTag
-                else -> "Subscription"
+                else -> "Key"
             }
-            val profileName = ProfileManager.uniqueName(baseName ?: "Subscription")
+            val profileName = ProfileManager.uniqueName(baseName ?: "Key")
 
             val profile = ProfileManager.create(
                 Profile(name = profileName, userOrder = ProfileManager.nextOrder()).apply {

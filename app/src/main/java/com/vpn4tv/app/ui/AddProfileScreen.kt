@@ -445,7 +445,7 @@ private suspend fun processConfigs(
         // `#profile-title:` marker, then the Telegram display name, then the
         // subscription URL host (xo.e0f.cx is a better fallback than a
         // random proxy tag), then the first proxy's tag, then its server host,
-        // finally "Subscription". Deduped via uniqueName so repeat adds get
+        // finally "Key". Deduped via uniqueName so repeat adds get
         // " 2", " 3", … suffixes.
         val inlineTitle = content.lines()
             .firstOrNull { it.startsWith("#profile-title:") }
@@ -465,7 +465,7 @@ private suspend fun processConfigs(
             firstHost.isNotEmpty() && firstTag.isNotEmpty() -> "$firstTag ($firstHost)"
             firstHost.isNotEmpty() -> firstHost
             firstTag.isNotEmpty() -> firstTag
-            else -> "Subscription"
+            else -> "Key"
         }
         val profileName = ProfileManager.uniqueName(baseName)
 

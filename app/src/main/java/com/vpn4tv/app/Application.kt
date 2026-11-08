@@ -341,7 +341,7 @@ class Application : Application() {
                                 null,
                             ).use { c ->
                                 while (c.moveToNext()) {
-                                    val name = c.getString(0) ?: "Subscription"
+                                    val name = c.getString(0) ?: "Key"
                                     val url = c.getString(1) ?: continue
                                     if (url.startsWith("http")) harvested.putIfAbsent(url, name)
                                 }

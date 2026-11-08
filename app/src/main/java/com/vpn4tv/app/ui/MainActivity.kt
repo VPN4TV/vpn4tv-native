@@ -307,7 +307,7 @@ class MainActivity : ComponentActivity() {
                 val names = migrateNames.split("\n")
                 Log.d(TAG, "Migrating ${urls.size} profiles from hiddify fork")
                 for (i in urls.indices) {
-                    val name = names.getOrElse(i) { "Subscription" }
+                    val name = names.getOrElse(i) { "Key" }
                     val url = urls[i]
                     createProfile(name, url)
                 }
@@ -381,6 +381,6 @@ internal fun isGenericProxyTag(tag: String): Boolean {
         "vless", "vmess", "trojan", "ss", "shadowsocks",
         "hysteria", "hysteria2", "hy2", "tuic",
         "wireguard", "wg", "awg",
-        "proxy", "default", "imported", "subscription",
+        "proxy", "default", "imported", "subscription", "key",
     )
 }

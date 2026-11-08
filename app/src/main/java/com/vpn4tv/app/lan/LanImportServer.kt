@@ -269,8 +269,8 @@ class LanImportServer(
 </head>
 <body>
 <div class="card">
-  <h1>Добавить ключ или подписку</h1>
-  <p>Вставьте ссылку подписки (https://…) либо ключ vless:// / vmess:// / trojan:// / ss:// / naive+https:// / wg://. Можно несколько строк.</p>
+  <h1>Добавить ключ</h1>
+  <p>Вставьте ссылку на ключ (https://…) либо ключ сервера vless:// / vmess:// / trojan:// / ss:// / naive+https:// / wg://. Можно несколько строк.</p>
   <textarea id="cfg" placeholder="https://…  или  vless://…" autofocus></textarea>
   <button id="go" onclick="send()">Подключить</button>
   <div id="status"></div>

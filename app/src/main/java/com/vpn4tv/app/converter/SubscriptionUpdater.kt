@@ -44,7 +44,7 @@ object SubscriptionUpdater {
     suspend fun update(context: Context, profile: Profile): Outcome {
         val sub = HwidService.fetchSubscription(context, profile.typed.remoteURL)
         val proxies = ProxyParser.parseSubscription(sub.body)
-        if (proxies.isEmpty()) throw IllegalStateException("подписка пуста")
+        if (proxies.isEmpty()) throw IllegalStateException("ключ пуст")
         val result = ConfigGenerator.generateFull(proxies)
 
         val path = profile.typed.path
