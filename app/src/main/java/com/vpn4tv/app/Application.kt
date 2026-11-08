@@ -224,16 +224,26 @@ class Application : Application() {
         // (the reliable "a crash happened" signal), then prefer .stderr content.
         if (!crashFile.exists() || crashFile.length() == 0L) return
         val stderrFile = File(tempDir, "go_crash.log.stderr")
+        // One-shot, moved aside BEFORE the read: a dump that cannot be read
+        // must not be read again at the next launch. A .stderr of about 64 MB,
+        // read whole, ran a TV out of memory here at every launch, before
+        // Libbox.setup could empty it (5.4.2, crash group 299f0bdf6e).
+        val consumedCrash = File(tempDir, "go_crash_consumed.log")
+        val consumedStderr = File(tempDir, "go_crash_consumed.log.stderr")
+        runCatching { crashFile.renameTo(consumedCrash) }
+        runCatching { stderrFile.renameTo(consumedStderr) }
+        val source = listOf(consumedStderr, stderrFile, consumedCrash, crashFile)
+            .firstOrNull { it.length() > 0L } ?: return
         val content = try {
-            if (stderrFile.exists() && stderrFile.length() > 0L) stderrFile.readText()
-            else crashFile.readText()
-        } catch (e: Exception) {
-            Log.e("Application", "consumeCrashLog read failed", e)
+            com.vpn4tv.app.utils.CrashDumpFile.read(source)
+        } catch (t: Throwable) {
+            Log.e("Application", "consumeCrashLog read failed: ${t.javaClass.simpleName}: ${t.message}")
             return
+        } finally {
+            // A dump larger than what is read and sent is not kept on the device.
+            val kept = com.vpn4tv.app.utils.CrashDumpFile.HEAD.toLong() + com.vpn4tv.app.utils.CrashDumpFile.TAIL
+            listOf(consumedStderr, consumedCrash).forEach { if (it.length() > kept) it.delete() }
         }
-        // One-shot: move both aside so the next launch doesn't re-read them.
-        runCatching { crashFile.renameTo(File(tempDir, "go_crash_consumed.log")) }
-        runCatching { stderrFile.renameTo(File(tempDir, "go_crash_consumed.log.stderr")) }
 
         val bridges = sessionBridges()
         Log.e("Application", "Previous Go crash dump (${content.length} bytes, $bridges):\n$content")
