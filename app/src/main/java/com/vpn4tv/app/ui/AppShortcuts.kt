@@ -81,9 +81,14 @@ object AppShortcuts {
             val wanted = toggleId(currentStatus(), BoxService.alwaysOn.value != null)
             val current = ShortcutManagerCompat.getDynamicShortcuts(context).map { it.id }
             val stale = listOf(ID_CONNECT, ID_DISCONNECT).filter { it in current && it != wanted }
-            if (stale.isNotEmpty()) ShortcutManagerCompat.removeDynamicShortcuts(context, stale)
             // Rank 0: at the top again. A new id, not an update: its meaning changed.
-            if (wanted != null && wanted !in current) ShortcutManagerCompat.pushDynamicShortcut(context, build(context, wanted))
+            // Pushed first: under the background rate limit (Android 7.1–10)
+            // the push fails, and the old toggle stays rather than none (a
+            // Connect while connected does nothing); publish() mends the menu
+            // once the app is in front.
+            val pushed = wanted == null || wanted in current ||
+                ShortcutManagerCompat.pushDynamicShortcut(context, build(context, wanted))
+            if (pushed && stale.isNotEmpty()) ShortcutManagerCompat.removeDynamicShortcuts(context, stale)
         } catch (e: Exception) {
             Log.w(TAG, "connect shortcut not updated: ${e.message}")
         }
@@ -99,19 +104,21 @@ object AppShortcuts {
         }
     }
 
-    /** MainActivity with [action]; a connect or disconnect carries the token. */
-    fun intent(context: Context, action: String): Intent {
-        val intent = Intent(action).setClass(context, MainActivity::class.java)
+    /**
+     * MainActivity with [action] and the token. Every quick action carries it:
+     * Add a key also stops a running VPN (the bot's polls need the plain
+     * network), so another app must not reach it through the exported activity.
+     */
+    fun intent(context: Context, action: String): Intent =
+        Intent(action).setClass(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (action == ACTION_CONNECT || action == ACTION_DISCONNECT) intent.putExtra(EXTRA_TOKEN, token())
-        return intent
-    }
+            .putExtra(EXTRA_TOKEN, token())
 
     /** Connect to [server] of the key [profileId], with the token: a card of the TV home screen's channel. */
     fun connectIntent(context: Context, server: String, profileId: Long): Intent =
         intent(context, ACTION_CONNECT).putExtra(EXTRA_SERVER, server).putExtra(EXTRA_PROFILE, profileId)
 
-    /** A connect or disconnect from the app's own shortcut, tile or widget. */
+    /** A quick action from the app's own shortcut, tile, widget or TV channel. */
     fun trusted(intent: Intent): Boolean {
         val given = intent.getStringExtra(EXTRA_TOKEN) ?: return false
         val own = Settings.quickActionToken

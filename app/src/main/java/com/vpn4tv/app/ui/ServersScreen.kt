@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +34,8 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
+import com.vpn4tv.app.bg.BoxService
+import com.vpn4tv.app.constant.Status
 import com.vpn4tv.app.ui.theme.LocalStateColors
 import com.vpn4tv.app.utils.CommandClient
 import io.nekohasekai.libbox.OutboundGroup
@@ -81,10 +84,19 @@ fun ServersScreen(onBack: (() -> Unit)?) {
         )
     }
 
-    DisposableEffect(Unit) {
-        commandClient.connect()
-        onDispose { commandClient.disconnect() }
+    // The core's command server runs only with the VPN: connecting while the
+    // VPN is off blocks the main thread for seconds (the screen also opens
+    // from an app shortcut, VPN off). Without groups the screen asks to connect.
+    val status by BoxService.globalStatus.observeAsState(Status.Stopped)
+    LaunchedEffect(status) {
+        if (status == Status.Started) {
+            commandClient.connect()
+        } else if (status == Status.Stopped) {
+            commandClient.disconnect()
+            groups = emptyList()
+        }
     }
+    DisposableEffect(Unit) { onDispose { commandClient.disconnect() } }
 
     val select: (GroupData, ServerItem) -> Unit = { group, server ->
         scope.launch(Dispatchers.IO) {

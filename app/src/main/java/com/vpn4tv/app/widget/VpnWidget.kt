@@ -214,7 +214,9 @@ data class WidgetModel(
 ) {
     companion object {
         suspend fun load(context: Context): WidgetModel = withContext(Dispatchers.IO) {
-            val facts = QuickToggle.facts(context)
+            // Drawn on every change, also in the background: never ask Android
+            // here (see QuickToggle.facts); a tap weighs the real state.
+            val facts = QuickToggle.facts(context, askAndroid = false)
             val id = Settings.selectedProfile
             val name = if (id != -1L) ProfileManager.get(id)?.name else null
             WidgetModel(

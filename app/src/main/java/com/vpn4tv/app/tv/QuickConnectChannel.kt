@@ -117,7 +117,7 @@ object QuickConnectChannel {
     private const val WORK = "QuickConnectChannel"
 
     /** Bump when the card pictures change: the launcher caches every picture by its address. */
-    private const val ART_VERSION = 2
+    private const val ART_VERSION = 3
 
     fun supported(context: Context): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Device.isTv &&
@@ -374,7 +374,7 @@ object QuickConnectChannel {
         return bitmap
     }
 
-    /** The channel's logo: the app's mark on its purple, opaque, 80 dp at xhdpi (the launcher masks it round). */
+    /** The channel's logo: the app's mark on its purple, opaque (the launcher masks it round). */
     private fun logo(context: Context): Bitmap {
         val bitmap = Bitmap.createBitmap(LOGO_SIZE, LOGO_SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -386,9 +386,11 @@ object QuickConnectChannel {
         return bitmap
     }
 
-    private const val ART_WIDTH = 512
-    private const val ART_HEIGHT = 288
-    private const val LOGO_SIZE = 160
+    // Drawn for a 4K launcher too: a card there is about 880 px wide, the
+    // logo 160 dp. Smaller art was stretched to twice its size (v2: 512×288).
+    private const val ART_WIDTH = 1024
+    private const val ART_HEIGHT = 576
+    private const val LOGO_SIZE = 320
     private val BRAND = Color.rgb(0x6A, 0x3D, 0xE8)
     private val CARD_BACKGROUND = Color.rgb(0x25, 0x25, 0x25)
 }

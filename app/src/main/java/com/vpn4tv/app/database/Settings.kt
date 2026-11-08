@@ -123,6 +123,14 @@ object Settings {
      * leads to the app's notification settings instead.
      */
     var notificationPermissionRequested by dataStore.boolean(SettingsKey.NOTIFICATION_PERMISSION_REQUESTED) { false }
+
+    /**
+     * The VPN permission as last seen: VpnService.prepare gave no intent, or a
+     * tun came up; cleared when the system takes the VPN away. Only a hint
+     * for what is drawn without a tap (the widget): prepare() itself makes
+     * this app the VPN app and so ends another app's running VPN.
+     */
+    var vpnPermissionSeen by dataStore.boolean(SettingsKey.VPN_PERMISSION_SEEN) { false }
     var disableDeprecatedWarnings by dataStore.boolean(SettingsKey.DISABLE_DEPRECATED_WARNINGS) { false }
 
     // Days of use (UsageMilestones): local calendar days since 1970, -1 none yet.

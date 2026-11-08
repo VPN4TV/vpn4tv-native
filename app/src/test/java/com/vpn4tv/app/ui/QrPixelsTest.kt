@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
  */
 class QrPixelsTest {
     private val botLink = "https://telegram.me/VPN4TV_Bot?start=0f8fad5b-d9cb-469f-a165-70867728950e"
-    private val lanLink = "http://192.168.11.77:8384/"
+    private val lanLink = "http://192.168.1.20:8384/"
 
     // The sizes the screens ask for (phone 180 dp, TV 200 dp, LAN import 240 dp)
     // at the densities of phones and of TVs (1080p xhdpi, 4K xxxhdpi), as roundToPx gives them.

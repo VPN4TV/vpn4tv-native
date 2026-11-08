@@ -43,7 +43,21 @@ object ExitReasons {
         val pssKb: Long,
         val rssKb: Long,
         val description: String?,
+        /** The app ended itself on purpose ([markSelfRestart]). */
+        val selfRestart: Boolean = false,
     )
+
+    private val SELF_RESTART = "self-restart".toByteArray()
+
+    /**
+     * Before the app kills its own process (the connect watchdog, the storage
+     * self-heal): Android records that as SIGNALED, like a kill by the system,
+     * so the next start would report it. The note travels with the exit.
+     */
+    fun markSelfRestart(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        runCatching { context.getSystemService(ActivityManager::class.java)?.setProcessStateSummary(SELF_RESTART) }
+    }
 
     /** Application.onCreate, off the main thread. Never throws. */
     fun record(context: Context, bridges: String) {
@@ -56,7 +70,12 @@ object ExitReasons {
             // Newest first.
             val exits = am.getHistoricalProcessExitReasons(context.packageName, 0, 16)
                 .filter { it.timestamp > seen }
-                .map { Exit(it.timestamp, it.reason, it.status, it.importance, it.pss, it.rss, it.description) }
+                .map {
+                    Exit(
+                        it.timestamp, it.reason, it.status, it.importance, it.pss, it.rss, it.description,
+                        selfRestart = it.processStateSummary?.contentEquals(SELF_RESTART) == true,
+                    )
+                }
             if (exits.isEmpty()) {
                 // Nothing yet: what comes after this start is new.
                 if (firstRun) prefs.edit().putLong(KEY_SEEN, System.currentTimeMillis()).apply()
@@ -67,7 +86,8 @@ object ExitReasons {
             // The first start with this code finds the history of older
             // versions: logged, not sent.
             if (firstRun) return
-            val worth = exits.filter { worthReporting(it.reason, it.importance, it.description) }.take(MAX_REPORTED)
+            val worth = exits.filter { worthReporting(it.reason, it.importance, it.description, it.selfRestart) }
+                .take(MAX_REPORTED)
             if (worth.isEmpty()) return
             CrashUpload.upload(report(worth, prefs.getString(KEY_WORK_STOP, null)), bridges, "exit")
         } catch (t: Throwable) {
@@ -87,12 +107,17 @@ object ExitReasons {
         }
     }
 
-    /** Ended by the system while it mattered, or by the memory limiter. Crashes report themselves. */
-    internal fun worthReporting(reason: Int, importance: Int, description: String?): Boolean {
+    /**
+     * Ended by the system while it mattered, or by the memory limiter. Crashes
+     * report themselves; the app's own restarts ([selfRestart]) have their
+     * report already (the watchdog's hang dumps).
+     */
+    internal fun worthReporting(reason: Int, importance: Int, description: String?, selfRestart: Boolean = false): Boolean {
+        if (selfRestart) return false
         if (description?.contains("MemoryLimiter") == true) return true
         return when (reason) {
             ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE -> false
-            // The app itself (the storage self-heal restarts it), the user, an update.
+            // The app itself, the user, an update.
             ApplicationExitInfo.REASON_EXIT_SELF, ApplicationExitInfo.REASON_USER_REQUESTED,
             ApplicationExitInfo.REASON_USER_STOPPED, ApplicationExitInfo.REASON_PERMISSION_CHANGE,
             REASON_PACKAGE_STATE_CHANGE, REASON_PACKAGE_UPDATED -> false

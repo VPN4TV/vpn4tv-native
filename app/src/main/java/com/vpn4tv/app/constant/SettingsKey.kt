@@ -9,6 +9,9 @@ object SettingsKey {
     // whether the system's has been asked at least once.
     const val NOTIFICATION_PROMPT_SHOWN = "notification_prompt_shown"
     const val NOTIFICATION_PERMISSION_REQUESTED = "notification_permission_requested"
+    // The VPN permission as last seen (prepare gave no intent, a tun came up),
+    // for what is drawn without asking Android: the widget.
+    const val VPN_PERMISSION_SEEN = "vpn_permission_seen"
     const val DISABLE_DEPRECATED_WARNINGS = "disable_deprecated_warnings"
 
     // Days of use (UsageMilestones) and what waits for them: the offers of

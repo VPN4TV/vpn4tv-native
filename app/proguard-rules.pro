@@ -36,3 +36,11 @@
     public static int v(...);
     public static int d(...);
 }
+
+# Glance creates a widget's ActionCallback by its class name and no-argument
+# constructor (RunCallbackAction). Glance's own rule keeps the class, but R8's
+# full mode then drops the constructor nobody calls in code, and the widget's
+# Connect/Disconnect does nothing in a release build.
+-keep class * implements androidx.glance.appwidget.action.ActionCallback {
+    <init>();
+}

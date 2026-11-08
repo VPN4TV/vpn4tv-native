@@ -371,30 +371,35 @@ private fun ColumnScope.TvHomeCenter(
     serverCardModifier: Modifier,
     onConnectFocused: () -> Unit,
 ) {
-    Column(
-        Modifier.fillMaxWidth().weight(1f),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        // A picture-in-picture window (a video kept playing while the
-        // server is changed) is placed off the status and Connect
-        // (Android 13+: keep-clear areas).
-        StatusText(m, 32.sp, Modifier.preferKeepClear())
-        ErrorLine(m, 14.sp)
-        Spacer(Modifier.height(32.dp))
-        // At least 300 × 80, larger with a large font (the TV
-        // accessibility guide: components still fit at larger text scales).
-        ConnectButton(
-            m, onConnectButton,
-            Modifier.preferKeepClear()
-                .focusRequester(connectFocus)
-                .onFocusChanged { if (it.hasFocus) onConnectFocused() },
-            24.sp,
-        )
-        Spacer(Modifier.height(32.dp))
-        ProxyModeCard(m)
-        ServerCard(m, onServers, 18.sp, serverCardModifier)
-        SessionLine(m, 16.sp)
+    // Centred while it fits; at the largest font with the proxy card and the
+    // error's details open it scrolls, and the remote's focus brings the
+    // controls into view, instead of the bottom being cut off.
+    BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // A picture-in-picture window (a video kept playing while the
+            // server is changed) is placed off the status and Connect
+            // (Android 13+: keep-clear areas).
+            StatusText(m, 32.sp, Modifier.preferKeepClear())
+            ErrorLine(m, 14.sp)
+            Spacer(Modifier.height(32.dp))
+            // At least 300 × 80, larger with a large font (the TV
+            // accessibility guide: components still fit at larger text scales).
+            ConnectButton(
+                m, onConnectButton,
+                Modifier.preferKeepClear()
+                    .focusRequester(connectFocus)
+                    .onFocusChanged { if (it.hasFocus) onConnectFocused() },
+                24.sp,
+            )
+            Spacer(Modifier.height(32.dp))
+            ProxyModeCard(m)
+            ServerCard(m, onServers, 18.sp, serverCardModifier)
+            SessionLine(m, 16.sp)
+        }
     }
 }
 

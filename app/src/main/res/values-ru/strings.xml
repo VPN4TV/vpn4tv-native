@@ -658,8 +658,8 @@
     <string name="setting_notification_system_desc">Звук, вид и отключение — в настройках Android</string>
     <string name="setting_always_on">Постоянная VPN</string>
     <string name="setting_always_on_desc">Настройка Android: VPN сам включается снова, а без него можно запретить интернет.</string>
-    <string name="always_on_note">Это постоянная VPN: включением управляет Android.</string>
-    <string name="always_on_note_lockdown">Это постоянная VPN: включением управляет Android, без VPN интернет заблокирован.</string>
+    <string name="always_on_note">Включена «Постоянная VPN»: VPN включает и выключает Android.</string>
+    <string name="always_on_note_lockdown">Включена «Постоянная VPN»: VPN включает и выключает Android, без него интернет заблокирован.</string>
     <string name="action_vpn_settings">Настройки VPN Android</string>
     <string name="error_start_failed">Не удалось запустить VPN. Перезапустите приложение; если не поможет — напишите в поддержку.</string>
     <string name="error_restarting">VPN не запустился — приложение перезапускается. Затем подключитесь ещё раз.</string>

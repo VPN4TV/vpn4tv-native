@@ -233,6 +233,7 @@ class VPNService :
         // alive until GC.
         service.fileDescriptor?.close()
         service.fileDescriptor = pfd
+        Settings.vpnPermissionSeen = true
         BoxService.alwaysOn.postValue(alwaysOnState())
         return pfd.fd
     }

@@ -159,6 +159,12 @@ fun AppNavigation(
                     markAddProfileOpened()
                     navController.navigate(Routes.ADD_PROFILE) { launchSingleTop = true }
                 }
+                // Connect from a shortcut or a TV home channel card: the app may
+                // come back on another screen; the connection shows on Home.
+                Routes.HOME -> if (navController.currentDestination?.route != Routes.HOME) {
+                    if (Device.isTv) navController.popBackStack(Routes.HOME, inclusive = false)
+                    else navController.openTab(Routes.HOME)
+                }
             }
         }
     }

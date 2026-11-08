@@ -416,6 +416,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                         .edit().putBoolean("use_internal", true).commit()
                     stopAndAlert(Alert.CreateService, "${e.message} (restarting with internal storage)", ServiceError.Reason.Restarting)
                     kotlinx.coroutines.delay(2000)
+                    com.vpn4tv.app.utils.ExitReasons.markSelfRestart(Application.application)
                     android.os.Process.killProcess(android.os.Process.myPid())
                     return
                 }
@@ -1011,6 +1012,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // Give the UI + the upload thread a moment, then hard-reset the
             // wedged Go runtime.
             try { Thread.sleep(3000) } catch (_: InterruptedException) {}
+            com.vpn4tv.app.utils.ExitReasons.markSelfRestart(Application.application)
             android.os.Process.killProcess(android.os.Process.myPid())
         }.apply { name = "connect-watchdog" }.start()
     }
@@ -1153,6 +1155,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         // was turned off in Android's settings. Without a word the screen just
         // says "Disconnected", and that looks like the app failed.
         if (status.value == Status.Started) lastError.value = ServiceError(ServiceError.Reason.Revoked)
+        // The widget then opens the app to connect, until a tun comes up again.
+        Settings.vpnPermissionSeen = false
         stopService()
     }
 

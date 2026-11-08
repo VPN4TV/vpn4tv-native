@@ -12,9 +12,9 @@ import org.junit.runner.RunWith
 import java.util.regex.Pattern
 
 /**
- * What a user runs first: the cold start up to the home screen, then the
- * servers (scrolled), the keys and the settings, and home again, through the
- * navigation bar of a phone. On a TV the same code serves most of it (start,
+ * What a user runs first: the cold start up to the home screen (also the
+ * startup profile), then the servers (scrolled), the keys and the settings,
+ * and home again, through the navigation bar of a phone. On a TV the same code serves most of it (start,
  * home, the lists); the TV's own layouts are not walked.
  *
  * Works with or without a key on the device and in English or Russian.
@@ -24,16 +24,25 @@ class BaselineProfileGenerator {
     @get:Rule
     val rule = BaselineProfileRule()
 
+    /**
+     * The cold start up to the home screen, and only that, as the startup
+     * profile too: R8 puts these classes first in the dex. With the screens
+     * below in it, it was the whole baseline profile again.
+     */
     @Test
-    fun startAndMainScreens() = rule.collect(
+    fun start() = rule.collect(
         packageName = PACKAGE,
-        // Also a startup profile: R8 puts the classes of the start first in the dex.
         includeInStartupProfile = true,
     ) {
-        pressHome()
-        startActivityAndWait()
-        // The launch screen stays until the keys are loaded.
-        device.wait(Until.hasObject(By.text(HOME)), TIMEOUT_MS)
+        startHome()
+    }
+
+    @Test
+    fun mainScreens() = rule.collect(
+        packageName = PACKAGE,
+        includeInStartupProfile = false,
+    ) {
+        startHome()
         open(SERVERS)
         device.findObject(By.scrollable(true))?.let {
             it.fling(Direction.DOWN)
@@ -46,6 +55,13 @@ class BaselineProfileGenerator {
             device.waitForIdle()
         }
         open(HOME)
+    }
+
+    private fun MacrobenchmarkScope.startHome() {
+        pressHome()
+        startActivityAndWait()
+        // The launch screen stays until the keys are loaded.
+        device.wait(Until.hasObject(By.text(HOME)), TIMEOUT_MS)
     }
 
     private fun MacrobenchmarkScope.open(tab: Pattern) {

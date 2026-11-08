@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        Settings.vpnPermissionSeen = result.resultCode == Activity.RESULT_OK
         if (result.resultCode == Activity.RESULT_OK) {
             BoxService.start()
         } else {
@@ -184,23 +185,24 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Connect and disconnect take the button's own path; a connect or
-     * disconnect without the app's token (another app starting this exported
-     * activity) only opens Home.
+     * Connect and disconnect take the button's own path; a quick action
+     * without the app's token (another app starting this exported activity)
+     * only opens Home.
      */
     private fun runQuickAction(intent: Intent) {
         val id = AppShortcuts.idFor(intent.action) ?: return
+        if (!AppShortcuts.trusted(intent)) return
         when (intent.action) {
             AppShortcuts.ACTION_CONNECT -> {
-                if (!AppShortcuts.trusted(intent)) return
                 reportShortcutUse(id)
                 val server = intent.getStringExtra(AppShortcuts.EXTRA_SERVER)
                 if (server != null && !chooseServer(server, intent.getLongExtra(AppShortcuts.EXTRA_PROFILE, -1L))) return
+                routeRequests.trySend(Routes.HOME)
                 if (BoxService.globalStatus.value == com.vpn4tv.app.constant.Status.Stopped) connect()
             }
             AppShortcuts.ACTION_DISCONNECT -> {
-                if (!AppShortcuts.trusted(intent)) return
                 reportShortcutUse(id)
+                routeRequests.trySend(Routes.HOME)
                 // Always-on VPN: Android turns it off; Home says so.
                 if (BoxService.globalStatus.value == com.vpn4tv.app.constant.Status.Started &&
                     BoxService.alwaysOn.value == null
@@ -459,6 +461,7 @@ class MainActivity : ComponentActivity() {
             onNoVpnDialog()
             return
         }
+        Settings.vpnPermissionSeen = intent == null
         if (intent != null) {
             try {
                 vpnPermissionLauncher.launch(intent)

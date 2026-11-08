@@ -175,10 +175,12 @@ fun LogsScreen(onBack: (() -> Unit)?) {
         if (!feed.paused && follow && found.isNotEmpty()) listState.animateScrollToItem(found.size - 1)
     }
 
-    DisposableEffect(Unit) {
-        commandClient.connect()
-        onDispose { commandClient.disconnect() }
+    // The core's log comes from its command server, which runs only with the
+    // VPN: connecting while the VPN is off blocks the main thread for seconds.
+    LaunchedEffect(status) {
+        if (status == Status.Started) commandClient.connect() else if (status == Status.Stopped) commandClient.disconnect()
     }
+    DisposableEffect(Unit) { onDispose { commandClient.disconnect() } }
 
     val keyboard = LocalSoftwareKeyboardController.current
     fun closeSearch() {

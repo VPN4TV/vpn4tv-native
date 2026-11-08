@@ -68,8 +68,13 @@ object QuickToggle {
     /**
      * The state a tap is weighed against. Settings and the key's saved expiry
      * only (no profile database), so the tile can call it on its click.
+     *
+     * [askAndroid] only for a tap: VpnService.prepare makes this app the VPN
+     * app once the user has agreed to it, which ends another app's running
+     * VPN. What is drawn without a tap (the widget) takes the permission as
+     * last seen instead.
      */
-    fun facts(context: Context): Facts {
+    fun facts(context: Context, askAndroid: Boolean = true): Facts {
         val profileId = Settings.selectedProfile
         val expiry = if (profileId != -1L) HwidService.loadUserInfo(context, profileId)?.expireEpochSec else null
         val proxyMode = Settings.isProxyMode
@@ -79,13 +84,17 @@ object QuickToggle {
             hasKey = profileId != -1L,
             keyExpired = expiry != null && expiry > 0 && expiry * 1000 < System.currentTimeMillis(),
             proxyMode = proxyMode,
-            vpnPermission = if (proxyMode) null else vpnPermission(context),
+            vpnPermission = when {
+                proxyMode -> null
+                askAndroid -> vpnPermission(context)
+                else -> Settings.vpnPermissionSeen
+            },
         )
     }
 
     /** Some vendor TV firmware throws from prepare (no VPN dialog there): unknown. */
     private fun vpnPermission(context: Context): Boolean? = try {
-        VpnService.prepare(context) == null
+        (VpnService.prepare(context) == null).also { Settings.vpnPermissionSeen = it }
     } catch (e: Exception) {
         Log.w(TAG, "VpnService.prepare failed: ${e.message}")
         null

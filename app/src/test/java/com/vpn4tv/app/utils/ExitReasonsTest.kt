@@ -20,6 +20,13 @@ class ExitReasonsTest {
     }
 
     @Test
+    fun theAppsOwnRestartIsNot() {
+        // The watchdog's kill shows as SIGNALED with the VPN running.
+        assertFalse(ExitReasons.worthReporting(ApplicationExitInfo.REASON_SIGNALED, fgs, null, selfRestart = true))
+        assertFalse(ExitReasons.worthReporting(ApplicationExitInfo.REASON_OTHER, cached, "MemoryLimiter:AnonSwap", selfRestart = true))
+    }
+
+    @Test
     fun aCachedProcessEndingIsNormal() {
         assertFalse(ExitReasons.worthReporting(ApplicationExitInfo.REASON_LOW_MEMORY, cached, null))
         assertFalse(ExitReasons.worthReporting(ApplicationExitInfo.REASON_OTHER, cached, "remove task"))

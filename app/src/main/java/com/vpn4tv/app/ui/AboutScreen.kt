@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -87,7 +88,7 @@ fun AboutScreen(onBack: (() -> Unit)?) {
         val link = refocusLink ?: return@LaunchedEffect
         // Asked again for a moment: before the button is placed the request fails.
         repeat(10) {
-            if (runCatching { linkFocus.getValue(link).requestFocus() }.isSuccess) {
+            if (runCatching { linkFocus.getValue(link).requestFocus(FocusDirection.Enter) }.getOrDefault(false)) {
                 refocusLink = null
                 return@LaunchedEffect
             }

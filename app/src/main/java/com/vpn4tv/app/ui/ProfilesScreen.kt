@@ -31,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.tv.material3.Icon as TvIcon
@@ -156,7 +157,7 @@ fun ProfilesScreen(
             // Asked again for a moment: the dialog's window comes up after this.
             repeat(5) {
                 kotlinx.coroutines.delay(100)
-                if (runCatching { firstAction.requestFocus() }.isSuccess) return@LaunchedEffect
+                if (runCatching { firstAction.requestFocus(FocusDirection.Enter) }.getOrDefault(false)) return@LaunchedEffect
             }
         }
         TvDialog(
@@ -195,7 +196,7 @@ fun ProfilesScreen(
             LaunchedEffect(profile) {
                 repeat(5) {
                     kotlinx.coroutines.delay(100)
-                    if (runCatching { cancelFocus.requestFocus() }.isSuccess) return@LaunchedEffect
+                    if (runCatching { cancelFocus.requestFocus(FocusDirection.Enter) }.getOrDefault(false)) return@LaunchedEffect
                 }
             }
             TvDialog(
