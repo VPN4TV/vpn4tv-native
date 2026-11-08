@@ -181,7 +181,7 @@
     <string name="filter_label">Фильтр: %s</string>
     <string name="clear_filter">Очистить</string>
     <string name="clear_logs">Очистить логи</string>
-    <string name="search_logs_placeholder">Поиск в логах...</string>
+    <string name="search_logs_placeholder">Поиск в журнале…</string>
     <string name="logs_copied_to_clipboard">Лог скопирован в буфер обмена</string>
     <string name="no_logs_to_copy">Нет записей для копирования</string>
     <string name="no_logs_to_share">Нет записей для отправки</string>
@@ -394,8 +394,8 @@
     <string name="content_description_copy_selected">Копировать выделенное</string>
     <string name="content_description_clear_search">Очистить поиск</string>
     <string name="content_description_qr_code">QR-код</string>
-    <string name="content_description_resume_logs">Возобновить лог</string>
-    <string name="content_description_pause_logs">Приостановить лог</string>
+    <string name="content_description_resume_logs">Продолжить</string>
+    <string name="content_description_pause_logs">Пауза</string>
     <string name="content_description_collapse_search">Свернуть поиск</string>
     <string name="content_description_search_logs">Поиск в логе</string>
     
@@ -562,10 +562,11 @@
     <string name="error_no_subscription">Ключ не добавлен</string>
     <string name="error_vpn_denied">VPN разрешение отклонено</string>
     <string name="error_no_vpn_dialog">На этом устройстве нет системного окна VPN. Включите режим прокси (SOCKS5) в настройках, чтобы подключиться.</string>
-    <string name="title_logs">Логи</string>
+    <string name="title_logs">Журнал</string>
     <string name="title_about">О программе</string>
-    <string name="logs_empty">Подключите VPN, чтобы видеть логи</string>
+    <string name="logs_empty">Подключите VPN, чтобы видеть журнал</string>
     <string name="logs_none_at_level">Записей этого уровня пока нет</string>
+    <string name="logs_nothing_found">Ничего не найдено</string>
     <string name="action_clear">Очистить</string>
     <string name="about_license">GPLv3 • На базе sing-box от SagerNet\nXray-core (MPLv2) • Outline SDK (Apache 2.0) • AmneziaWG (MIT)</string>
     <string name="about_licenses">Лицензии открытого ПО</string>
@@ -625,8 +626,8 @@
     <string name="profile_action_update">Обновить</string>
     <string name="profile_action_delete">Удалить</string>
     <string name="profile_delete_title">Удалить ключ?</string>
-    <string name="profile_delete_text">«%1$s» будет удалена с этого устройства.</string>
-    <string name="profile_selected">Выбрана</string>
+    <string name="profile_delete_text">«%1$s» будет удалён с этого устройства.</string>
+    <string name="profile_selected">Выбран</string>
     <string name="action_copy_code">Скопировать код</string>
     <string name="code_copied">Код скопирован</string>
     <string name="action_show_qr">Показать QR-код для другого устройства</string>

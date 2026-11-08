@@ -1,26 +1,45 @@
 package com.vpn4tv.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
@@ -28,6 +47,9 @@ import com.vpn4tv.app.bg.BoxService
 import com.vpn4tv.app.constant.Status
 import com.vpn4tv.app.ui.theme.LocalStateColors
 import com.vpn4tv.app.utils.CommandClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private enum class LogLevel(@StringRes val label: Int, val priority: Int) {
     ALL(R.string.log_filter_all, 0),
@@ -47,21 +69,72 @@ private fun logLineLevel(line: String): Int = when {
     else -> 0 // DEBUG, TRACE
 }
 
+/** The most lines the screen keeps; older ones drop off the top. */
+internal const val LOG_LINES_KEPT = 500
+
+/**
+ * The lines of the screen. [all] is everything that came, the newest
+ * [LOG_LINES_KEPT]: it keeps growing during a pause, and Share sends it.
+ * [frozen] is what the list held when the pause began; while it is set the
+ * list stands still, as on the iPhone, and Resume shows all that came since.
+ */
+internal class LogFeed(
+    val all: List<String> = emptyList(),
+    private val frozen: List<String>? = null,
+) {
+    val paused: Boolean get() = frozen != null
+    val shown: List<String> get() = frozen ?: all
+
+    fun append(lines: List<String>) = LogFeed((all + lines).takeLast(LOG_LINES_KEPT), frozen)
+    fun pause() = if (paused) this else LogFeed(all, all)
+    fun resume() = LogFeed(all)
+}
+
+/** The lines at [minPriority] or above; all of them for 0. */
+internal fun linesAtLevel(lines: List<String>, minPriority: Int): List<String> =
+    if (minPriority == 0) lines else lines.filter { logLineLevel(it) >= minPriority }
+
+/** The lines that hold [query] in any case; all of them for an empty query. */
+internal fun linesWith(lines: List<String>, query: String): List<String> =
+    if (query.isEmpty()) lines else lines.filter { it.contains(query, ignoreCase = true) }
+
+/** Where [query] occurs in [line], in any case, left to right: what the list marks. */
+internal fun matchesIn(line: String, query: String): List<IntRange> {
+    if (query.isEmpty()) return emptyList()
+    val found = mutableListOf<IntRange>()
+    var from = 0
+    while (true) {
+        val at = line.indexOf(query, from, ignoreCase = true)
+        if (at < 0) break
+        found.add(at until at + query.length)
+        from = at + query.length
+    }
+    return found
+}
+
 @Composable
 fun LogsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var allLogs by remember { mutableStateOf(listOf<String>()) }
+    var feed by remember { mutableStateOf(LogFeed()) }
     // Default to WARN+: sing-box at INFO is noisy (several lines per
     // connection) and users opening Logs are almost always chasing a
     // problem, not reviewing steady-state traffic.
-    var filterLevel by remember { mutableStateOf(LogLevel.WARN) }
+    var filterLevel by rememberSaveable { mutableStateOf(LogLevel.WARN) }
+    // Phone only: typing with a TV remote is a chore, so TV has no search.
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    // What the list is filtered by: the query once typing stops for 300 ms,
+    // as on the iPhone; an emptied query at once.
+    var appliedQuery by remember { mutableStateOf(query) }
+    LaunchedEffect(query) {
+        if (query.isNotEmpty()) delay(300)
+        appliedQuery = query
+    }
     val listState = rememberLazyListState()
     val status by BoxService.globalStatus.observeAsState(Status.Stopped)
 
-    val filteredLogs = remember(allLogs, filterLevel) {
-        if (filterLevel == LogLevel.ALL) allLogs
-        else allLogs.filter { logLineLevel(it) >= filterLevel.priority }
-    }
+    val atLevel = remember(feed.shown, filterLevel) { linesAtLevel(feed.shown, filterLevel.priority) }
+    val found = remember(atLevel, appliedQuery) { linesWith(atLevel, appliedQuery) }
 
     val commandClient = remember {
         CommandClient(
@@ -69,20 +142,45 @@ fun LogsScreen(onBack: () -> Unit) {
             listOf(CommandClient.ConnectionType.Log),
             object : CommandClient.Handler {
                 override fun appendLogs(messages: List<String>) {
-                    allLogs = (allLogs + messages).takeLast(500)
+                    // Called on libbox's thread: the lines are added on the
+                    // main one, where Pause and Clear change the feed too,
+                    // so neither is undone by a batch arriving meanwhile.
+                    scope.launch { feed = feed.append(messages) }
                 }
             }
         )
     }
 
-    LaunchedEffect(filteredLogs.size) {
-        if (filteredLogs.isNotEmpty()) listState.animateScrollToItem(filteredLogs.size - 1)
+    // New lines are followed only while the list is at its end, as on the
+    // iPhone: a drag up to read stops it, a drag back to the end (or Resume)
+    // starts it again. A pause stops the scrolling as well.
+    var follow by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is DragInteraction.Start -> follow = false
+                is DragInteraction.Stop, is DragInteraction.Cancel -> follow = !listState.canScrollForward
+            }
+        }
+    }
+    LaunchedEffect(found.size, feed.paused) {
+        if (!feed.paused && follow && found.isNotEmpty()) listState.animateScrollToItem(found.size - 1)
     }
 
     DisposableEffect(Unit) {
         commandClient.connect()
         onDispose { commandClient.disconnect() }
     }
+
+    val keyboard = LocalSoftwareKeyboardController.current
+    fun closeSearch() {
+        keyboard?.hide()
+        searchOpen = false
+        query = ""
+        appliedQuery = ""
+    }
+    // Back closes the search first, then the screen.
+    BackHandler(enabled = searchOpen) { closeSearch() }
 
     val colors = MaterialTheme.colorScheme
     val state = LocalStateColors.current
@@ -91,18 +189,82 @@ fun LogsScreen(onBack: () -> Unit) {
         title = stringResource(R.string.title_logs),
         onBack = onBack,
         actions = {
-            // Phone: hand the log to Telegram, mail, Files… for support.
             if (!Device.isTv) {
-                IconButton(onClick = { shareLogs(context, allLogs) }, enabled = allLogs.isNotEmpty()) {
+                IconButton(onClick = { if (searchOpen) closeSearch() else searchOpen = true }) {
+                    if (searchOpen) Icon(Icons.Default.SearchOff, stringResource(R.string.close_search))
+                    else Icon(Icons.Default.Search, stringResource(R.string.search))
+                }
+            }
+            // The same button in both states, so the TV focus stays on it.
+            IconButton(
+                onClick = {
+                    if (feed.paused) follow = true
+                    feed = if (feed.paused) feed.resume() else feed.pause()
+                },
+                modifier = Modifier.tvFocus(CircleShape),
+            ) {
+                if (feed.paused) Icon(Icons.Default.PlayArrow, stringResource(R.string.content_description_resume_logs))
+                else Icon(Icons.Default.Pause, stringResource(R.string.content_description_pause_logs))
+            }
+            // Phone: hand the log to Telegram, mail, Files… for support.
+            // All the lines that came, whatever the list shows.
+            if (!Device.isTv) {
+                IconButton(onClick = { shareLogs(context, feed.all) }, enabled = feed.all.isNotEmpty()) {
                     Icon(Icons.Default.Share, stringResource(R.string.action_share_logs))
                 }
             }
-            IconButton(onClick = { allLogs = emptyList() }, modifier = Modifier.tvFocus(CircleShape)) {
+            // Clear ends a pause too, and empties the core's own buffer, which
+            // otherwise comes back on the next visit (as Clear on the iPhone).
+            IconButton(onClick = {
+                feed = LogFeed()
+                follow = true
+                scope.launch(Dispatchers.IO) {
+                    runCatching {
+                        val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
+                        client.clearLogs()
+                        client.disconnect()
+                    }
+                }
+            }, modifier = Modifier.tvFocus(CircleShape)) {
                 Icon(Icons.Default.Delete, stringResource(R.string.action_clear))
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = if (Device.isTv) 0.dp else 16.dp)) {
+        // Phone: the list ends above the keyboard, so the newest matches stay
+        // in sight while the query is typed.
+        Column(
+            Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
+                .padding(horizontal = if (Device.isTv) 0.dp else 16.dp),
+        ) {
+            if (searchOpen) {
+                val searchFocus = remember { FocusRequester() }
+                // Opened: the field takes the focus, so the keyboard is up.
+                LaunchedEffect(Unit) { runCatching { searchFocus.requestFocus() } }
+                val clearQuery: @Composable () -> Unit = {
+                    IconButton(onClick = { query = "" }) {
+                        Icon(Icons.Default.Close, stringResource(R.string.content_description_clear_search))
+                    }
+                }
+                val hideKeyboard = KeyboardActions(
+                    onSearch = { appliedQuery = query; keyboard?.hide() },
+                    onDone = { appliedQuery = query; keyboard?.hide() },
+                )
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp).focusRequester(searchFocus),
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.search_logs_placeholder)) },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    trailingIcon = if (query.isEmpty()) null else clearQuery,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                        imeAction = ImeAction.Search,
+                    ),
+                    keyboardActions = hideKeyboard,
+                )
+            }
             // Filter chips: the selected one carries a check mark, not only a colour.
             // TV: room inside the scrolling row for the focused chip's
             // enlarged outline, which the scroll would clip at the edges.
@@ -123,31 +285,53 @@ fun LogsScreen(onBack: () -> Unit) {
                     )
                 }
             }
-            if (filteredLogs.isEmpty()) {
+            if (found.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    // Connected: the filter hides what there is, or nothing came yet.
-                    val empty = if (status == Status.Started) R.string.logs_none_at_level else R.string.logs_empty
+                    val empty = when {
+                        // The level shows lines, the query matches none of them.
+                        appliedQuery.isNotEmpty() && atLevel.isNotEmpty() -> R.string.logs_nothing_found
+                        // Connected: the filter hides what there is, or nothing came yet.
+                        status == Status.Started -> R.string.logs_none_at_level
+                        else -> R.string.logs_empty
+                    }
                     Text(stringResource(empty), color = colors.onSurfaceVariant, fontSize = 16.sp)
                 }
             } else {
+                val mark = SpanStyle(background = colors.primaryContainer, color = colors.onPrimaryContainer)
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                    items(filteredLogs) { line ->
-                        Text(
+                    items(found) { line ->
+                        LogLine(
                             line,
+                            appliedQuery,
+                            mark,
                             fontSize = if (Device.isTv) 14.sp else 11.sp,
-                            fontFamily = FontFamily.Monospace,
                             color = when (logLineLevel(line)) {
                                 3 -> state.danger
                                 2 -> state.slow
                                 0 -> colors.onSurfaceVariant
                                 else -> colors.onSurface
                             },
-                            modifier = Modifier.padding(vertical = 1.dp),
                         )
                     }
                 }
             }
         }
+    }
+}
+
+/** One line of the log; the matches of the search marked, as on the iPhone. */
+@Composable
+private fun LogLine(line: String, query: String, mark: SpanStyle, fontSize: TextUnit, color: Color) {
+    val modifier = Modifier.padding(vertical = 1.dp)
+    val matches = matchesIn(line, query)
+    if (matches.isEmpty()) {
+        Text(line, modifier, color = color, fontSize = fontSize, fontFamily = FontFamily.Monospace)
+    } else {
+        val marked = buildAnnotatedString {
+            append(line)
+            matches.forEach { addStyle(mark, it.first, it.last + 1) }
+        }
+        Text(marked, modifier, color = color, fontSize = fontSize, fontFamily = FontFamily.Monospace)
     }
 }
 

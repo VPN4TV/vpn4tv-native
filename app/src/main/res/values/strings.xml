@@ -390,8 +390,8 @@
     <string name="content_description_copy_selected">Copy selected</string>
     <string name="content_description_clear_search">Clear search</string>
     <string name="content_description_qr_code">QR Code</string>
-    <string name="content_description_resume_logs">Resume logs</string>
-    <string name="content_description_pause_logs">Pause logs</string>
+    <string name="content_description_resume_logs">Resume</string>
+    <string name="content_description_pause_logs">Pause</string>
     <string name="content_description_collapse_search">Collapse search</string>
     <string name="content_description_search_logs">Search logs</string>
 
@@ -534,6 +534,7 @@
     <string name="title_about">About</string>
     <string name="logs_empty">Connect VPN to see logs</string>
     <string name="logs_none_at_level">No entries at this level yet</string>
+    <string name="logs_nothing_found">Nothing found</string>
     <string name="action_clear">Clear</string>
     <string name="about_license">GPLv3 • Based on sing-box by SagerNet\nXray-core (MPLv2) • Outline SDK (Apache 2.0) • AmneziaWG (MIT)</string>
     <string name="about_licenses">Open Source Licenses</string>
