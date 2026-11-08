@@ -108,7 +108,7 @@ object ProfileImporter {
             Log.d(TAG, "Imported ${profile.name}: ${proxies.size} proxies (selected)")
             Result.success(profileName)
         } catch (e: Exception) {
-            Log.e(TAG, "import failed", e)
+            Log.e(TAG, "import failed: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
             Result.failure(e)
         }
     }

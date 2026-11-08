@@ -47,9 +47,13 @@ import com.vpn4tv.app.bg.BoxService
 import com.vpn4tv.app.constant.Status
 import com.vpn4tv.app.ui.theme.LocalStateColors
 import com.vpn4tv.app.utils.CommandClient
+import com.vpn4tv.app.utils.LogPrivacy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.tv.material3.Icon as TvIcon
+import androidx.tv.material3.MaterialTheme as TvMaterialTheme
+import androidx.tv.material3.Text as TvText
 
 private enum class LogLevel(@StringRes val label: Int, val priority: Int) {
     ALL(R.string.log_filter_all, 0),
@@ -112,8 +116,9 @@ internal fun matchesIn(line: String, query: String): List<IntRange> {
     return found
 }
 
+/** [onBack] null: shown beside the settings list on a wide window, no Back arrow. */
 @Composable
-fun LogsScreen(onBack: () -> Unit) {
+fun LogsScreen(onBack: (() -> Unit)?) {
     val scope = rememberCoroutineScope()
     var feed by remember { mutableStateOf(LogFeed()) }
     // Default to WARN+: sing-box at INFO is noisy (several lines per
@@ -142,10 +147,13 @@ fun LogsScreen(onBack: () -> Unit) {
             listOf(CommandClient.ConnectionType.Log),
             object : CommandClient.Handler {
                 override fun appendLogs(messages: List<String>) {
+                    // The core's error lines name the site that failed: the
+                    // list and Share get them without it (LogPrivacy).
+                    val lines = messages.map(LogPrivacy::redactCoreLine)
                     // Called on libbox's thread: the lines are added on the
                     // main one, where Pause and Clear change the feed too,
                     // so neither is undone by a batch arriving meanwhile.
-                    scope.launch { feed = feed.append(messages) }
+                    scope.launch { feed = feed.append(lines) }
                 }
             }
         )
@@ -188,6 +196,7 @@ fun LogsScreen(onBack: () -> Unit) {
     ScreenScaffold(
         title = stringResource(R.string.title_logs),
         onBack = onBack,
+        collapsingTopBar = true,
         actions = {
             if (!Device.isTv) {
                 IconButton(onClick = { if (searchOpen) closeSearch() else searchOpen = true }) {
@@ -196,15 +205,18 @@ fun LogsScreen(onBack: () -> Unit) {
                 }
             }
             // The same button in both states, so the TV focus stays on it.
-            IconButton(
-                onClick = {
-                    if (feed.paused) follow = true
-                    feed = if (feed.paused) feed.resume() else feed.pause()
-                },
-                modifier = Modifier.tvFocus(CircleShape),
-            ) {
-                if (feed.paused) Icon(Icons.Default.PlayArrow, stringResource(R.string.content_description_resume_logs))
-                else Icon(Icons.Default.Pause, stringResource(R.string.content_description_pause_logs))
+            val pauseOrResume = {
+                if (feed.paused) follow = true
+                feed = if (feed.paused) feed.resume() else feed.pause()
+            }
+            val pauseIcon = if (feed.paused) Icons.Default.PlayArrow else Icons.Default.Pause
+            val pauseLabel = stringResource(
+                if (feed.paused) R.string.content_description_resume_logs else R.string.content_description_pause_logs,
+            )
+            if (Device.isTv) {
+                TvIconButton(onClick = pauseOrResume) { TvIcon(pauseIcon, pauseLabel) }
+            } else {
+                IconButton(onClick = pauseOrResume) { Icon(pauseIcon, pauseLabel) }
             }
             // Phone: hand the log to Telegram, mail, Files… for support.
             // All the lines that came, whatever the list shows.
@@ -215,7 +227,7 @@ fun LogsScreen(onBack: () -> Unit) {
             }
             // Clear ends a pause too, and empties the core's own buffer, which
             // otherwise comes back on the next visit (as Clear on the iPhone).
-            IconButton(onClick = {
+            val clear = {
                 feed = LogFeed()
                 follow = true
                 scope.launch(Dispatchers.IO) {
@@ -225,8 +237,12 @@ fun LogsScreen(onBack: () -> Unit) {
                         client.disconnect()
                     }
                 }
-            }, modifier = Modifier.tvFocus(CircleShape)) {
-                Icon(Icons.Default.Delete, stringResource(R.string.action_clear))
+                Unit
+            }
+            if (Device.isTv) {
+                TvIconButton(onClick = clear) { TvIcon(Icons.Default.Delete, stringResource(R.string.action_clear)) }
+            } else {
+                IconButton(onClick = clear) { Icon(Icons.Default.Delete, stringResource(R.string.action_clear)) }
             }
         },
     ) { padding ->
@@ -275,14 +291,22 @@ fun LogsScreen(onBack: () -> Unit) {
             ) {
                 LogLevel.entries.forEach { level ->
                     val selected = filterLevel == level
-                    val checkIcon: @Composable () -> Unit = { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
-                    FilterChip(
-                        selected = selected,
-                        onClick = { filterLevel = level },
-                        label = { Text(stringResource(level.label), fontSize = if (Device.isTv) 16.sp else 14.sp) },
-                        leadingIcon = if (selected) checkIcon else null,
-                        modifier = Modifier.tvFocus(RoundedCornerShape(8.dp)),
-                    )
+                    if (Device.isTv) {
+                        val checkIcon: @Composable () -> Unit = { TvIcon(Icons.Default.Check, null, Modifier.size(18.dp)) }
+                        TvFilterChip(
+                            selected = selected,
+                            onClick = { filterLevel = level },
+                            leadingIcon = if (selected) checkIcon else null,
+                        ) { TvText(stringResource(level.label)) }
+                    } else {
+                        val checkIcon: @Composable () -> Unit = { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
+                        FilterChip(
+                            selected = selected,
+                            onClick = { filterLevel = level },
+                            label = { Text(stringResource(level.label), fontSize = 14.sp) },
+                            leadingIcon = if (selected) checkIcon else null,
+                        )
+                    }
                 }
             }
             if (found.isEmpty()) {
@@ -294,7 +318,11 @@ fun LogsScreen(onBack: () -> Unit) {
                         status == Status.Started -> R.string.logs_none_at_level
                         else -> R.string.logs_empty
                     }
-                    Text(stringResource(empty), color = colors.onSurfaceVariant, fontSize = 16.sp)
+                    if (Device.isTv) {
+                        TvText(stringResource(empty), style = TvMaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                    } else {
+                        Text(stringResource(empty), color = colors.onSurfaceVariant, fontSize = 16.sp)
+                    }
                 }
             } else {
                 val mark = SpanStyle(background = colors.primaryContainer, color = colors.onPrimaryContainer)
@@ -304,7 +332,9 @@ fun LogsScreen(onBack: () -> Unit) {
                             line,
                             appliedQuery,
                             mark,
-                            fontSize = if (Device.isTv) 14.sp else 11.sp,
+                            // Phone: 12 sp, the smallest body text Google's
+                            // accessibility guide allows.
+                            fontSize = if (Device.isTv) 14.sp else 12.sp,
                             color = when (logLineLevel(line)) {
                                 3 -> state.danger
                                 2 -> state.slow
@@ -324,6 +354,11 @@ fun LogsScreen(onBack: () -> Unit) {
 private fun LogLine(line: String, query: String, mark: SpanStyle, fontSize: TextUnit, color: Color) {
     val modifier = Modifier.padding(vertical = 1.dp)
     val matches = matchesIn(line, query)
+    if (Device.isTv) {
+        // TV: no search, so nothing to mark.
+        TvText(line, modifier, color = color, style = TvMaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+        return
+    }
     if (matches.isEmpty()) {
         Text(line, modifier, color = color, fontSize = fontSize, fontFamily = FontFamily.Monospace)
     } else {

@@ -1,14 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup on Android 6 to 11 (android:fullBackupContent). Android 12 and
+  newer read data_extraction_rules.xml: keep the two lists the same.
+
+  Only what is included goes (with a database Android takes its -journal and
+  -wal files too). Included: the keys (profiles.db and their
+  configs in files/profiles, bridge files with them), the settings
+  (settings.db; RestoreAgent marks a restore and RestoredData resets the
+  settings that describe the old device), the server chosen for each key
+  (server_selection.xml) and what the key's server said about it
+  (sub_userinfo.xml).
+
+  Left on the device: the installation ID (shared_prefs/hwid.xml: a new
+  device gets its own, as Google's Auto Backup guide asks for device IDs),
+  the core's working files with cache.db (FakeDNS names of visited sites,
+  in internal or external storage), the core's copy of the running config,
+  rule sets, caches, crash files and the other shared preferences (DNS cache,
+  storage and session flags, probes).
+-->
 <full-backup-content>
-
-    <include
-        domain="database"
-        path="profiles.db" />
-    <include
-        domain="database"
-        path="settings.db" />
-    <include
-        domain="file"
-        path="configs" />
-
+    <include domain="database" path="profiles.db" />
+    <include domain="database" path="settings.db" />
+    <include domain="file" path="profiles" />
+    <include domain="sharedpref" path="server_selection.xml" />
+    <include domain="sharedpref" path="sub_userinfo.xml" />
 </full-backup-content>

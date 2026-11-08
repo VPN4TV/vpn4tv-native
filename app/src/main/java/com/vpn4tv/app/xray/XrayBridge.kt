@@ -54,12 +54,20 @@ object XrayBridge {
             Log.w(TAG, "start() called while already running — stopping first")
             stop()
         }
-        // Log in 3000-char chunks so logcat doesn't truncate a large config
-        com.vpn4tv.app.bg.BridgeAuth.redact(configJson).chunked(3000).forEachIndexed { idx, chunk ->
-            Log.d(TAG, "xray config[$idx]: $chunk")
+        // The config holds the servers and their user ids: debug builds only,
+        // in 3000-char chunks so logcat doesn't truncate a large config.
+        if (com.vpn4tv.app.BuildConfig.DEBUG) {
+            com.vpn4tv.app.bg.BridgeAuth.redact(configJson).chunked(3000).forEachIndexed { idx, chunk ->
+                Log.d(TAG, "xray config[$idx]: $chunk")
+            }
         }
         try {
-            Libbox.startXrayInstance(configJson)
+            // Xray logs to stdout: release builds keep it to warnings, without
+            // the access log (a line per site), whatever level the saved config
+            // has (LogPrivacy).
+            Libbox.startXrayInstance(
+                com.vpn4tv.app.utils.LogPrivacy.applyXrayLog(configJson, com.vpn4tv.app.BuildConfig.DEBUG)
+            )
             running = true
             Log.i(TAG, "xray started on $SOCKS_HOST:$SOCKS_PORT_BASE+")
         } catch (e: Exception) {

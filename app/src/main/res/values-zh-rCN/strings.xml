@@ -508,4 +508,15 @@
     <string name="lsposed_module_pending_update">LSPosed 模块待更新</string>
     <string name="lsposed_module_pending_downgrade">LSPosed 模块待降级</string>
     <string name="lsposed_module_not_activated">LSPosed 模块未激活</string>
+    <string name="about_privacy">隐私政策</string>
+    <string name="about_privacy_on_phone">请在手机上打开：扫描二维码或输入网址</string>
+    <string name="about_privacy_qr">隐私政策链接的二维码</string>
+    <string name="about_telegram_channel">Telegram 频道</string>
+    <string name="about_telegram_on_phone">请在手机上打开：扫描二维码或在 Telegram 中搜索该频道</string>
+    <string name="about_telegram_qr">Telegram 频道链接的二维码</string>
+    <string name="channel_quick_connect">快速连接</string>
+    <string name="channel_auto">自动（最佳）</string>
+    <string name="channel_auto_desc">您的密钥中最快的服务器</string>
+    <string name="channel_server">服务器 %1$s</string>
+    <string name="channel_server_desc">您的密钥中的服务器</string>
 </resources>

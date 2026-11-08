@@ -1,7 +1,7 @@
 package com.vpn4tv.app.ui
 
 import android.graphics.Bitmap
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -9,9 +9,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -24,6 +32,8 @@ import com.vpn4tv.app.lan.ProfileImporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import androidx.tv.material3.MaterialTheme as TvMaterialTheme
+import androidx.tv.material3.Text as TvText
 
 /**
  * LAN import: the user opens a URL (shown + QR) on their phone, pastes a key
@@ -31,8 +41,9 @@ import kotlinx.coroutines.withContext
  * fallback — reachable from Settings, and surfaced automatically in
  * onboarding only after the Telegram flow fails to reach our server.
  */
+/** [onBack] null: shown beside the settings list on a wide window, no Back arrow. */
 @Composable
-fun LanImportScreen(onBack: () -> Unit, onImported: () -> Unit) {
+fun LanImportScreen(onBack: (() -> Unit)?, onImported: () -> Unit) {
     val context = LocalContext.current
     var imported by remember { mutableStateOf(false) }
     var importedName by remember { mutableStateOf<String?>(null) }
@@ -108,16 +119,40 @@ fun LanImportScreen(onBack: () -> Unit, onImported: () -> Unit) {
         }
     }
 
-    val qrBitmap by produceState<Bitmap?>(initialValue = null, importUrl) {
+    // In the screen's own pixels, drawn 1:1 (QrImage).
+    val qrSize = 240.dp
+    val qrPixels = with(LocalDensity.current) { qrSize.roundToPx() }
+    val qrBitmap by produceState<Bitmap?>(initialValue = null, importUrl, qrPixels) {
         val url = importUrl
         value = if (url == null) null else withContext(Dispatchers.Default) {
-            generateQrBitmap(url, 240)
+            generateQrBitmap(url, qrPixels)
+        }
+    }
+
+    // TV: the address and its instructions are one focus stop, in focus from
+    // the start, so TalkBack reads them (on a TV it reads only what has the
+    // focus); asked again for a moment, a request during the enter
+    // transition is dropped.
+    val addressFocus = remember { FocusRequester() }
+    var addressFocused by remember { mutableStateOf(false) }
+    val hasAddress = importUrl != null && !imported
+    if (Device.isTv) {
+        LaunchedEffect(hasAddress) {
+            if (!hasAddress) return@LaunchedEffect
+            repeat(10) {
+                delay(200)
+                if (addressFocused) return@LaunchedEffect
+                runCatching { addressFocus.requestFocus() }
+            }
         }
     }
 
     val colors = MaterialTheme.colorScheme
     ScreenScaffold(title = stringResource(R.string.lan_import_title), onBack = onBack) { padding ->
-    Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = if (Device.isTv) 0.dp else 16.dp)) {
+    Column(
+        Modifier.fillMaxSize().padding(padding).padding(horizontal = if (Device.isTv) 0.dp else 16.dp)
+            .readableWidth(ContentWidth.text),
+    ) {
         Spacer(modifier = Modifier.height(16.dp))
 
         when {
@@ -126,45 +161,71 @@ fun LanImportScreen(onBack: () -> Unit, onImported: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text("✓", fontSize = 64.sp, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        importedName?.let { stringResource(R.string.lan_import_added, it) }
-                            ?: stringResource(R.string.lan_import_done),
-                        fontSize = 20.sp, color = colors.onSurface, textAlign = TextAlign.Center,
-                    )
+                    val done = importedName?.let { stringResource(R.string.lan_import_added, it) }
+                        ?: stringResource(R.string.lan_import_done)
+                    // TalkBack says it as it appears.
+                    val announced = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                    if (Device.isTv) {
+                        val type = TvMaterialTheme.typography
+                        TvText("✓", style = type.displayMedium.copy(fontSize = 64.sp, lineHeight = 72.sp), color = colors.primary)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        TvText(done, style = type.titleMedium, color = colors.onSurface, textAlign = TextAlign.Center, modifier = announced)
+                    } else {
+                        Text("✓", fontSize = 64.sp, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(done, fontSize = 20.sp, color = colors.onSurface, textAlign = TextAlign.Center, modifier = announced)
+                    }
                 }
             }
             importUrl == null -> {
                 // probedOnce guards the brief gap before the first poll; once
                 // probed, a null URL means no site-local IPv4 (no Wi-Fi/eth).
                 if (probedOnce) {
-                    Text(
-                        stringResource(R.string.lan_import_no_network),
-                        fontSize = 16.sp, color = colors.onSurfaceVariant, textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
-                    )
+                    val noNetwork = stringResource(R.string.lan_import_no_network)
+                    val modifier = Modifier.fillMaxWidth().padding(top = 32.dp)
+                        .semantics { liveRegion = LiveRegionMode.Polite }
+                    if (Device.isTv) {
+                        TvText(noNetwork, style = TvMaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant,
+                            textAlign = TextAlign.Center, modifier = modifier)
+                    } else {
+                        Text(noNetwork, fontSize = 16.sp, color = colors.onSurfaceVariant, textAlign = TextAlign.Center, modifier = modifier)
+                    }
                 }
             }
             else -> {
+                val step1 = stringResource(R.string.lan_import_step1)
+                val step2 = stringResource(R.string.lan_import_step2)
+                val tvStop = if (!Device.isTv) Modifier else Modifier
+                    .focusRequester(addressFocus)
+                    .onFocusChanged { if (it.hasFocus) addressFocused = true }
+                    .focusable()
+                    .clearAndSetSemantics { contentDescription = "$step1 $importUrl. $step2" }
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().then(tvStop),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     qrBitmap?.let { bmp ->
-                        Image(
-                            bitmap = bmp.asImageBitmap(),
-                            contentDescription = "QR",
-                            modifier = Modifier.size(240.dp),
-                        )
+                        QrImage(bmp, qrSize, stringResource(R.string.qr_import_page))
                     }
                     Spacer(modifier = Modifier.width(40.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            stringResource(R.string.lan_import_step1),
-                            fontSize = 16.sp, color = colors.onSurface,
-                        )
+                    if (Device.isTv) {
+                        val type = TvMaterialTheme.typography
+                        Column(modifier = Modifier.weight(1f)) {
+                            TvText(step1, style = type.bodyMedium, color = colors.onSurface)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TvPanel {
+                                TvText(
+                                    importUrl ?: "",
+                                    style = type.titleLarge, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            TvText(step2, style = type.labelSmall, color = colors.onSurfaceVariant)
+                        }
+                    } else Column(modifier = Modifier.weight(1f)) {
+                        Text(step1, fontSize = 16.sp, color = colors.onSurface)
                         Spacer(modifier = Modifier.height(8.dp))
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                             Text(
@@ -175,10 +236,7 @@ fun LanImportScreen(onBack: () -> Unit, onImported: () -> Unit) {
                             )
                         }
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            stringResource(R.string.lan_import_step2),
-                            fontSize = 14.sp, color = colors.onSurfaceVariant,
-                        )
+                        Text(step2, fontSize = 14.sp, color = colors.onSurfaceVariant)
                     }
                 }
             }

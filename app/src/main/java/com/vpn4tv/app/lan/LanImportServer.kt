@@ -65,7 +65,8 @@ class LanImportServer(
                 val socket = ServerSocket(0)
                 serverSocket = socket
                 port = socket.localPort
-                Log.i(TAG, "LAN import server on :$port path /$token")
+                // Not the path: its token is what lets a browser in.
+                Log.i(TAG, "LAN import server on :$port")
                 while (running) {
                     val client = try {
                         socket.accept()

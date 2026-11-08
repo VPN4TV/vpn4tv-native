@@ -1,25 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup and device-to-device transfer on Android 12 and newer
+  (android:dataExtractionRules). The same list as backup_rules.xml, which
+  says what goes and what stays on the device, and why.
+-->
 <data-extraction-rules>
     <cloud-backup>
-        <include
-            domain="database"
-            path="profiles.db" />
-        <include
-            domain="database"
-            path="settings.db" />
-        <include
-            domain="file"
-            path="configs" />
+        <include domain="database" path="profiles.db" />
+        <include domain="database" path="settings.db" />
+        <include domain="file" path="profiles" />
+        <include domain="sharedpref" path="server_selection.xml" />
+        <include domain="sharedpref" path="sub_userinfo.xml" />
     </cloud-backup>
     <device-transfer>
-        <include
-            domain="database"
-            path="profiles.db" />
-        <include
-            domain="database"
-            path="settings.db" />
-        <include
-            domain="file"
-            path="configs" />
+        <include domain="database" path="profiles.db" />
+        <include domain="database" path="settings.db" />
+        <include domain="file" path="profiles" />
+        <include domain="sharedpref" path="server_selection.xml" />
+        <include domain="sharedpref" path="sub_userinfo.xml" />
     </device-transfer>
 </data-extraction-rules>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widget in the widget picker before Android 12, which takes a picture:
+     the 2x1 widget's shapes (the two lines of text as bars) and its button. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="180dp"
+    android:height="72dp"
+    android:viewportWidth="180"
+    android:viewportHeight="72">
+    <path
+        android:fillColor="@color/widget_preview_background"
+        android:pathData="M16 0h148a16 16 0 0 1 16 16v40a16 16 0 0 1 -16 16h-148a16 16 0 0 1 -16 -16v-40a16 16 0 0 1 16 -16z" />
+    <path
+        android:fillAlpha="0.6"
+        android:fillColor="@color/widget_preview_on_surface_variant"
+        android:pathData="M20 20h40a4 4 0 0 1 0 8h-40a4 4 0 0 1 0 -8z" />
+    <path
+        android:fillColor="@color/widget_preview_on_surface"
+        android:pathData="M22 36h62a6 6 0 0 1 0 12h-62a6 6 0 0 1 0 -12z" />
+    <path
+        android:fillColor="@color/widget_preview_button"
+        android:pathData="M148 12a24 24 0 1 1 0 48a24 24 0 1 1 0 -48z" />
+    <group
+        android:translateX="136"
+        android:translateY="24">
+        <path
+            android:fillColor="@color/widget_preview_on_button"
+            android:pathData="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z" />
+    </group>
+</vector>

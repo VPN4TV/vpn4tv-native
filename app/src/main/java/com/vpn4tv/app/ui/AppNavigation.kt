@@ -4,6 +4,8 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -11,14 +13,28 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.layout.AnimatedPane
+import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldRole
+import androidx.compose.material3.adaptive.navigation.NavigableListDetailPaneScaffold
+import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaffoldNavigator
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -31,6 +47,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.dialog
 import androidx.navigation.compose.rememberNavController
 import com.vpn4tv.app.R
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 object Routes {
@@ -46,7 +64,7 @@ object Routes {
     const val MANUAL_IMPORT = "manual_import"
 }
 
-/** Phone: the primary destinations go in a Material 3 navigation bar. */
+/** Phone and tablet: the primary destinations, in a Material 3 navigation bar or rail. */
 private enum class Tab(val route: String, @StringRes val label: Int, val icon: ImageVector) {
     Home(Routes.HOME, R.string.title_dashboard, Icons.Default.Home),
     Servers(Routes.SERVERS, R.string.nav_servers, Icons.AutoMirrored.Filled.List),
@@ -109,18 +127,53 @@ fun AppNavigation(
             com.vpn4tv.app.database.ProfileManager.list()
         }
         if (profiles.isEmpty()) {
-            markAddProfileOpened()
-            navController.navigate(Routes.ADD_PROFILE) {
-                popUpTo(Routes.HOME)
+            // Not again when the activity is recreated (a turn, the theme) or
+            // restored after the system dropped it while the user was in
+            // Telegram: the restored screen
+            // keeps its code and uuid, a new one would wait for another code.
+            // A TV stays on Home, which is the add-key screen without a key
+            // (Google's TV navigation: the first screen is also the last).
+            if (!Device.isTv && navController.currentBackStackEntry?.destination?.route != Routes.ADD_PROFILE) {
+                markAddProfileOpened()
+                navController.navigate(Routes.ADD_PROFILE) {
+                    popUpTo(Routes.HOME)
+                }
             }
-            return@LaunchedEffect
-        }
-        if (com.vpn4tv.app.database.Settings.selectedProfile == -1L) {
+        } else if (com.vpn4tv.app.database.Settings.selectedProfile == -1L) {
             com.vpn4tv.app.database.Settings.selectedProfile = profiles.first().id
+        }
+        // The screens the launcher's shortcuts open, after the check above:
+        // with no key at all, Add key is open already.
+        MainActivity.routeRequests.receiveAsFlow().collect { route ->
+            when (route) {
+                Routes.SERVERS -> {
+                    val noKeys = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.vpn4tv.app.database.ProfileManager.list().isEmpty()
+                    }
+                    if (!noKeys) {
+                        if (Device.isTv) navController.navigate(Routes.SERVERS) { launchSingleTop = true }
+                        else navController.openTab(Routes.SERVERS)
+                    }
+                }
+                Routes.ADD_PROFILE -> if (navController.currentDestination?.route != Routes.ADD_PROFILE) {
+                    markAddProfileOpened()
+                    navController.navigate(Routes.ADD_PROFILE) { launchSingleTop = true }
+                }
+            }
         }
     }
 
     if (Device.isTv) {
+        TvConnectFeedback()
+        TvMessages(
+            onRetryConnect = onConnect,
+            // The one way to connect on a box without the system VPN window:
+            // proxy mode on, and the connect the user asked for goes ahead.
+            onProxyMode = {
+                com.vpn4tv.app.database.Settings.serviceMode = com.vpn4tv.app.constant.ServiceMode.PROXY
+                onConnect()
+            },
+        )
         Graph(navController, onConnect, onDisconnect)
         return
     }
@@ -129,28 +182,54 @@ fun AppNavigation(
     val route = entry?.destination?.route
     // The bar stays under the manual-import dialog that opens over a tab.
     val showBar = route in Tab.entries.map { it.route } || route == Routes.MANUAL_IMPORT
-    Scaffold(
-        // Each screen pads for the status bar itself (its top app bar); the
-        // bar pads for the navigation bar. Without the bar, the screen's own
-        // scaffold takes the navigation-bar inset.
-        contentWindowInsets = WindowInsets(0),
-        bottomBar = {
-            if (showBar) {
-                NavigationBar {
-                    Tab.entries.forEach { tab ->
-                        NavigationBarItem(
-                            selected = entry?.destination?.route == tab.route,
-                            onClick = { navController.openTab(tab.route) },
-                            icon = { Icon(tab.icon, contentDescription = null) },
-                            label = { Text(stringResource(tab.label)) },
-                        )
-                    }
-                }
+    val snackbar = remember { SnackbarHostState() }
+    PhoneMessages(
+        snackbar,
+        onRetryConnect = onConnect,
+        onOpenSettings = { navController.openTab(Routes.SETTINGS) },
+        onAddKey = { markAddProfileOpened(); navController.navigateSafe(Routes.ADD_PROFILE) },
+    )
+    ConnectFeedback()
+    // Google's adaptive navigation: the bar at the bottom of a narrow window;
+    // a rail at the side of one 600 dp wide and more that is not low (a tablet,
+    // a foldable open), where the thumbs reach the edges. Turned on its side, a
+    // phone is low: the bar stays. Off on the screens below the tabs.
+    val navigation = if (showBar) {
+        NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
+    } else {
+        NavigationSuiteType.None
+    }
+    NavigationSuiteScaffold(
+        navigationSuiteItems = {
+            Tab.entries.forEach { tab ->
+                item(
+                    selected = route == tab.route,
+                    onClick = { navController.openTab(tab.route) },
+                    icon = { Icon(tab.icon, contentDescription = null) },
+                    label = { Text(stringResource(tab.label)) },
+                )
             }
         },
-    ) { padding ->
-        Box(Modifier.padding(padding).consumeWindowInsets(padding)) {
-            Graph(navController, onConnect, onDisconnect)
+        layoutType = navigation,
+        containerColor = MaterialTheme.colorScheme.background,
+    ) {
+        Scaffold(
+            // Each screen pads for the status bar itself (its top app bar); the
+            // bar pads for the navigation bar and leaves it consumed, the rail
+            // only its side. Without either, the screen's own scaffold takes the
+            // navigation-bar inset.
+            contentWindowInsets = WindowInsets(0),
+            // Above the navigation bar; without it, above the system's.
+            snackbarHost = {
+                SnackbarHost(snackbar, Modifier.navigationBarsPadding()) { data ->
+                    // A long message keeps the full width, its action goes below.
+                    Snackbar(data, actionOnNewLine = data.visuals.actionLabel != null && data.visuals.message.length > 40)
+                }
+            },
+        ) { padding ->
+            Box(Modifier.padding(padding).consumeWindowInsets(padding)) {
+                Graph(navController, onConnect, onDisconnect)
+            }
         }
     }
 }
@@ -176,6 +255,8 @@ private fun Graph(
                 onNavigateSettings = { navController.navigateSafe(Routes.SETTINGS) },
                 onNavigateAbout = { navController.navigateSafe(Routes.ABOUT) },
                 onManualImport = { navController.navigateSafe(Routes.MANUAL_IMPORT) },
+                // TV without a key: the fallback when the bot's server is out of reach.
+                onLanImport = { navController.navigateSafe(Routes.LAN_IMPORT) },
             )
         }
         composable(Routes.PROFILES) {
@@ -186,20 +267,26 @@ private fun Graph(
             )
         }
         composable(Routes.SERVERS) {
+            // The same as the launcher's Servers shortcut: the launcher ranks it by this.
+            ReportShortcutUse(AppShortcuts.ID_SERVERS)
             ServersScreen(onBack = tabBack)
         }
         composable(Routes.LOGS) {
             LogsScreen(onBack = { navController.popBackStackSafe() })
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen(
-                onBack = tabBack,
-                onPerAppProxy = { navController.navigateSafe(Routes.PER_APP_PROXY) },
-                onLanImport = { navController.navigateSafe(Routes.LAN_IMPORT) },
-                onManualImport = { navController.navigateSafe(Routes.MANUAL_IMPORT) },
-                onLogs = { navController.navigateSafe(Routes.LOGS) },
-                onAbout = { navController.navigateSafe(Routes.ABOUT) },
-            )
+            if (tv) {
+                    SettingsScreen(
+                    onBack = tabBack,
+                    onPerAppProxy = { navController.navigateSafe(Routes.PER_APP_PROXY) },
+                    onLanImport = { navController.navigateSafe(Routes.LAN_IMPORT) },
+                    onManualImport = { navController.navigateSafe(Routes.MANUAL_IMPORT) },
+                    onLogs = { navController.navigateSafe(Routes.LOGS) },
+                    onAbout = { navController.navigateSafe(Routes.ABOUT) },
+                )
+            } else {
+                PhoneSettings(navController)
+            }
         }
         composable(Routes.PER_APP_PROXY) {
             PerAppProxyScreen(onBack = { navController.popBackStackSafe() })
@@ -234,6 +321,7 @@ private fun Graph(
             LaunchedEffect(imported) {
                 if (imported != importsBeforeAddProfile) navController.popBackStack(Routes.HOME, false)
             }
+            ReportShortcutUse(AppShortcuts.ID_NEW_KEY)
             AddProfileScreen(
                 onBack = { navController.popBackStackSafe() },
                 onProfileAdded = {
@@ -244,5 +332,80 @@ private fun Graph(
                 onLanImport = { navController.navigateSafe(Routes.LAN_IMPORT) }
             )
         }
+    }
+}
+
+/**
+ * Settings on a phone or tablet. A window under 840 dp: the list, and each
+ * sub-screen opens over it, as before. A wider one (a tablet on its side, a
+ * foldable open): the sub-screen opens beside the list (Google's settings
+ * pattern, "Adaptive layout": list-detail; the list stays in view, the chosen
+ * row marked). The pane picked survives a turn; a window that narrows while
+ * one is open keeps showing it alone, Back returns to the list.
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Composable
+private fun PhoneSettings(navController: androidx.navigation.NavHostController) {
+    val navigator = rememberListDetailPaneScaffoldNavigator<String>()
+    val twoPanes = navigator.scaffoldDirective.maxHorizontalPartitions > 1
+    val scope = rememberCoroutineScope()
+    val shown = navigator.currentDestination
+        ?.takeIf { it.pane == ListDetailPaneScaffoldRole.Detail }?.contentKey
+    val open: (String) -> Unit = { route ->
+        if (!twoPanes) navController.navigateSafe(route)
+        else if (route != shown) scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, route) }
+    }
+    val list = @Composable {
+        SettingsScreen(
+            onBack = null,
+            selected = if (twoPanes) shown else null,
+            onPerAppProxy = { open(Routes.PER_APP_PROXY) },
+            onLanImport = { open(Routes.LAN_IMPORT) },
+            onManualImport = { navController.navigateSafe(Routes.MANUAL_IMPORT) },
+            onLogs = { open(Routes.LOGS) },
+            onAbout = { open(Routes.ABOUT) },
+        )
+    }
+    // A phone: the plain list, exactly as before.
+    if (!twoPanes && shown == null) {
+        list()
+        return
+    }
+    // Two panes: the sub-screens without their Back arrow, the list is beside
+    // them. One (the window narrowed, a tablet turned upright): the arrow back
+    // to the list.
+    val back: (() -> Unit)? = if (twoPanes) null else { { scope.launch { navigator.navigateBack() } } }
+    NavigableListDetailPaneScaffold(
+        navigator = navigator,
+        listPane = { AnimatedPane { list() } },
+        detailPane = {
+            AnimatedPane {
+                when (shown) {
+                    Routes.PER_APP_PROXY -> PerAppProxyScreen(onBack = back)
+                    Routes.LAN_IMPORT -> LanImportScreen(
+                        onBack = back,
+                        onImported = { navController.popBackStack(Routes.HOME, false) },
+                    )
+                    Routes.LOGS -> LogsScreen(onBack = back)
+                    Routes.ABOUT -> AboutScreen(onBack = back)
+                    else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            stringResource(R.string.settings_pick_detail),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
+    )
+}
+
+/** A screen a launcher shortcut also opens: its use is reported once per visit. */
+@Composable
+private fun ReportShortcutUse(id: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(id) {
+        withContext(kotlinx.coroutines.Dispatchers.IO) { AppShortcuts.reportUsed(context.applicationContext, id) }
     }
 }

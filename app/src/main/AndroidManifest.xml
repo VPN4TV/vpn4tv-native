@@ -12,6 +12,13 @@
     <uses-feature
         android:name="android.hardware.touchscreen"
         android:required="false" />
+    <!-- ACCESS_WIFI_STATE implies Wi-Fi as required hardware, and Google Play
+         would then hide the app from TV boxes with Ethernet only (Google's TV
+         hardware guide). Without Wi-Fi the app reads no Wi-Fi state
+         (Application.wifiManager is null). -->
+    <uses-feature
+        android:name="android.hardware.wifi"
+        android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -26,16 +33,38 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
+    <!-- Android TV: the app's channel on the home screen (TvProvider, a normal
+         permission; nothing on a phone, which has no TvProvider). The library
+         also asks to read TV listings, which the app does not need: its own
+         channel is readable without it. -->
+    <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" />
+    <uses-permission
+        android:name="com.android.providers.tv.permission.READ_EPG_DATA"
+        tools:node="remove" />
 
+    <!-- enableOnBackInvokedCallback: predictive back on phones and tablets
+         (Android 13+; Android 16 turns it on for targetSdk 36 anyway): the back
+         gesture previews where it leads, and the opt-out Google calls temporary
+         is gone. Then BACK no longer reaches MainActivity.dispatchKeyEvent on
+         Android 13+, so on a TV with Android 13+ the guard against a remote's
+         double BACK is a callback of its own (MainActivity.tvBackGuard).
+         Backup: Auto Backup with rules (keys and settings go; the installation
+         ID, the core's cache with visited names and caches stay), the same
+         for Android 6-11 (fullBackupContent) and 12+ (dataExtractionRules).
+         RestoreAgent only marks a restore (fullBackupOnly keeps Auto Backup);
+         RestoredData then resets what described the old device. -->
     <application
         android:name=".Application"
         android:allowBackup="true"
-        android:enableOnBackInvokedCallback="false"
+        android:backupAgent=".bg.RestoreAgent"
+        android:fullBackupOnly="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:banner="@mipmap/tv_banner"
@@ -43,12 +72,18 @@
         android:theme="@style/AppTheme"
         tools:targetApi="31">
 
+        <!-- Theme.VPN4TV.Starting: the launch screen, AppTheme once MainActivity
+             starts. configChanges: a TV remote or a keyboard that sleeps and
+             wakes (Bluetooth) or is plugged in changes the keyboard and
+             navigation configuration; the screen stays as it is instead of
+             being recreated (Google's TV controllers guide). -->
         <activity
             android:name=".ui.MainActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation"
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/AppTheme">
+            android:theme="@style/Theme.VPN4TV.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -119,6 +154,42 @@
                 android:value="proxy" />
         </service>
 
+        <!-- Quick Settings tile (phones and tablets, Android 7+): connect and
+             disconnect from the shade. Active: redrawn when the VPN changes,
+             not bound each time the panel opens. -->
+        <service
+            android:name=".bg.VpnTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_vpn4tv"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+            <meta-data
+                android:name="android.service.quicksettings.TILE_CATEGORY"
+                android:value="android.service.quicksettings.CATEGORY_CONNECTIVITY" />
+        </service>
+
+        <!-- Home-screen widget (Jetpack Glance): the VPN's state and a connect button. -->
+        <receiver
+            android:name=".widget.VpnWidgetReceiver"
+            android:exported="false"
+            android:label="@string/widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/vpn_widget_info" />
+        </receiver>
+
         <receiver
             android:name=".bg.BootReceiver"
             android:exported="true">
@@ -128,14 +199,25 @@
             </intent-filter>
         </receiver>
 
+        <!-- Android TV's home screen: the launcher asks for the app's default
+             channel after an install, and says when the user removed a card. -->
         <receiver
-            android:name=".bg.AppChangeReceiver"
-            android:exported="false">
+            android:name=".tv.QuickConnectReceiver"
+            android:exported="true">
             <intent-filter>
-                <action android:name="android.intent.action.PACKAGE_ADDED" />
-                <data android:scheme="package" />
+                <action android:name="android.media.tv.action.INITIALIZE_PROGRAMS" />
+                <action android:name="android.media.tv.action.PREVIEW_PROGRAM_BROWSABLE_DISABLED" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </receiver>
+
+        <!-- The pictures of the channel's cards, which the TV launcher loads:
+             read only, the PNG files drawn for the channel and nothing else. -->
+        <provider
+            android:name=".tv.ChannelArtProvider"
+            android:authorities="${applicationId}.channelart"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

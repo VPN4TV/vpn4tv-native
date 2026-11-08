@@ -22,11 +22,39 @@ class VPNService :
     PlatformInterfaceWrapper {
     companion object {
         private const val TAG = "VPNService"
+
+        @Volatile
+        private var running: java.lang.ref.WeakReference<VPNService>? = null
+
+        /**
+         * The app came to the front: always-on VPN may have been changed in
+         * Android's settings meanwhile, and turning "block connections
+         * without VPN" on or off starts nothing here. Blocking: a call to the
+         * system, keep it off the main thread.
+         */
+        fun refreshAlwaysOn() {
+            val service = running?.get() ?: return
+            val now = service.alwaysOnState()
+            if (now == BoxService.alwaysOn.value) return
+            BoxService.alwaysOn.postValue(now)
+            ServiceNotification.refresh()
+        }
     }
 
     private val service = BoxService(this, this)
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = service.onStartCommand()
+    override fun onCreate() {
+        super.onCreate()
+        running = java.lang.ref.WeakReference(this)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Every start command, the system's too: turning always-on VPN on in
+        // Android's settings while this VPN runs starts it once more. A fresh
+        // start learns it only once its tun is up (openTun).
+        BoxService.alwaysOn.value = alwaysOnState()
+        return service.onStartCommand()
+    }
 
     override fun onBind(intent: Intent): IBinder {
         val binder = super.onBind(intent)
@@ -37,7 +65,26 @@ class VPNService :
     }
 
     override fun onDestroy() {
+        if (running?.get() === this) running = null
+        BoxService.alwaysOn.value = null
         service.onDestroy()
+    }
+
+    /**
+     * Whether Android keeps this VPN on (always-on VPN) and blocks connections
+     * without it (Android 10+; older versions cannot tell). Google's VPN guide:
+     * the system starts and stops such a connection, so the app offers no
+     * Disconnect for it. Android answers only for an established VPN (it asks
+     * who owns the VPN network): false before the first tun is up.
+     */
+    fun alwaysOnState(): BoxService.AlwaysOnVpn? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return try {
+            if (isAlwaysOn) BoxService.AlwaysOnVpn(lockdown = isLockdownEnabled) else null
+        } catch (e: Exception) {
+            Log.w(TAG, "always-on state unavailable: ${e.message}")
+            null
+        }
     }
 
     override fun onRevoke() {
@@ -186,6 +233,7 @@ class VPNService :
         // alive until GC.
         service.fileDescriptor?.close()
         service.fileDescriptor = pfd
+        BoxService.alwaysOn.postValue(alwaysOnState())
         return pfd.fd
     }
 

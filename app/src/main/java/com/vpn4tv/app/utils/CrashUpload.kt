@@ -7,7 +7,8 @@ import com.vpn4tv.app.BuildConfig
 /**
  * Best-effort off-device upload of diagnostic dumps to bell.a4e.ar/crash.
  * Shared by the Go-crash surfacer (consumeCrashLog, kind="crash"), the Java crash
- * reporter (JavaCrashReport, kind="java-crash") and the connect-watchdog (kind="hang") — Play strips/truncates the in-app frames and
+ * reporter (JavaCrashReport, kind="java-crash"), the connect-watchdog (kind="hang") and the exits the system
+ * forced while the app mattered (ExitReasons, kind="exit") — Play strips/truncates the in-app frames and
  * field hangs never reach Vitals at all, so the receiver is the only way to see
  * full goroutine stacks. Off-thread, never throws.
  */

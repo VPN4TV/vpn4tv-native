@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android TV. The television qualifier outranks night mode and the API
+         level, so these two replace AppTheme and the launch theme on every TV.
+         - android:colorPrimary: the expanding circle a TV draws when the app
+           starts is the icon's purple, with the two transition overlaps Google
+           asks for alongside ("Change the launcher color").
+         - A dark window before the first frame: the TV screens are always dark
+           (TvTheme), and on a TV whose system theme is light the window was
+           light until Compose drew.
+         - No splash icon: the TV has its own start animation, and Android 12+
+           does not show an app's splash screen on TV. The launch theme only
+           holds the dark window until the keys are loaded, as on a phone. -->
+    <style name="AppTheme" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="bottomSheetDialogTheme">@style/BottomSheetDialogTheme</item>
+        <item name="android:colorPrimary">@color/brand</item>
+        <item name="android:windowBackground">@color/tv_window_background</item>
+        <item name="android:windowAllowEnterTransitionOverlap">true</item>
+        <item name="android:windowAllowReturnTransitionOverlap">true</item>
+    </style>
+
+    <style name="Theme.VPN4TV.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/tv_window_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="postSplashScreenTheme">@style/AppTheme</item>
+        <item name="android:windowBackground">@color/tv_window_background</item>
+        <item name="android:colorPrimary">@color/brand</item>
+        <item name="android:windowAllowEnterTransitionOverlap">true</item>
+        <item name="android:windowAllowReturnTransitionOverlap">true</item>
+    </style>
+</resources>

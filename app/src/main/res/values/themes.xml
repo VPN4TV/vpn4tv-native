@@ -3,6 +3,16 @@
 
     <style name="AppTheme" parent="AppTheme.Base" />
 
+    <!-- MainActivity's launch screen (core-splashscreen): Android 12's splash
+         screen on every version from 6, the icon's purple with its mark, until
+         the keys are loaded (MainActivity.onCreate), then AppTheme. TV:
+         values-television. -->
+    <style name="Theme.VPN4TV.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/brand</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/AppTheme</item>
+    </style>
+
     <style name="AppTheme.Base" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="bottomSheetDialogTheme">@style/BottomSheetDialogTheme</item>
     </style>

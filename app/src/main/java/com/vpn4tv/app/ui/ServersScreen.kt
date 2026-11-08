@@ -2,7 +2,9 @@ package com.vpn4tv.app.ui
 
 import android.content.Context
 import android.util.Log
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,8 +17,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
@@ -27,13 +40,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.tv.material3.Icon as TvIcon
+import androidx.tv.material3.MaterialTheme as TvMaterialTheme
+import androidx.tv.material3.Text as TvText
 
 @Composable
 fun ServersScreen(onBack: (() -> Unit)?) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var groups by remember { mutableStateOf<List<GroupData>>(emptyList()) }
+    // The server each automatic group ("auto") is on now.
+    var autoPicks by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var isTestRunning by remember { mutableStateOf(false) }
+    // TV: the row in focus, whose country the background shows.
+    var focusedTag by remember { mutableStateOf<String?>(null) }
 
     val commandClient = remember {
         CommandClient(
@@ -41,6 +63,7 @@ fun ServersScreen(onBack: (() -> Unit)?) {
             listOf(CommandClient.ConnectionType.Groups),
             object : CommandClient.Handler {
                 override fun updateGroups(newGroups: MutableList<OutboundGroup>) {
+                    autoPicks = newGroups.filter { it.type == "urltest" }.associate { it.tag to it.selected }
                     // Only show selector groups (skip internal urltest)
                     groups = newGroups
                         .filter { it.type == "selector" }
@@ -63,6 +86,21 @@ fun ServersScreen(onBack: (() -> Unit)?) {
         onDispose { commandClient.disconnect() }
     }
 
+    val select: (GroupData, ServerItem) -> Unit = { group, server ->
+        scope.launch(Dispatchers.IO) {
+            try {
+                val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
+                client.selectOutbound(group.tag, server.tag)
+                client.disconnect()
+                // Remember selection
+                saveSelectedServer(context, server.tag)
+                Log.d("Servers", "Selected ${server.tag} in ${group.tag}")
+            } catch (e: Exception) {
+                Log.e("Servers", "select failed: ${e.message}")
+            }
+        }
+    }
+
     val testAll: () -> Unit = {
         if (!isTestRunning) {
             isTestRunning = true
@@ -83,17 +121,47 @@ fun ServersScreen(onBack: (() -> Unit)?) {
         }
     }
 
+    // TV: behind the list, the country of the row in focus (before any, of
+    // the server in use); "auto" shows where it is connected now.
+    if (Device.isTv) {
+        val tag = focusedTag ?: groups.firstOrNull()?.selected
+        val country = tag?.let { serverCountry(autoPicks[it] ?: it) }
+        Box(Modifier.fillMaxSize()) {
+            CountryBackdrop(country)
+            ServersList(onBack, groups, isTestRunning, testAll, onFocused = { focusedTag = it }, onSelect = select)
+        }
+    } else {
+        ServersList(onBack, groups, isTestRunning, testAll, onFocused = {}, onSelect = select)
+    }
+}
+
+/** The list of servers under the screen's title; the refresh button tests them all. */
+@Composable
+private fun ServersList(
+    onBack: (() -> Unit)?,
+    groups: List<GroupData>,
+    isTestRunning: Boolean,
+    testAll: () -> Unit,
+    onFocused: (String) -> Unit,
+    onSelect: (GroupData, ServerItem) -> Unit,
+) {
     ScreenScaffold(
         title = stringResource(R.string.title_servers),
         onBack = onBack,
+        collapsingTopBar = true,
         actions = {
             // Nothing to test until the tunnel lists its servers.
             if (groups.isNotEmpty()) {
-                IconButton(onClick = testAll, modifier = Modifier.tvFocus(CircleShape)) {
-                    if (isTestRunning) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.Refresh, stringResource(R.string.action_test_all))
+                val testing: @Composable () -> Unit = {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                }
+                if (Device.isTv) {
+                    TvIconButton(onClick = testAll) {
+                        if (isTestRunning) testing() else TvIcon(Icons.Default.Refresh, stringResource(R.string.action_test_all))
+                    }
+                } else {
+                    IconButton(onClick = testAll) {
+                        if (isTestRunning) testing() else Icon(Icons.Default.Refresh, stringResource(R.string.action_test_all))
                     }
                 }
             }
@@ -101,11 +169,12 @@ fun ServersScreen(onBack: (() -> Unit)?) {
     ) { padding ->
         if (groups.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text(
-                    stringResource(R.string.servers_empty),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 18.sp,
-                )
+                val empty = stringResource(R.string.servers_empty)
+                if (Device.isTv) {
+                    TvText(empty, style = TvMaterialTheme.typography.bodyLarge, color = TvMaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Text(empty, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 18.sp)
+                }
             }
             return@ScreenScaffold
         }
@@ -119,20 +188,8 @@ fun ServersScreen(onBack: (() -> Unit)?) {
                     ServerRow(
                         server = server,
                         isSelected = server.tag == group.selected,
-                        onClick = {
-                            scope.launch(Dispatchers.IO) {
-                                try {
-                                    val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
-                                    client.selectOutbound(group.tag, server.tag)
-                                    client.disconnect()
-                                    // Remember selection
-                                    saveSelectedServer(context, server.tag)
-                                    Log.d("Servers", "Selected ${server.tag} in ${group.tag}")
-                                } catch (e: Exception) {
-                                    Log.e("Servers", "select failed: ${e.message}")
-                                }
-                            }
-                        },
+                        onFocused = { onFocused(server.tag) },
+                        onClick = { onSelect(group, server) },
                     )
                 }
             }
@@ -140,48 +197,69 @@ fun ServersScreen(onBack: (() -> Unit)?) {
     }
 }
 
-/** The selected server carries a check mark; on TV the outline is the focus only. */
+/**
+ * The selected server carries a check mark; on TV the outline is the focus
+ * only. For TalkBack a row is one of a set, as a radio button, on a phone and
+ * on TV alike: the server, "selected" or not, what a press does.
+ */
 @Composable
-private fun ServerRow(server: ServerItem, isSelected: Boolean, onClick: () -> Unit) {
+private fun ServerRow(server: ServerItem, isSelected: Boolean, onFocused: () -> Unit, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val tv = Device.isTv
     val mark: @Composable () -> Unit = {
         Box(Modifier.width(32.dp)) {
             if (isSelected) {
                 Icon(
-                    Icons.Default.Check, stringResource(R.string.server_selected),
+                    // The row itself says "selected", the mark is only seen.
+                    Icons.Default.Check, null,
                     tint = LocalStateColors.current.connected, modifier = Modifier.size(22.dp),
                 )
             }
         }
     }
-    if (!Device.isTv) {
-        ListItem(
-            modifier = Modifier.clickable(onClick = onClick),
-            leadingContent = mark,
-            headlineContent = { Text(server.tag) },
+    if (tv) {
+        // Compose for TV's list item: no container (the country behind shows
+        // through), the grey plate and the outline in focus.
+        val type = TvMaterialTheme.typography
+        TvListItem(
+            selected = isSelected,
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth()
+                .onFocusChanged { if (it.isFocused) onFocused() }
+                .semantics { role = Role.RadioButton },
+            leadingContent = {
+                if (isSelected) {
+                    TvIcon(
+                        Icons.Default.Check, null,
+                        tint = LocalStateColors.current.connected, modifier = Modifier.size(22.dp),
+                    )
+                }
+            },
+            headlineContent = { TvText(server.tag, style = type.titleSmall) },
             trailingContent = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(server.type, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
-                    Spacer(Modifier.width(12.dp))
-                    DelayText(server.delay, 14.sp)
+                    TvText(server.type, style = type.labelSmall, color = colors.onSurfaceVariant, modifier = Modifier.padding(end = 16.dp))
+                    DelayText(server.delay, 16.sp)
                 }
             },
         )
         return
     }
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(10.dp), TV_ROW_SCALE),
-        shape = RoundedCornerShape(10.dp),
-        color = colors.surfaceContainerHigh,
-    ) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            mark()
-            Text(server.tag, fontSize = 18.sp, color = colors.onSurface, modifier = Modifier.weight(1f))
-            Text(server.type, fontSize = 14.sp, color = colors.onSurfaceVariant, modifier = Modifier.padding(end = 16.dp))
-            DelayText(server.delay, 16.sp)
-        }
-    }
+    ListItem(
+        // One of the list, as a radio button: TalkBack says which server is
+        // selected and what a tap does. No wider than a readable column.
+        modifier = Modifier.fillMaxWidth().readableWidth(ContentWidth.list)
+            .selectable(selected = isSelected, role = Role.RadioButton, onClick = onClick),
+        leadingContent = mark,
+        headlineContent = { Text(server.tag) },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(server.type, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                Spacer(Modifier.width(12.dp))
+                DelayText(server.delay, 14.sp)
+            }
+        },
+    )
 }
 
 @Composable
@@ -199,8 +277,56 @@ private fun DelayText(delay: Int, size: androidx.compose.ui.unit.TextUnit) {
         delay < 600 -> state.medium
         else -> state.slow
     }
-    Text(text, fontSize = size, color = color)
+    if (Device.isTv) TvText(text, style = TvMaterialTheme.typography.bodyMedium, color = color)
+    else Text(text, fontSize = size, color = color)
 }
+
+/**
+ * TV: the flag of a server's country, large and faint, behind the whole
+ * screen; it changes as the focus moves from row to row (Google's TV app
+ * checklist: "Change the background image as users browse through
+ * content"). Nothing for a server whose name gives no country, or where the
+ * font has no such flag. Only a picture: TalkBack skips it.
+ */
+@Composable
+private fun CountryBackdrop(country: String?) {
+    val flag = remember(country) { country?.let(::flagEmoji)?.takeIf(::canDrawEmoji) }
+    Crossfade(targetState = flag, animationSpec = tween(durationMillis = 450), label = "countryBackdrop") { shown ->
+        if (shown != null) {
+            Box(
+                Modifier.fillMaxSize().clearAndSetSemantics {},
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                // In dp, whatever the font scale: a picture, not text to read.
+                val size = with(LocalDensity.current) { BACKDROP_FLAG.toSp() }
+                Text(
+                    shown,
+                    fontSize = size,
+                    lineHeight = size,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.offset(x = BACKDROP_FLAG / 6)
+                        .graphicsLayer { alpha = BACKDROP_ALPHA; compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawWithContent {
+                            drawContent()
+                            // Its left side fades out: no edge drawn across the rows.
+                            drawRect(
+                                Brush.horizontalGradient(0f to Color.Transparent, 0.5f to Color.Black),
+                                blendMode = BlendMode.DstIn,
+                            )
+                        },
+                )
+            }
+        }
+    }
+}
+
+private val BACKDROP_FLAG = 420.dp
+private const val BACKDROP_ALPHA = 0.22f
+
+/** Whether the device's fonts draw [emoji] as one picture (an old TV may lack a flag). */
+private fun canDrawEmoji(emoji: String): Boolean =
+    runCatching { android.graphics.Paint().hasGlyph(emoji) }.getOrDefault(false)
 
 data class GroupData(
     val tag: String,

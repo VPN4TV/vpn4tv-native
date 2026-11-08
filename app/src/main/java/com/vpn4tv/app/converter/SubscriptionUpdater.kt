@@ -28,6 +28,9 @@ object SubscriptionUpdater {
     /** Longer than the connect watchdog's 45 s, which ends any start stuck in Starting. */
     private const val START_WAIT_MS = 60_000L
 
+    /** The subscription answered, but with no server in it: Home says so instead of "check the internet". */
+    class EmptyKeyException : IllegalStateException("ключ пуст")
+
     class Outcome(
         /** The sing-box config on disk changed. */
         val configChanged: Boolean,
@@ -44,7 +47,7 @@ object SubscriptionUpdater {
     suspend fun update(context: Context, profile: Profile): Outcome {
         val sub = HwidService.fetchSubscription(context, profile.typed.remoteURL)
         val proxies = ProxyParser.parseSubscription(sub.body)
-        if (proxies.isEmpty()) throw IllegalStateException("ключ пуст")
+        if (proxies.isEmpty()) throw EmptyKeyException()
         val result = ConfigGenerator.generateFull(proxies)
 
         val path = profile.typed.path

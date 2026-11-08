@@ -313,14 +313,13 @@
     <!-- Errors -->
     <string name="error_title">Error</string>
     <string name="error_missing_vpn_permission">Missiong VPN permission</string>
-    <string name="error_no_vpn_dialog">This device has no system VPN dialog. Enable Proxy mode (SOCKS5) in Settings to connect.</string>
+    <string name="error_no_vpn_dialog">This device has no system VPN dialog. You can connect in proxy mode.</string>
     <string name="error_empty_configuration">Empty configuration</string>
     <string name="error_empty_file">Empty file</string>
     <string name="error_import_too_large">File is too large to import — did you pick the right file?</string>
     <string name="refreshing_expired_subscription">Key expired — refreshing…</string>
     <string name="subscription_until">until %1$s</string>
     <string name="subscription_expired">expired</string>
-    <string name="subscription_update_failed">Key update: %1$s</string>
     <string name="error_decode_profile">Failed to decode profile: %s</string>
     <string name="error_invalid_configuration">Invalid sing-box configuration: %s</string>
     <string name="error_start_command_server">Start command server</string>
@@ -539,16 +538,20 @@
     <string name="about_license">GPLv3 • Based on sing-box by SagerNet\nXray-core (MPLv2) • Outline SDK (Apache 2.0) • AmneziaWG (MIT)</string>
     <string name="about_licenses">Open Source Licenses</string>
     <string name="about_telegram">Telegram channel:</string>
+    <!-- Google Play's User Data policy: the privacy policy inside the app. The page has #ru and #en parts. -->
+    <string name="about_privacy">Privacy policy</string>
+    <string name="about_privacy_url">https://vpn4tv.com/privacy.html#en</string>
+    <string name="about_privacy_on_phone">Open it on your phone: scan the QR code or type the address</string>
+    <string name="about_privacy_qr">QR code with the link to the privacy policy</string>
     <string name="setting_auto_connect">Auto-connect on boot</string>
     <string name="setting_auto_connect_desc">Restore VPN connection when device starts</string>
-    <string name="setting_proxy_mode">Proxy mode (SOCKS5)</string>
-    <string name="setting_proxy_mode_desc">Local SOCKS5 on 127.0.0.1:12334 for devices that can\'t run a VPN (SberBox and similar). Set the proxy in SmartTube by hand.</string>
+    <string name="setting_proxy_mode">Proxy mode</string>
+    <string name="setting_proxy_mode_desc">For devices that can’t run a VPN: a SOCKS5 proxy for SmartTube</string>
     <string name="setting_bypass_lan">Bypass LAN</string>
-    <string name="setting_bypass_lan_desc">Local network bypasses the VPN: Chromecast, media servers, router and printers keep working.</string>
-    <string name="setting_fake_dns">DNS blocking bypass (FakeDNS)</string>
-    <string name="setting_fake_dns_desc">Site addresses are looked up on the VPN server, so your ISP can\'t spoof them. Turn off if connecting hangs.</string>
+    <string name="setting_bypass_lan_desc">Chromecast, media servers, printers and the router skip the VPN</string>
+    <string name="setting_fake_dns">DNS blocking bypass</string>
+    <string name="setting_fake_dns_desc">FakeDNS: the VPN server looks up site addresses. Turn it off if connecting hangs.</string>
     <string name="setting_all_through_vpn">Everything through VPN</string>
-    <string name="setting_all_through_vpn_desc">Off: Russian sites, banks and Gosuslugi open directly. On: everything goes through the VPN.</string>
     <string name="settings_torrents_note">Torrents always go direct, outside the VPN, under the terms of use.</string>
     <string name="setting_lan_import_desc">Add a key from your phone\'s browser over the local network</string>
     <string name="lan_import_title">Import over local network</string>
@@ -567,7 +570,7 @@
     <string name="proxy_mode_card_hint">Configure SmartTube or another app to use SOCKS5 proxy at 127.0.0.1:12334</string>
     <string name="session_traffic">Session</string>
     <string name="title_per_app_proxy">Per-app proxy</string>
-    <string name="setting_per_app_enabled">Enable per-app proxy</string>
+    <string name="setting_per_app_enabled">Custom app list</string>
     <string name="setting_disabled">Disabled</string>
     <string name="mode_exclude">Exclude</string>
     <string name="mode_include">Include</string>
@@ -616,7 +619,7 @@
     <string name="add_retry_mirror">backup server</string>
     <string name="add_waiting_sub">Waiting for the key…</string>
     <string name="error_no_subscription">No key added</string>
-    <string name="error_vpn_denied">VPN permission denied</string>
+    <string name="error_vpn_denied">VPN permission not granted</string>
     <!-- 2026-11 UI guidelines pass -->
     <string name="action_back">Back</string>
     <string name="unit_bytes">B</string>
@@ -644,4 +647,87 @@
     <string name="server_selected">Selected</string>
     <string name="unit_ms">ms</string>
     <string name="action_share_logs">Share log</string>
+    <!-- Notifications, connection errors and messages (2026-11, Google's Android guidance) -->
+    <string name="notification_channel_vpn">VPN status</string>
+    <string name="notification_channel_vpn_desc">Shown while the VPN is on: its state, the server and a Disconnect button.</string>
+    <string name="notification_connected_server">Connected to %1$s</string>
+    <string name="notification_prompt_text">Show the VPN status and a Disconnect button in the notification shade?</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_not_now">Not now</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="setting_notifications_off">Notifications are off</string>
+    <string name="setting_notifications_off_desc">The shade shows neither the VPN status nor the Disconnect button.</string>
+    <string name="action_allow">Allow</string>
+    <string name="setting_notification_server">Current server in the notification</string>
+    <string name="setting_notification_server_desc">“Connected to …” under the key name</string>
+    <string name="setting_notification_system">Notification settings</string>
+    <string name="setting_notification_system_desc">Sound, look and turning them off, in Android settings</string>
+    <string name="setting_always_on">Always-on VPN</string>
+    <string name="setting_always_on_desc">An Android setting: the VPN comes back on by itself, and the internet can be blocked without it.</string>
+    <string name="always_on_note">This is an always-on VPN: Android turns it on and off.</string>
+    <string name="always_on_note_lockdown">This is an always-on VPN: Android turns it on and off, and blocks the internet without it.</string>
+    <string name="action_vpn_settings">Android VPN settings</string>
+    <string name="error_start_failed">Couldn’t start the VPN. Restart the app; if that doesn’t help, contact support.</string>
+    <string name="error_restarting">The VPN didn’t start, so the app is restarting. Then connect again.</string>
+    <string name="error_system_refused">Android didn’t let the VPN start in the background. Open VPN4TV and connect again.</string>
+    <string name="error_no_vpn_permission">VPN4TV has lost the VPN permission, probably to another VPN app. Connect again and allow the request.</string>
+    <string name="error_empty_key">The key wasn’t found or has no servers. Refresh it or add it again.</string>
+    <string name="error_key_download_failed">Couldn’t download the key. Check the internet connection and try again.</string>
+    <string name="error_key_update_failed">Couldn’t refresh the key. Check the internet connection and try again.</string>
+    <string name="error_vpn_revoked">Android turned the VPN off: another VPN app was turned on, or the VPN was turned off in Android settings.</string>
+    <string name="action_details">Details</string>
+    <string name="action_hide_details">Hide details</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_open_settings">Open settings</string>
+    <string name="action_try_again">Try again</string>
+    <string name="vpn_denied_tv_text">The VPN can’t connect without it. Choose Try again and allow the request.</string>
+    <string name="no_vpn_dialog_title">No system VPN dialog</string>
+    <string name="no_vpn_dialog_text">Android on this device can’t ask for the VPN permission, so the VPN can’t be turned on. In proxy mode VPN4TV works as a SOCKS5 proxy that SmartTube and other apps can use.</string>
+    <string name="action_enable_proxy_mode">Turn on proxy mode</string>
+    <!-- Quick Settings tile, launcher shortcuts and the home-screen widget (phones and tablets).
+         Shortcut labels: short ones up to 10 characters, long ones up to 25 (Google's limits). -->
+    <string name="tile_label" translatable="false">VPN4TV</string>
+    <string name="shortcut_connect_long">Connect the VPN</string>
+    <string name="shortcut_disconnect_long">Disconnect the VPN</string>
+    <string name="shortcut_servers_long">Choose a server</string>
+    <string name="shortcut_new_key">New key</string>
+    <string name="shortcut_new_key_long">Add a new key</string>
+    <string name="widget_name" translatable="false">VPN4TV</string>
+    <string name="widget_description">VPN status and a button to connect</string>
+    <string name="widget_no_key">No key</string>
+    <string name="widget_offer">VPN4TV widget: connect with one tap from the home screen.</string>
+    <!-- Wide windows, foldables, TalkBack and the settings groups (2026-11, Google's Android guidance) -->
+    <string name="settings_group_connection">Connection</string>
+    <string name="settings_group_routing">Routing</string>
+    <string name="settings_group_own_key">Your own key</string>
+    <string name="setting_bypass_lan_proxy">In proxy mode the local network skips the VPN anyway</string>
+    <string name="setting_all_through_vpn_on">All traffic goes through the VPN</string>
+    <string name="setting_all_through_vpn_off">Russian sites, banks and Gosuslugi go direct</string>
+    <plurals name="per_app_bypass_count">
+        <item quantity="one">%d app skips the VPN</item>
+        <item quantity="other">%d apps skip the VPN</item>
+    </plurals>
+    <plurals name="per_app_only_count">
+        <item quantity="one">Only %d app uses the VPN</item>
+        <item quantity="other">Only %d apps use the VPN</item>
+    </plurals>
+    <string name="settings_pick_detail">Choose a setting</string>
+    <string name="action_update_key_named">Update key “%1$s”</string>
+    <string name="action_delete_key_named">Delete key “%1$s”</string>
+    <string name="qr_bot_link">QR code with a link to the bot</string>
+    <string name="qr_import_page">QR code with a link to the import page</string>
+    <!-- TV: no browser and no Telegram link (Google's TV-WB), TalkBack labels of actions -->
+    <string name="about_telegram_channel">Telegram channel</string>
+    <string name="about_telegram_on_phone">Open it on your phone: scan the QR code or find the channel in Telegram</string>
+    <string name="about_telegram_qr">QR code with the link to the Telegram channel</string>
+    <string name="install_broken_no_play">Google Play did not open. Open Google Play on this TV, find VPN4TV and reinstall it.</string>
+    <string name="a11y_connect_vpn">connect the VPN</string>
+    <string name="a11y_disconnect_vpn">disconnect the VPN</string>
+    <string name="a11y_choose_server">choose a server</string>
+    <!-- Android TV home screen: the "Quick connect" channel (not the app's name, Google's TV checklist) -->
+    <string name="channel_quick_connect">Quick connect</string>
+    <string name="channel_auto">Auto (best)</string>
+    <string name="channel_auto_desc">The fastest server of your key</string>
+    <string name="channel_server">Server %1$s</string>
+    <string name="channel_server_desc">A server of your key</string>
 </resources>

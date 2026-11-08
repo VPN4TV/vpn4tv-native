@@ -40,7 +40,10 @@ object WgBridge {
             Libbox.startWireproxyBridge(configJson)
             running = true
             Log.i(TAG, "wireproxy bridge started")
-            startLogDumper()
+            // Debug builds: the bridge's own log lines into logcat. They name
+            // the site of every connection ("dialing <site>"), so release
+            // builds leave them in the bridge (Google's Sensitive_Data_Logging).
+            if (com.vpn4tv.app.BuildConfig.DEBUG) startLogDumper()
         } catch (e: Exception) {
             Log.e(TAG, "failed to start wireproxy bridge", e)
             throw e
@@ -74,7 +77,7 @@ object WgBridge {
                     val lines = if (all.isEmpty()) emptyList() else all.split("\n")
                     if (lines.size > lastSize) {
                         for (i in lastSize until lines.size) {
-                            Log.i(TAG, "[bridge] ${lines[i]}")
+                            Log.d(TAG, "[bridge] ${lines[i]}")
                         }
                         lastSize = lines.size
                     }

@@ -512,4 +512,15 @@
     <string name="privilege_module_restart_notification_title">نیاز به راه‌اندازی مجدد</string>
     <string name="privilege_module_restart_notification_message">ماژول LSPosed به‌روزرسانی شد. برای اعمال تغییرات دستگاه را راه‌اندازی مجدد کنید.</string>
     <string name="privilege_module_restart_channel">ماژول LSPosed</string>
+    <string name="about_privacy">سیاست حفظ حریم خصوصی</string>
+    <string name="about_privacy_on_phone">روی تلفن باز کنید: کد QR را اسکن کنید یا نشانی را وارد کنید</string>
+    <string name="about_privacy_qr">کد QR با پیوند سیاست حفظ حریم خصوصی</string>
+    <string name="about_telegram_channel">کانال تلگرام</string>
+    <string name="about_telegram_on_phone">روی تلفن باز کنید: کد QR را اسکن کنید یا کانال را در تلگرام پیدا کنید</string>
+    <string name="about_telegram_qr">کد QR با پیوند کانال تلگرام</string>
+    <string name="channel_quick_connect">اتصال سریع</string>
+    <string name="channel_auto">خودکار (بهترین)</string>
+    <string name="channel_auto_desc">سریع‌ترین سرور کلید شما</string>
+    <string name="channel_server">سرور %1$s</string>
+    <string name="channel_server_desc">یکی از سرورهای کلید شما</string>
 </resources>

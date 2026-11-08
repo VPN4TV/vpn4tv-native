@@ -86,6 +86,16 @@ open class CommandClient(
     private var commandClient: CommandClient? = null
     private val clientHandler = ClientHandler()
 
+    /**
+     * The level of the core's config (LogPrivacy.coreLevel: warn in release
+     * builds). The core hands a log reader every line it makes, debug and trace
+     * included, with the configured level beside them (GetDefaultLogLevel), and
+     * the reader cuts: lines below it never reach the Logs screen or its Share.
+     * Nothing is cut until the stream has said it.
+     */
+    @Volatile
+    private var logLevel = Int.MAX_VALUE
+
     fun connect() {
         // Wrap the WHOLE body in catch(Throwable): on a broken native-lib
         // install every libbox touch here (Libbox.CommandStatus, the
@@ -134,7 +144,9 @@ open class CommandClient(
     private inner class ClientHandler : CommandClientHandler {
         override fun clearLogs() {}
         override fun initializeClashMode(modeList: io.nekohasekai.libbox.StringIterator?, currentMode: String?) {}
-        override fun setDefaultLogLevel(level: Int) {}
+        override fun setDefaultLogLevel(level: Int) {
+            logLevel = level
+        }
         override fun updateClashMode(newMode: String?) {}
         override fun writeConnectionEvents(events: io.nekohasekai.libbox.ConnectionEvents?) {}
         override fun writeOutbounds(message: io.nekohasekai.libbox.OutboundGroupItemIterator?) {}
@@ -143,6 +155,8 @@ open class CommandClient(
             val logs = mutableListOf<String>()
             while (messageList.hasNext()) {
                 val entry = messageList.next()
+                // Levels: 0 panic … 3 warn, 4 info, 5 debug, 6 trace.
+                if (entry.level > logLevel) continue
                 var msg = entry.message ?: ""
                 // Strip ANSI color codes
                 msg = msg.replace(Regex("\u001B\\[[0-9;]*m"), "")

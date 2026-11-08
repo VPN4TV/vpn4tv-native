@@ -2,6 +2,7 @@ package com.vpn4tv.app.outline
 
 import android.util.Base64
 import android.util.Log
+import com.vpn4tv.app.utils.LogPrivacy
 import com.vpn4tv.app.utils.HTTPClient
 import org.json.JSONObject
 import java.io.File
@@ -40,7 +41,7 @@ object OutlineDynamicKeys {
         val root = try {
             JSONObject(sidecarJson)
         } catch (error: Exception) {
-            Log.w(TAG, "sidecar is not JSON: ${error.message}")
+            Log.w(TAG, "sidecar is not JSON: ${LogPrivacy.error(error)}")
             return sidecarJson
         }
         val endpoints = root.optJSONArray("endpoints") ?: return sidecarJson
@@ -56,8 +57,8 @@ object OutlineDynamicKeys {
                 val previous = endpoint.optString("url")
                 Log.w(
                     TAG,
-                    if (previous.isNullOrEmpty()) "no key yet for $dynamicUrl"
-                    else "keeping the previous key for $dynamicUrl"
+                    if (previous.isNullOrEmpty()) "no key yet for ${LogPrivacy.link(dynamicUrl)}"
+                    else "keeping the previous key for ${LogPrivacy.link(dynamicUrl)}"
                 )
                 continue
             }
@@ -110,7 +111,7 @@ object OutlineDynamicKeys {
             try {
                 sidecar.writeText(resolved)
             } catch (error: Exception) {
-                Log.w(TAG, "could not persist the resolved key: ${error.message}")
+                Log.w(TAG, "could not persist the resolved key: ${LogPrivacy.error(error)}")
             }
         }
         return resolved
@@ -123,7 +124,8 @@ object OutlineDynamicKeys {
             toShadowsocksUrl(JSONObject(client.getString(url)), java.net.URI(url).host ?: "Outline")
         }
     } catch (error: Exception) {
-        Log.w(TAG, "fetching $url failed: ${error.message}")
+        // The link is the key (ssconf://): its scheme and, for https, its host only.
+        Log.w(TAG, "fetching ${LogPrivacy.link(url)} failed: ${LogPrivacy.redactLinks(error.message)}")
         null
     }
 

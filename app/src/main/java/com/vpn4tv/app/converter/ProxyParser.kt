@@ -319,7 +319,7 @@ object ProxyParser {
             try {
                 parse(line)
             } catch (e: Exception) {
-                android.util.Log.w("ProxyParser", "Skipping an unparsable line: ${e.message}")
+                android.util.Log.w("ProxyParser", "Skipping an unparsable line: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
                 null
             }
         }
@@ -362,7 +362,7 @@ object ProxyParser {
                 android.util.Log.w("ProxyParser", "Skipping vless '$name' (transport=$transportType, xray bridge not supported on API ${android.os.Build.VERSION.SDK_INT})")
                 return null
             }
-            android.util.Log.i("ProxyParser", "Routing vless '$name' via xray bridge (transport=$transportType)")
+            android.util.Log.d("ProxyParser", "Routing vless '$name' via xray bridge (transport=$transportType)")
             val xrayOb = buildXrayVlessOutbound(name, uuid, host, port, security, sni, flow, fp, pbk, sid, spx, transportType, params)
             return ProxyConfig(
                 tag = name,
@@ -703,7 +703,7 @@ object ProxyParser {
         // outline-sdk bridge in libbox, which applies prefix obfuscation.
         val isOutline = !ssParams["prefix"].isNullOrEmpty() || ssParams["outline"] == "1"
         if (isOutline) {
-            android.util.Log.i("ProxyParser", "Routing SS '$tag' via outline bridge (prefix=${ssParams["prefix"] != null}, outline=${ssParams["outline"]})")
+            android.util.Log.d("ProxyParser", "Routing SS '$tag' via outline bridge (prefix=${ssParams["prefix"] != null}, outline=${ssParams["outline"]})")
             return ProxyConfig(
                 tag = tag,
                 type = "shadowsocks",
@@ -872,7 +872,7 @@ object ProxyParser {
                 val xrayJson = try { JSONObject(lastConfigRaw) } catch (_: Exception) { continue }
                 val results = parseXrayConfig(xrayJson)
                 if (results.isNotEmpty()) {
-                    android.util.Log.i("ProxyParser", "AmneziaVPN: routed via amnezia-xray container ($description)")
+                    android.util.Log.d("ProxyParser", "AmneziaVPN: routed via amnezia-xray container ($description)")
                     // Use the file's description as the proxy tag so the
                     // imported profile name is human-readable instead of "vless".
                     return if (description.isNotBlank()) {
@@ -885,7 +885,7 @@ object ProxyParser {
             android.util.Log.w("ProxyParser", "AmneziaVPN: no supported container (wg/awg/xray with last_config)")
             return emptyList()
         } catch (e: Exception) {
-            android.util.Log.w("ProxyParser", "AmneziaVPN decode failed: ${e.message}")
+            android.util.Log.w("ProxyParser", "AmneziaVPN decode failed: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
             emptyList()
         }
     }
@@ -925,7 +925,7 @@ object ProxyParser {
         val nameRegex = Regex("(?im)^\\s*#\\s*(.+?)\\s*$")
         val name = nameRegex.find(ini)?.groupValues?.get(1)?.take(64) ?: server
 
-        android.util.Log.i("ProxyParser", "Routing WG '$name' via wireproxy bridge ($server:$port)")
+        android.util.Log.d("ProxyParser", "Routing WG '$name' via wireproxy bridge")
         return ProxyConfig(
             tag = name,
             type = "wireguard",
@@ -1008,9 +1008,9 @@ object ProxyParser {
             sb.append("Endpoint = ").append(serverHost).append(':').append(serverPort).append('\n')
             sb.append("PersistentKeepalive = 25\n")
 
-            android.util.Log.i(
+            android.util.Log.d(
                 "ProxyParser",
-                "Routing WG URI '$name' via wireproxy bridge ($serverHost:$serverPort, awg=${jc != null})",
+                "Routing WG URI '$name' via wireproxy bridge (awg=${jc != null})",
             )
             ProxyConfig(
                 tag = name,
@@ -1021,7 +1021,7 @@ object ProxyParser {
                 awgIni = sb.toString(),
             )
         } catch (e: Exception) {
-            android.util.Log.w("ProxyParser", "wg:// URI parse failed: ${e.message}")
+            android.util.Log.w("ProxyParser", "wg:// URI parse failed: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
             null
         }
     }
@@ -1077,7 +1077,7 @@ object ProxyParser {
                         android.util.Log.w("ProxyParser", "Skipping outbound '$tag' (transport=$network, xray bridge not supported on API ${android.os.Build.VERSION.SDK_INT})")
                         continue
                     }
-                    android.util.Log.i("ProxyParser", "Routing outbound '$tag' via xray bridge (transport=$network)")
+                    android.util.Log.d("ProxyParser", "Routing outbound '$tag' via xray bridge (transport=$network)")
                     val server = extractXrayServer(ob) ?: continue
                     val port = extractXrayPort(ob)
                     // xray builds the request URL from server+port+path and crashes
@@ -1088,7 +1088,7 @@ object ProxyParser {
                     // proxy here instead of feeding xray a URL it can't parse.
                     val xhttpPath = stream.optJSONObject("xhttpSettings")?.optString("path") ?: ""
                     if (!isXrayUrlSafe(server, xhttpPath)) {
-                        android.util.Log.w("ProxyParser", "Skipping outbound '$tag': malformed xhttp URL (server='$server' path='$xhttpPath')")
+                        android.util.Log.w("ProxyParser", "Skipping outbound '$tag': malformed xhttp URL (server or path)")
                         continue
                     }
                     results.add(ProxyConfig(

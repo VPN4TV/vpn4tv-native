@@ -151,7 +151,7 @@ object SavedConfigUpgrade {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "$name: upgrade failed: ${e.message}", e)
+            Log.e(TAG, "$name: upgrade failed: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
             Outcome.FAILED
         }
     }
@@ -168,7 +168,7 @@ object SavedConfigUpgrade {
     private fun readIfExists(path: String): String? = try {
         File(path).takeIf { it.isFile }?.readText()
     } catch (e: Exception) {
-        Log.w(TAG, "${File(path).name}: unreadable, its bridge is left alone: ${e.message}")
+        Log.w(TAG, "${File(path).name}: unreadable, its bridge is left alone: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
         null
     }
 

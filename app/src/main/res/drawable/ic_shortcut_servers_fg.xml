@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher shortcut "Servers": the foreground of the adaptive icon (Android 8+). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="1.5"
+        android:scaleY="1.5"
+        android:translateX="36"
+        android:translateY="36">
+        <path
+            android:fillColor="@color/brand"
+            android:pathData="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z" />
+    </group>
+</vector>

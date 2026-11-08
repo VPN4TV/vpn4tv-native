@@ -511,4 +511,15 @@
     <string name="lsposed_module_pending_update">LSPosed 模組待更新</string>
     <string name="lsposed_module_pending_downgrade">LSPosed 模組待降級</string>
     <string name="lsposed_module_not_activated">LSPosed 模組未啟用</string>
+    <string name="about_privacy">隱私權政策</string>
+    <string name="about_privacy_on_phone">請在手機上開啟：掃描 QR 圖碼或輸入網址</string>
+    <string name="about_privacy_qr">隱私權政策連結的 QR 圖碼</string>
+    <string name="about_telegram_channel">Telegram 頻道</string>
+    <string name="about_telegram_on_phone">請在手機上開啟：掃描 QR 圖碼或在 Telegram 中搜尋此頻道</string>
+    <string name="about_telegram_qr">Telegram 頻道連結的 QR 圖碼</string>
+    <string name="channel_quick_connect">快速連線</string>
+    <string name="channel_auto">自動（最佳）</string>
+    <string name="channel_auto_desc">您的金鑰中最快的伺服器</string>
+    <string name="channel_server">伺服器 %1$s</string>
+    <string name="channel_server_desc">您的金鑰中的伺服器</string>
 </resources>

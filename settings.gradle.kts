@@ -14,3 +14,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "vpn4tv"
 include(":app")
+// Generates the app's Baseline Profile (./gradlew :app:generateBaselineProfile, see baselineprofile/).
+include(":baselineprofile")

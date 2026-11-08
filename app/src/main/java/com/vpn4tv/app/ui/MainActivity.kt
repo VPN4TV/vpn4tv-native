@@ -2,19 +2,20 @@ package com.vpn4tv.app.ui
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.VpnService
 import android.os.Bundle
+import android.os.SystemClock
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.enableEdgeToEdge
 import android.util.Log
 import android.view.KeyEvent
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.*
 import android.net.Uri
 import androidx.lifecycle.MutableLiveData
-import com.vpn4tv.app.R
 import com.vpn4tv.app.bg.BoxService
 import com.vpn4tv.app.converter.ConfigGenerator
 import com.vpn4tv.app.converter.ProxyParser
@@ -23,6 +24,7 @@ import com.vpn4tv.app.database.ProfileManager
 import com.vpn4tv.app.database.Settings
 import com.vpn4tv.app.database.TypedProfile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -32,11 +34,31 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
+        /** The longest the launch screen waits for the keys. */
+        private const val SPLASH_MAX_MS = 1000L
         val profileReady = MutableLiveData(false)
         /** Bumped when the refresh at launch has finished: the home screen re-reads the profile's name and expiry. */
         val profileRefreshed = MutableLiveData(0)
         /** Bumped when a link or file opened with the app became a profile: the add screen closes. */
         val profileImported = MutableLiveData(0)
+
+        /**
+         * Not one key in the app, as last seen: at launch, before [profileReady],
+         * then by Home on every return. A TV without a key shows the add-key
+         * content on Home from its first frame (HomeScreen).
+         */
+        @Volatile
+        var noKeysSeen = false
+
+        /** A screen a shortcut asked for (Routes.SERVERS, Routes.ADD_PROFILE): AppNavigation opens it. */
+        val routeRequests = Channel<String>(capacity = 4)
+
+        /**
+         * A shortcut's, the tile's or the widget's request that waits for the
+         * keys to load. Main thread only. Here, not in the activity: an activity
+         * recreated meanwhile (turned at once) runs it instead of the old one.
+         */
+        private var pendingQuickAction: Intent? = null
     }
 
     private val vpnPermissionLauncher = registerForActivityResult(
@@ -45,17 +67,33 @@ class MainActivity : ComponentActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             BoxService.start()
         } else {
-            Toast.makeText(this, getString(R.string.error_vpn_denied), Toast.LENGTH_SHORT).show()
+            AppMessages.post(AppMessage.VpnDenied)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Before super.onCreate: the launch screen (Theme.VPN4TV.Starting, the
+        // splash screen of Android 12+ on every version) hands over to AppTheme.
+        val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
         // First thing: a launch that never gets to the home screen gets its thread stacks reported.
         com.vpn4tv.app.utils.StartupWatchdog.arm { profileReady.value == true }
+        // The launch screen stays until the keys are loaded, so Home opens with
+        // Connect ready instead of "Loading…" under it; at most SPLASH_MAX_MS
+        // (a key whose config has to be downloaded first keeps Home's loading
+        // state instead). Asked before every frame; a recreated activity finds
+        // the keys loaded and draws at once.
+        val splashDeadline = SystemClock.uptimeMillis() + SPLASH_MAX_MS
+        splash.setKeepOnScreenCondition {
+            profileReady.value != true && SystemClock.uptimeMillis() < splashDeadline
+        }
+        // TV: landscape, as Google's TV checklist asks. The activity serves
+        // phones and tablets too, so it is set here rather than in the manifest.
+        if (Device.isTv) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         // Edge-to-edge with system bar icons that follow the light/dark theme
         // (enforced for targetSdk 35+ on Android 15+ anyway).
         enableEdgeToEdge()
+        installTvBackGuard()
 
         // Fire-and-forget Play in-app update check. Will only actually
         // prompt when Play Store has a release with priority >= 4 and
@@ -63,16 +101,26 @@ class MainActivity : ComponentActivity() {
         // installs this is a no-op by design (see PlayUpdateChecker).
         com.vpn4tv.app.utils.PlayUpdateChecker.maybePromptImmediate(this)
 
+        // A shortcut, the tile or the widget asked for something (run once the
+        // keys are loaded). Once per launch: not again when the activity is
+        // recreated (a turn, a theme change) or reopened from Recents.
+        if (savedInstanceState == null) pendingQuickAction = quickAction(intent)
+
         // Load profiles in background. A profile whose config is already on
         // disk can connect at once: its subscription is refreshed behind the
         // home screen, not before it: the screen used to say "loading" for as
         // long as the fetch took, minutes where api.vpn4tv.com is blocked.
         GlobalScope.launch(Dispatchers.IO) {
             val refresh = ensureDefaultProfile()
+            noKeysSeen = runCatching { ProfileManager.list().isEmpty() }.getOrDefault(false)
             profileReady.postValue(true)
+            withContext(Dispatchers.Main) { runPendingQuickAction() }
+            // TV: the home screen's channel, in step with the keys as they are now.
+            com.vpn4tv.app.tv.QuickConnectChannel.requestSync(applicationContext)
             if (refresh != null) launch {
                 updateProfileConfig(refresh)
                 profileRefreshed.postValue((profileRefreshed.value ?: 0) + 1)
+                com.vpn4tv.app.tv.QuickConnectChannel.requestSync(applicationContext)
             }
             handleImportIntent(intent)
         }
@@ -80,17 +128,125 @@ class MainActivity : ComponentActivity() {
         setContent {
             com.vpn4tv.app.ui.theme.VPN4TVTheme {
                 AppNavigation(
-                    onConnect = { connect() },
-                    onDisconnect = { BoxService.stop() },
+                    // The launcher ranks the shortcuts by what the user does in the app too.
+                    onConnect = { reportShortcutUse(AppShortcuts.ID_CONNECT); connect() },
+                    onDisconnect = { reportShortcutUse(AppShortcuts.ID_DISCONNECT); BoxService.stop() },
                 )
             }
         }
     }
 
+    private var notificationsWereAllowed: Boolean? = null
+
+    override fun onResume() {
+        super.onResume()
+        // Back from Android's settings, or from anywhere: notifications turned
+        // on there show the running VPN's notification now (it is posted
+        // anew), and a changed always-on VPN changes Home and the notification.
+        val allowed = notificationsAllowed(this)
+        if (allowed && notificationsWereAllowed == false) com.vpn4tv.app.bg.ServiceNotification.refresh()
+        notificationsWereAllowed = allowed
+        GlobalScope.launch(Dispatchers.IO) { com.vpn4tv.app.bg.VPNService.refreshAlwaysOn() }
+        // In front: Android lets the app change its shortcuts freely now (a
+        // new language, a backup restored onto a new phone without them).
+        GlobalScope.launch(Dispatchers.IO) { AppShortcuts.publish(applicationContext) }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Another key may have been picked: the widget names the key it connects with.
+        com.vpn4tv.app.bg.QuickControls.changed()
+        // TV: the home screen's channel shows the countries of the key picked now.
+        com.vpn4tv.app.tv.QuickConnectChannel.requestSync(this)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        quickAction(intent)?.let { action ->
+            if (profileReady.value == true) runQuickAction(action) else pendingQuickAction = action
+        }
         GlobalScope.launch(Dispatchers.IO) { handleImportIntent(intent) }
+    }
+
+    /** One of the app's own actions (shortcuts, tile, widget), unless reopened from Recents. */
+    private fun quickAction(intent: Intent?): Intent? {
+        if (intent == null || AppShortcuts.idFor(intent.action) == null) return null
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return null
+        return intent
+    }
+
+    private fun runPendingQuickAction() {
+        if (isDestroyed) return
+        val action = pendingQuickAction ?: return
+        pendingQuickAction = null
+        runQuickAction(action)
+    }
+
+    /**
+     * Connect and disconnect take the button's own path; a connect or
+     * disconnect without the app's token (another app starting this exported
+     * activity) only opens Home.
+     */
+    private fun runQuickAction(intent: Intent) {
+        val id = AppShortcuts.idFor(intent.action) ?: return
+        when (intent.action) {
+            AppShortcuts.ACTION_CONNECT -> {
+                if (!AppShortcuts.trusted(intent)) return
+                reportShortcutUse(id)
+                val server = intent.getStringExtra(AppShortcuts.EXTRA_SERVER)
+                if (server != null && !chooseServer(server, intent.getLongExtra(AppShortcuts.EXTRA_PROFILE, -1L))) return
+                if (BoxService.globalStatus.value == com.vpn4tv.app.constant.Status.Stopped) connect()
+            }
+            AppShortcuts.ACTION_DISCONNECT -> {
+                if (!AppShortcuts.trusted(intent)) return
+                reportShortcutUse(id)
+                // Always-on VPN: Android turns it off; Home says so.
+                if (BoxService.globalStatus.value == com.vpn4tv.app.constant.Status.Started &&
+                    BoxService.alwaysOn.value == null
+                ) {
+                    BoxService.stop()
+                }
+            }
+            AppShortcuts.ACTION_SERVERS -> {
+                reportShortcutUse(id)
+                routeRequests.trySend(Routes.SERVERS)
+            }
+            AppShortcuts.ACTION_ADD_KEY -> {
+                reportShortcutUse(id)
+                routeRequests.trySend(Routes.ADD_PROFILE)
+            }
+        }
+    }
+
+    /**
+     * A card of the TV home screen's channel: its server becomes the key's
+     * choice, as on the Servers screen (now if connected, at the start
+     * otherwise). A card of a key no longer selected only opens Home, and the
+     * channel catches up. False: no connect then.
+     */
+    private fun chooseServer(server: String, profileId: Long): Boolean {
+        if (profileId != Settings.selectedProfile) {
+            com.vpn4tv.app.tv.QuickConnectChannel.requestSync(this)
+            return false
+        }
+        saveSelectedServer(this, server)
+        if (BoxService.globalStatus.value == com.vpn4tv.app.constant.Status.Started) {
+            GlobalScope.launch(Dispatchers.IO) {
+                try {
+                    val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
+                    client.selectOutbound("select", server)
+                    client.disconnect()
+                } catch (e: Exception) {
+                    Log.w(TAG, "server from the channel not selected: ${e.message}")
+                }
+            }
+        }
+        return true
+    }
+
+    private fun reportShortcutUse(id: String) {
+        GlobalScope.launch(Dispatchers.IO) { AppShortcuts.reportUsed(applicationContext, id) }
     }
 
     // TV remotes double-fire BACK easily (contact bounce + key repeat).
@@ -100,18 +256,55 @@ class MainActivity : ComponentActivity() {
     // "Cannot transition entry that is not in the back stack"
     // (NavControllerImpl.prepareForTransition — vc50326, 12 reports).
     // The handler is internal to NavHost, so the dispatch itself is the
-    // only place we can debounce.
+    // only place we can debounce: the key event on Android 12 and older (and
+    // on any device without predictive back), [tvBackGuard] on a TV with
+    // Android 13+, where the app's predictive back (the manifest) takes BACK
+    // away from key events.
     private var lastBackEventTime = 0L
+
+    /** The double-BACK debounce: true when this BACK comes too soon after the last one. */
+    private fun duplicateBack(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastBackEventTime < 300) return true
+        lastBackEventTime = now
+        return false
+    }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
-            val now = android.os.SystemClock.elapsedRealtime()
-            if (now - lastBackEventTime < 300) {
-                return true // swallow the duplicate
-            }
-            lastBackEventTime = now
+            if (duplicateBack()) return true // swallow the duplicate
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    /**
+     * TV, Android 13+: the app takes predictive back for phones (the manifest),
+     * and then BACK reaches no key event. This callback, above the app's own,
+     * gets every BACK of the activity's window first and does what the key
+     * path did before: drops a second one within 300 ms and hands the rest to
+     * the same dispatcher (the screens' handlers, NavHost's, else the system's
+     * Back, which sends the app behind the launcher). Dialogs have windows and
+     * callbacks of their own. The TV has no back gesture to preview.
+     */
+    private var tvBackGuard: android.window.OnBackInvokedCallback? = null
+
+    private fun installTvBackGuard() {
+        if (!Device.isTv || android.os.Build.VERSION.SDK_INT < 33) return
+        val guard = android.window.OnBackInvokedCallback {
+            if (!duplicateBack()) onBackPressedDispatcher.onBackPressed()
+        }
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(
+            android.window.OnBackInvokedDispatcher.PRIORITY_OVERLAY, guard,
+        )
+        tvBackGuard = guard
+    }
+
+    override fun onDestroy() {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            tvBackGuard?.let { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it) }
+        }
+        tvBackGuard = null
+        super.onDestroy()
     }
 
     /**
@@ -144,11 +337,7 @@ class MainActivity : ComponentActivity() {
                     }
                     if (read > maxBytes) {
                         Log.w(TAG, "Import file > 2 MB, refusing: $uri")
-                        Toast.makeText(
-                            this,
-                            getString(R.string.error_import_too_large),
-                            Toast.LENGTH_LONG,
-                        ).show()
+                        AppMessages.post(AppMessage.ImportTooLarge)
                         return
                     }
                     String(buf, 0, read, Charsets.UTF_8)
@@ -167,19 +356,17 @@ class MainActivity : ComponentActivity() {
             try {
                 createProfile(Uri.parse(unwrapped.trim()).host ?: "VPN4TV", unwrapped.trim())
                 profileImported.postValue((profileImported.value ?: 0) + 1)
-                // This runs on an IO thread, where a toast throws.
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, getString(R.string.profile_imported), Toast.LENGTH_SHORT).show()
-                }
+                AppMessages.post(AppMessage.KeyAdded)
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to import subscription from link", e)
+                Log.w(TAG, "Failed to import subscription from link: ${e.javaClass.simpleName}: ${com.vpn4tv.app.utils.LogPrivacy.redactLinks(e.message)}")
             }
             return
         }
         try {
             val proxies = ProxyParser.parseSubscription(unwrapped)
             if (proxies.isEmpty()) {
-                Log.w(TAG, "Intent URL parsed to zero proxies: ${data.take(40)}...")
+                // Not the data itself: it is a key.
+                Log.w(TAG, "Intent data parsed to zero proxies (${data.length} chars, ${com.vpn4tv.app.utils.LogPrivacy.link(data.trim())})")
                 return
             }
             val profilesDir = File(filesDir, "profiles")
@@ -213,13 +400,16 @@ class MainActivity : ComponentActivity() {
             profileImported.postValue((profileImported.value ?: 0) + 1)
             Log.d(TAG, "Imported profile via intent: $name (${proxies.size} proxies)")
         } catch (e: Exception) {
-            Log.e(TAG, "Import intent failed", e)
+            Log.e(TAG, "Import intent failed: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
         }
     }
 
     private fun connect() {
+        // A new attempt: the reason the last one ended no longer applies. A
+        // start that fails says its own; one stopped here, a message.
+        BoxService.lastError.value = null
         if (profileReady.value != true || Settings.selectedProfile == -1L) {
-            Toast.makeText(this, getString(R.string.error_no_subscription), Toast.LENGTH_SHORT).show()
+            AppMessages.post(AppMessage.NoKey)
             return
         }
 
@@ -229,12 +419,12 @@ class MainActivity : ComponentActivity() {
         // dead server addresses — they had to guess that "refresh" was the
         // fix. Now we do it automatically: fetch the subscription, write
         // fresh config, then proceed to connect as usual. The refresh is
-        // async + shows a Toast so the user knows something is happening.
+        // async + says so, so the user knows something is happening.
         val profileId = Settings.selectedProfile
         val cachedInfo = com.vpn4tv.app.converter.HwidService.loadUserInfo(this, profileId)
         val expired = cachedInfo?.expireEpochSec?.let { it > 0 && it * 1000 < System.currentTimeMillis() } == true
         if (expired) {
-            Toast.makeText(this, getString(R.string.refreshing_expired_subscription), Toast.LENGTH_SHORT).show()
+            AppMessages.post(AppMessage.RefreshingExpiredKey)
             GlobalScope.launch(Dispatchers.IO) {
                 val profile = ProfileManager.get(profileId) ?: return@launch
                 if (profile.typed.remoteURL.isNotEmpty()) {
@@ -286,9 +476,10 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Device has no system VPN-permission dialog: can't bind VpnService.
-     *  Point the user at Proxy mode (SOCKS5), which needs no consent. */
+     *  Point the user at Proxy mode (SOCKS5), which needs no consent: a phone
+     *  opens Settings from the snackbar, a TV turns it on from the dialog. */
     private fun onNoVpnDialog() {
-        Toast.makeText(this, getString(R.string.error_no_vpn_dialog), Toast.LENGTH_LONG).show()
+        AppMessages.post(AppMessage.NoVpnDialog)
     }
 
     /**

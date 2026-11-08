@@ -1,7 +1,7 @@
 package com.vpn4tv.app.ui
 
 import android.util.Log
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpn4tv.app.R
@@ -30,6 +31,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.tv.material3.Icon as TvIcon
+import androidx.tv.material3.MaterialTheme as TvMaterialTheme
+import androidx.tv.material3.Text as TvText
 
 @Composable
 fun ProfilesScreen(
@@ -71,7 +77,7 @@ fun ProfilesScreen(
             reload()
             // Route through the shared lastError LiveData so HomeScreen shows
             // it as a red line the next time the user lands there.
-            com.vpn4tv.app.bg.BoxService.lastError.postValue(err?.let { com.vpn4tv.app.Application.application.getString(R.string.subscription_update_failed, it) })
+            com.vpn4tv.app.bg.BoxService.lastError.postValue(err)
         }
     }
     val delete: (Profile) -> Unit = { profile ->
@@ -127,56 +133,96 @@ fun ProfilesScreen(
             }
             if (Device.isTv) {
                 // The screen's one primary action: a wide button, as the TV buttons guide asks.
-                Button(
+                TvButton(
                     onClick = onAddViaTelegram,
-                    modifier = Modifier.fillMaxWidth().height(64.dp).tvFocus(RoundedCornerShape(32.dp), 1.03f),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(32.dp),
+                    focusedScale = 1.03f,
+                    minHeight = 64.dp,
+                    fillWidth = true,
                 ) {
-                    Icon(Icons.Default.Add, null, modifier = Modifier.size(24.dp))
+                    TvIcon(Icons.Default.Add, null, modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(12.dp))
-                    Text(stringResource(R.string.action_add_telegram), fontSize = 20.sp)
+                    TvText(stringResource(R.string.action_add_telegram), style = TvMaterialTheme.typography.titleMedium)
                 }
             }
         }
     }
 
-    // TV: a row is one control; its actions open here.
+    // TV: a row is one control; its actions open here, the first in focus.
     actionsFor?.let { profile ->
-        AlertDialog(
+        val firstAction = remember(profile) { FocusRequester() }
+        LaunchedEffect(profile) {
+            // Asked again for a moment: the dialog's window comes up after this.
+            repeat(5) {
+                kotlinx.coroutines.delay(100)
+                if (runCatching { firstAction.requestFocus() }.isSuccess) return@LaunchedEffect
+            }
+        }
+        TvDialog(
             onDismissRequest = { actionsFor = null },
-            title = { Text(profile.name) },
+            title = profile.name,
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (profile.id != selectedId) {
-                        DialogAction(stringResource(R.string.profile_action_select)) { actionsFor = null; select(profile) }
+                        DialogAction(stringResource(R.string.profile_action_select), Modifier.focusRequester(firstAction)) {
+                            actionsFor = null; select(profile)
+                        }
                     }
                     if (profile.typed.type == TypedProfile.Type.Remote) {
-                        DialogAction(stringResource(R.string.profile_action_update)) { actionsFor = null; update(profile) }
+                        val focus = if (profile.id == selectedId) Modifier.focusRequester(firstAction) else Modifier
+                        DialogAction(stringResource(R.string.profile_action_update), focus) { actionsFor = null; update(profile) }
                     }
-                    DialogAction(stringResource(R.string.profile_action_delete)) { actionsFor = null; deleteAsked = profile }
+                    val focus = if (profile.id == selectedId && profile.typed.type != TypedProfile.Type.Remote) {
+                        Modifier.focusRequester(firstAction)
+                    } else {
+                        Modifier
+                    }
+                    DialogAction(stringResource(R.string.profile_action_delete), focus) { actionsFor = null; deleteAsked = profile }
                 }
             },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { actionsFor = null }, modifier = Modifier.tvFocus(CircleShape)) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
+        ) {
+            TvTextButton(onClick = { actionsFor = null }) {
+                TvText(stringResource(R.string.cancel))
+            }
+        }
     }
 
     deleteAsked?.let { profile ->
+        if (Device.isTv) {
+            // Cancel in focus: a stray OK keeps the key.
+            val cancelFocus = remember(profile) { FocusRequester() }
+            LaunchedEffect(profile) {
+                repeat(5) {
+                    kotlinx.coroutines.delay(100)
+                    if (runCatching { cancelFocus.requestFocus() }.isSuccess) return@LaunchedEffect
+                }
+            }
+            TvDialog(
+                onDismissRequest = { deleteAsked = null },
+                title = stringResource(R.string.profile_delete_title),
+                text = { TvText(stringResource(R.string.profile_delete_text, profile.name)) },
+            ) {
+                TvTextButton(onClick = { deleteAsked = null }, modifier = Modifier.focusRequester(cancelFocus)) {
+                    TvText(stringResource(R.string.cancel))
+                }
+                TvTextButton(onClick = { deleteAsked = null; delete(profile) }) {
+                    TvText(stringResource(R.string.profile_action_delete), color = TvMaterialTheme.colorScheme.error)
+                }
+            }
+            return@let
+        }
         AlertDialog(
             onDismissRequest = { deleteAsked = null },
             title = { Text(stringResource(R.string.profile_delete_title)) },
             text = { Text(stringResource(R.string.profile_delete_text, profile.name)) },
             confirmButton = {
-                TextButton(
-                    onClick = { deleteAsked = null; delete(profile) },
-                    modifier = Modifier.tvFocus(CircleShape),
-                ) { Text(stringResource(R.string.profile_action_delete), color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = { deleteAsked = null; delete(profile) }) {
+                    Text(stringResource(R.string.profile_action_delete), color = MaterialTheme.colorScheme.error)
+                }
             },
             dismissButton = {
-                TextButton(onClick = { deleteAsked = null }, modifier = Modifier.tvFocus(CircleShape)) {
+                TextButton(onClick = { deleteAsked = null }) {
                     Text(stringResource(R.string.cancel))
                 }
             },
@@ -184,38 +230,45 @@ fun ProfilesScreen(
     }
 }
 
+/** TV: one of a key's actions in its dialog, the width of the dialog. */
 @Composable
-private fun DialogAction(label: String, onClick: () -> Unit) {
-    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().tvFocus(CircleShape, 1.05f)) {
-        Text(label, fontSize = 18.sp)
+private fun DialogAction(label: String, modifier: Modifier, onClick: () -> Unit) {
+    TvOutlinedButton(onClick = onClick, modifier = modifier.fillMaxWidth(), focusedScale = 1.05f, fillWidth = true) {
+        TvText(label)
     }
 }
 
 private fun Profile.host(): String =
     if (typed.type == TypedProfile.Type.Remote) runCatching { java.net.URL(typed.remoteURL).host }.getOrDefault("") else ""
 
-/** TV: the whole row is one focusable; the selection is a check mark, not a colour. */
+/**
+ * TV: the whole row is one focusable, Compose for TV's list item without a
+ * container; the selection is a check mark, not a colour. TalkBack hears
+ * "selected" from the row; OK opens the key's actions.
+ */
 @Composable
 private fun TvProfileRow(profile: Profile, selected: Boolean, onClick: () -> Unit) {
-    val colors = MaterialTheme.colorScheme
-    Surface(
+    val host = profile.host()
+    val supporting: (@Composable () -> Unit)? = if (host.isNotEmpty()) { { TvText(host) } } else null
+    TvListItem(
+        selected = selected,
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(12.dp), TV_ROW_SCALE),
-        shape = RoundedCornerShape(12.dp),
-        color = colors.surfaceContainerHigh,
-    ) {
-        Row(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            SelectionMark(selected)
-            Column(Modifier.weight(1f)) {
-                Text(profile.name, fontSize = 20.sp, color = colors.onSurface)
-                val host = profile.host()
-                if (host.isNotEmpty()) Text(host, fontSize = 14.sp, color = colors.onSurfaceVariant)
+        modifier = Modifier.fillMaxWidth(),
+        leadingContent = {
+            if (selected) {
+                TvIcon(Icons.Default.Check, null, tint = LocalStateColors.current.connected, modifier = Modifier.size(24.dp))
             }
-        }
-    }
+        },
+        headlineContent = { TvText(profile.name) },
+        supportingContent = supporting,
+    )
 }
 
-/** Phone: a Material 3 list row; trailing icon buttons are fine in a touch list. */
+/**
+ * Phone: a Material 3 list row; trailing icon buttons are fine in a touch list.
+ * For TalkBack the row is one of a set, as a radio button ("selected"), and the
+ * buttons name the key they act on, not just "Delete" on every row.
+ */
 @Composable
 private fun PhoneProfileRow(
     profile: Profile,
@@ -227,7 +280,8 @@ private fun PhoneProfileRow(
     val host = profile.host()
     val supporting: (@Composable () -> Unit)? = if (host.isNotEmpty()) { { Text(host) } } else null
     ListItem(
-        modifier = Modifier.clickable(onClick = onSelect),
+        modifier = Modifier.fillMaxWidth().readableWidth(ContentWidth.list)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
         leadingContent = { SelectionMark(selected) },
         headlineContent = { Text(profile.name) },
         supportingContent = supporting,
@@ -235,31 +289,32 @@ private fun PhoneProfileRow(
             Row {
                 if (profile.typed.type == TypedProfile.Type.Remote) {
                     IconButton(onClick = onUpdate) {
-                        Icon(Icons.Default.Refresh, stringResource(R.string.action_update_subscription))
+                        Icon(Icons.Default.Refresh, stringResource(R.string.action_update_key_named, profile.name))
                     }
                 }
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, stringResource(R.string.profile_action_delete))
+                    Icon(Icons.Default.Delete, stringResource(R.string.action_delete_key_named, profile.name))
                 }
             }
         },
     )
 }
 
+/** The check of the selected key: only seen, the row says "selected" itself. */
 @Composable
 private fun SelectionMark(selected: Boolean) {
     Box(Modifier.width(36.dp)) {
         if (selected) {
             Icon(
-                Icons.Default.Check, stringResource(R.string.profile_selected),
+                Icons.Default.Check, null,
                 tint = LocalStateColors.current.connected, modifier = Modifier.size(24.dp),
             )
         }
     }
 }
 
-/** Returns null on success, error message on failure. */
-private fun updateProfile(profile: Profile): String? {
+/** Returns null on success, what Home says about the failure otherwise. */
+private fun updateProfile(profile: Profile): com.vpn4tv.app.bg.ServiceError? {
     return try {
         val outcome = kotlinx.coroutines.runBlocking {
             com.vpn4tv.app.converter.SubscriptionUpdater.update(
@@ -271,7 +326,7 @@ private fun updateProfile(profile: Profile): String? {
         Log.d("Profiles", "Updated ${profile.name}: config=${outcome.configChanged} bridges=${outcome.bridgesChanged}")
         null
     } catch (e: Exception) {
-        Log.e("Profiles", "Update failed: ${e.message}", e)
-        e.message ?: e.javaClass.simpleName
+        Log.e("Profiles", "Update failed: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
+        com.vpn4tv.app.bg.ServiceError.keyUpdate(e)
     }
 }

@@ -11,6 +11,8 @@ plugins {
     id("com.google.devtools.ksp")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    // The Baseline Profile from :baselineprofile, in src/main/generated/baselineProfiles.
+    id("androidx.baselineprofile")
 }
 
 fun getProps(propName: String): String {
@@ -30,11 +32,28 @@ android {
         unitTests.isReturnDefaultValues = true
     }
     namespace = "com.vpn4tv.app"
-    compileSdk = 36
+    compileSdk = 37
+
+    // Per-app language on Android 13+ (Settings > Apps > VPN4TV > Language):
+    // AGP writes the LocaleConfig from the res folders, English being the
+    // unqualified one (res/resources.properties). Only the app's own languages
+    // are packed: without the filter the libraries' translations would come
+    // along in dozens of languages the app is not translated into.
+    androidResources {
+        generateLocaleConfig = true
+        localeFilters += listOf("en", "ru", "fa", "zh-rCN", "zh-rTW")
+    }
 
     defaultConfig {
         applicationId = "com.vpn4tv.hiddify"
         minSdk = 23
+        // Raising it to 37 (Android 17) needs, first: the ACCESS_LOCAL_NETWORK
+        // runtime permission for the LAN import server and for the core's own
+        // connections to LAN addresses when "Bypass LAN" is off (ask on opening
+        // the import screen, with "paste the key" as the way round; do not
+        // declare it before 37, Google says); certificate transparency then
+        // checks our HTTPS (the own-infra connections by IP with a pinned SNI);
+        // and a run on an Android 17 device (memory limiter, BAL, ECH).
         targetSdk = 36
         versionCode = 55002
         versionName = "5.5.0"
@@ -149,9 +168,9 @@ dependencies {
     implementation("org.slf4j:slf4j-api:1.7.25")
 
     // AndroidX Core
-    implementation("androidx.core:core-ktx:1.17.0")
-    implementation("androidx.appcompat:appcompat:1.7.1")
-    implementation("com.google.android.material:material:1.13.0")
+    implementation("androidx.core:core-ktx:1.19.1")
+    implementation("androidx.appcompat:appcompat:1.8.0")
+    implementation("com.google.android.material:material:1.14.0")
     implementation("androidx.preference:preference-ktx:1.2.1")
 
     // Kotlin
@@ -159,17 +178,23 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
 
     // Lifecycle
-    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.10.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0")
-    implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.11.0")
 
     // Room DB
-    val roomVersion = "2.8.4"
+    val roomVersion = "2.8.5"
     implementation("androidx.room:room-runtime:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
     // WorkManager (subscription auto-update)
-    implementation("androidx.work:work-runtime-ktx:2.11.1")
+    // 2.11.x: WorkManager 2.12 and Navigation 2.10 need Android 7 (minSdk 24),
+    // and the app still runs on Android 6 TVs.
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
+
+    // The launch screen (Theme.VPN4TV.Starting): Android 12's splash screen on
+    // every version from 6, held until the keys are loaded (MainActivity).
+    implementation("androidx.core:core-splashscreen:1.2.0")
 
     // Play Core in-app update — used to force-prompt users on a stale build
     // when the corresponding release on Play Store has inAppUpdatePriority
@@ -178,22 +203,46 @@ dependencies {
     // failed Task; the checker catches that and the app starts normally.
     implementation("com.google.android.play:app-update-ktx:2.1.0")
 
+    // Play In-App Review: the rating card after a few good days of use
+    // (ReviewPrompt). Without Google Play its task fails and nothing shows.
+    // Not review-ktx: its 2.0.2 refers to a Play services annotation R8 cannot find.
+    implementation("com.google.android.play:review:2.0.2")
+
+    // The home-screen widget (phones and tablets): Jetpack Glance draws it
+    // as RemoteViews from Compose-style code (VpnWidget).
+    implementation("androidx.glance:glance-appwidget:1.2.0")
+
     // Compose + TV
-    val composeBom = platform("androidx.compose:compose-bom:2026.02.00")
+    val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.activity:activity-compose:1.12.4")
-    implementation("androidx.navigation:navigation-compose:2.9.7")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.navigation:navigation-compose:2.9.8")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.compose.runtime:runtime-livedata")
-    implementation("androidx.tv:tv-foundation:1.0.0-rc01")
-    implementation("androidx.tv:tv-material:1.0.0-rc01")
+    // Phones, tablets and foldables (not the TV path): the navigation bar or
+    // rail by window size (NavigationSuiteScaffold), settings in two panes on
+    // a wide window (ListDetailPaneScaffold), and the window's hinge for Home.
+    implementation("androidx.compose.material3:material3-adaptive-navigation-suite")
+    implementation("androidx.compose.material3.adaptive:adaptive")
+    implementation("androidx.compose.material3.adaptive:adaptive-layout")
+    implementation("androidx.compose.material3.adaptive:adaptive-navigation")
+    // TV screens: Compose for TV's components and theme (TvComponents, TvTheme).
+    // tv-foundation is not used (nor needed by tv-material 1.1.0).
+    implementation("androidx.tv:tv-material:1.1.0")
+    // Android TV's home screen: the "Quick connect" channel (tv/QuickConnectChannel).
+    implementation("androidx.tvprovider:tvprovider:1.1.0")
 
     // QR code generation
     implementation("com.google.zxing:core:3.5.4")
+
+    // Baseline Profile: profileinstaller writes it for ART where Play does not
+    // (sideloaded APKs, devices without Play); :baselineprofile generates it.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    "baselineProfile"(project(":baselineprofile"))
 
 
     // Debug
@@ -204,6 +253,14 @@ tasks.withType<KotlinCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
     }
+}
+
+baselineProfile {
+    // One flavor: the profile goes to src/main/generated/baselineProfiles, in git,
+    // and every build packs it. It is regenerated by hand (see baselineprofile/).
+    mergeIntoMain = true
+    saveInSrc = true
+    automaticGenerationDuringBuild = false
 }
 
 // TrustTunnel's socks outbound carries UDP (ConfigGenerator). That is safe only with the

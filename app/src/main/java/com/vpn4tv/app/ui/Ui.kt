@@ -64,10 +64,13 @@ object TvSafeArea {
 }
 
 /**
- * The focus mark of every control on TV: the control grows (1.1x for
- * buttons, as in the TV buttons guide; less for full-width rows, which would
- * otherwise run into the safe margin) and gets a white outline. One scheme on
- * every screen, as the TV navigation guide asks. Does nothing on a phone.
+ * The focus mark on TV: the control grows (1.1x for buttons, as in the TV
+ * buttons guide; less for full-width rows, which would otherwise run into the
+ * safe margin) and gets a white outline. One scheme on every screen, as the TV
+ * navigation guide asks. The controls are Compose for TV's (TvComponents),
+ * which draw the same mark from their own focus state; this modifier is for
+ * the focus stops that are not controls (a code to read, a licence row).
+ * Does nothing on a phone.
  */
 @Composable
 fun Modifier.tvFocus(
@@ -76,9 +79,25 @@ fun Modifier.tvFocus(
 ): Modifier {
     if (!Device.isTv) return this
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) focusedScale else 1f, label = "tvFocusScale")
     return this
         .onFocusChanged { focused = it.hasFocus }
+        .tvFocusMark(focused, shape, focusedScale)
+}
+
+/**
+ * The same mark, drawn for a focus held elsewhere: a group that TalkBack reads
+ * as one (the add-key code with its instructions) marks only the part the eye
+ * looks for. Does nothing on a phone.
+ */
+@Composable
+fun Modifier.tvFocusMark(
+    focused: Boolean,
+    shape: Shape = RoundedCornerShape(12.dp),
+    focusedScale: Float = 1.1f,
+): Modifier {
+    if (!Device.isTv) return this
+    val scale by animateFloatAsState(if (focused) focusedScale else 1f, label = "tvFocusScale")
+    return this
         .graphicsLayer { scaleX = scale; scaleY = scale }
         .border(3.dp, if (focused) Color.White else Color.Transparent, shape)
 }
@@ -91,6 +110,10 @@ const val TV_ROW_SCALE = 1.03f
  * stays put and tints on scroll, content padded for the system bars; on TV
  * the title row inside the overscan-safe area, no on-screen Back (the remote
  * has one, and the TV guide does not ask for it).
+ *
+ * [collapsingTopBar], for long screens: the phone's bar scrolls away with the
+ * content and comes back on the first scroll up (Google's edge-to-edge guide:
+ * "Top app bars should collapse while scrolling"), more rows on a small screen.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,6 +122,7 @@ fun ScreenScaffold(
     onBack: (() -> Unit)?,
     actions: @Composable RowScope.() -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
+    collapsingTopBar: Boolean = false,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     if (Device.isTv) {
@@ -111,10 +135,10 @@ fun ScreenScaffold(
                 Modifier.fillMaxWidth().padding(bottom = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
+                androidx.tv.material3.Text(
                     title,
-                    fontSize = 30.sp,
-                    color = MaterialTheme.colorScheme.onBackground,
+                    style = androidx.tv.material3.MaterialTheme.typography.headlineMedium,
+                    color = androidx.tv.material3.MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -125,7 +149,8 @@ fun ScreenScaffold(
         }
         return
     }
-    val scroll = TopAppBarDefaults.pinnedScrollBehavior()
+    val scroll = if (collapsingTopBar) TopAppBarDefaults.enterAlwaysScrollBehavior()
+        else TopAppBarDefaults.pinnedScrollBehavior()
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         topBar = {

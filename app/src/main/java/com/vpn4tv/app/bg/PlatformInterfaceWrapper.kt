@@ -141,9 +141,10 @@ interface PlatformInterfaceWrapper : PlatformInterface {
     }
 
     override fun readWIFIState(): WIFIState? {
+        // No Wi-Fi hardware (an Ethernet-only TV box): no Wi-Fi state.
         @Suppress("DEPRECATION")
         val wifiInfo =
-            Application.wifiManager.connectionInfo ?: return null
+            Application.wifiManager?.connectionInfo ?: return null
         var ssid = wifiInfo.ssid
         if (ssid == "<unknown ssid>") {
             return WIFIState("", "")

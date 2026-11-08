@@ -30,6 +30,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
+import androidx.tv.material3.SelectableSurfaceDefaults
+import androidx.tv.material3.Icon as TvIcon
+import androidx.tv.material3.MaterialTheme as TvMaterialTheme
+import androidx.tv.material3.Surface as TvSurface
+import androidx.tv.material3.Text as TvText
 
 data class AppEntry(
     val packageName: String,
@@ -37,8 +49,13 @@ data class AppEntry(
     val isSystem: Boolean,
 )
 
+/**
+ * [onBack] null: shown beside the settings list on a wide window. Then there is
+ * no Back arrow and Back is not taken: the changes apply when the pane closes
+ * (another row picked, Settings left), as they do on Back otherwise.
+ */
 @Composable
-fun PerAppProxyScreen(onBack: () -> Unit) {
+fun PerAppProxyScreen(onBack: (() -> Unit)?) {
     val context = LocalContext.current
     var apps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
     var selectedApps by remember { mutableStateOf(Settings.perAppProxyList.toMutableSet()) }
@@ -47,15 +64,16 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
     var showSystem by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(true) }
 
-    fun saveAndBack() {
+    fun save() {
         val changed = enabled != Settings.perAppProxyEnabled ||
             mode != Settings.perAppProxyMode ||
             selectedApps != Settings.perAppProxyList
+        if (!changed) return
         Settings.perAppProxyEnabled = enabled
         Settings.perAppProxyMode = mode
         Settings.perAppProxyList = selectedApps
         // Auto-reconnect if VPN is running and settings changed
-        if (changed && com.vpn4tv.app.bg.BoxService.globalStatus.value == com.vpn4tv.app.constant.Status.Started) {
+        if (com.vpn4tv.app.bg.BoxService.globalStatus.value == com.vpn4tv.app.constant.Status.Started) {
             com.vpn4tv.app.bg.BoxService.stop()
             // Start again once the stop has ended: it may wait for a reload in
             // progress, and a start asked for before it ends is dropped.
@@ -70,10 +88,15 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
                 }
             }
         }
-        onBack()
     }
 
-    BackHandler { saveAndBack() }
+    if (onBack != null) {
+        BackHandler { save(); onBack() }
+    } else {
+        // In a pane: the latest values when it closes.
+        val latestSave by rememberUpdatedState(::save)
+        DisposableEffect(Unit) { onDispose { latestSave() } }
+    }
 
     // Load app list
     LaunchedEffect(Unit) {
@@ -116,20 +139,39 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
     val toggle: (String, Boolean) -> Unit = { pkg, on ->
         selectedApps = selectedApps.toMutableSet().apply { if (on) add(pkg) else remove(pkg) }
     }
-    ScreenScaffold(title = stringResource(R.string.title_per_app_proxy), onBack = { saveAndBack() }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = if (Device.isTv) 0.dp else 16.dp)) {
-            // Enable toggle: the whole row toggles, one focus stop on TV.
+    ScreenScaffold(
+        title = stringResource(R.string.title_per_app_proxy),
+        onBack = onBack?.let { back -> { save(); back() } },
+        collapsingTopBar = true,
+    ) { padding ->
+        if (Device.isTv) {
+            TvPerAppContent(
+                enabled = enabled, onEnabled = { enabled = it },
+                mode = mode, onMode = { mode = it },
+                showSystem = showSystem, onShowSystem = { showSystem = it },
+                selectedCount = selectedApps.size,
+                isLoading = isLoading,
+                apps = filteredApps,
+                isChecked = { it in selectedApps },
+                onToggle = toggle,
+            )
+            return@ScreenScaffold
+        }
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)
+                .readableWidth(ContentWidth.text),
+        ) {
+            // Enable toggle: the whole row toggles.
             Surface(
                 modifier = Modifier.fillMaxWidth()
-                    .toggleable(value = enabled, role = Role.Switch, onValueChange = { enabled = it })
-                    .tvFocus(RoundedCornerShape(12.dp), TV_ROW_SCALE),
+                    .toggleable(value = enabled, role = Role.Switch, onValueChange = { enabled = it }),
                 shape = RoundedCornerShape(12.dp),
                 color = colors.surfaceContainerHigh,
             ) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         stringResource(R.string.setting_per_app_enabled),
-                        fontSize = if (Device.isTv) 20.sp else 16.sp, color = colors.onSurface,
+                        fontSize = 16.sp, color = colors.onSurface,
                         modifier = Modifier.weight(1f),
                     )
                     Switch(checked = enabled, onCheckedChange = null)
@@ -149,7 +191,6 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
                             selected = mode == value,
                             onClick = { mode = value },
                             shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                            modifier = Modifier.tvFocus(RoundedCornerShape(20.dp), 1.05f),
                         ) { Text(label) }
                     }
                 }
@@ -163,7 +204,6 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
                 Row(
                     Modifier
                         .toggleable(value = showSystem, role = Role.Checkbox, onValueChange = { showSystem = it })
-                        .tvFocus(RoundedCornerShape(8.dp), 1.05f)
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -180,10 +220,7 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
                 if (isLoading) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 } else {
-                    LazyColumn(
-                        Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(if (Device.isTv) 4.dp else 0.dp),
-                    ) {
+                    LazyColumn(Modifier.fillMaxSize()) {
                         items(filteredApps, key = { it.packageName }) { app ->
                             val checked = app.packageName in selectedApps
                             // The whole row toggles; the checkbox only shows the state.
@@ -191,21 +228,149 @@ fun PerAppProxyScreen(onBack: () -> Unit) {
                                 Modifier
                                     .fillMaxWidth()
                                     .toggleable(value = checked, role = Role.Checkbox, onValueChange = { toggle(app.packageName, it) })
-                                    .tvFocus(RoundedCornerShape(10.dp), TV_ROW_SCALE)
                                     .padding(horizontal = 8.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Checkbox(checked = checked, onCheckedChange = null)
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text(app.label, fontSize = if (Device.isTv) 17.sp else 15.sp, color = colors.onSurface)
-                                    Text(app.packageName, fontSize = if (Device.isTv) 13.sp else 12.sp, color = colors.onSurfaceVariant)
+                                    Text(app.label, fontSize = 15.sp, color = colors.onSurface)
+                                    Text(app.packageName, fontSize = 12.sp, color = colors.onSurfaceVariant)
                                 }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * TV: the same screen in Compose for TV. Each row is one focus stop that
+ * toggles (TalkBack: a switch or a check box with its state), rows without a
+ * container (the grey plate and the outline in focus), the mode as two
+ * segments of which one is chosen.
+ */
+@Composable
+private fun TvPerAppContent(
+    enabled: Boolean,
+    onEnabled: (Boolean) -> Unit,
+    mode: Int,
+    onMode: (Int) -> Unit,
+    showSystem: Boolean,
+    onShowSystem: (Boolean) -> Unit,
+    selectedCount: Int,
+    isLoading: Boolean,
+    apps: List<AppEntry>,
+    isChecked: (String) -> Boolean,
+    onToggle: (String, Boolean) -> Unit,
+) {
+    val type = TvMaterialTheme.typography
+    val colors = TvMaterialTheme.colorScheme
+    Column(Modifier.fillMaxSize()) {
+        TvRow(
+            onClick = { onEnabled(!enabled) },
+            modifier = Modifier.fillMaxWidth().toggleState(Role.Switch, enabled),
+        ) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                TvText(stringResource(R.string.setting_per_app_enabled), style = type.titleMedium, modifier = Modifier.weight(1f))
+                TvSwitch(checked = enabled)
+            }
+        }
+        if (!enabled) return@Column
+
+        Spacer(Modifier.height(12.dp))
+        val options = listOf(
+            Settings.PER_APP_PROXY_EXCLUDE to stringResource(R.string.mode_exclude),
+            Settings.PER_APP_PROXY_INCLUDE to stringResource(R.string.mode_include),
+        )
+        Row(Modifier.fillMaxWidth()) {
+            options.forEachIndexed { index, (value, label) ->
+                val shape = if (index == 0) RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50)
+                    else RoundedCornerShape(topEndPercent = 50, bottomEndPercent = 50)
+                TvSegment(selected = mode == value, label = label, shape = shape, modifier = Modifier.weight(1f)) { onMode(value) }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        TvText(
+            stringResource(if (mode == Settings.PER_APP_PROXY_EXCLUDE) R.string.mode_exclude_desc else R.string.mode_include_desc),
+            style = type.labelSmall, color = colors.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(4.dp))
+        TvRow(
+            onClick = { onShowSystem(!showSystem) },
+            modifier = Modifier.toggleState(Role.Checkbox, showSystem),
+            shape = RoundedCornerShape(8.dp),
+        ) {
+            Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                TvCheckbox(checked = showSystem)
+                Spacer(Modifier.width(8.dp))
+                TvText(stringResource(R.string.show_system_apps), style = type.bodyMedium)
+            }
+        }
+        TvText(
+            String.format(stringResource(R.string.selected_count), selectedCount),
+            style = type.labelSmall, color = colors.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(4.dp))
+        if (isLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            return@Column
+        }
+        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(apps, key = { it.packageName }) { app ->
+                val checked = isChecked(app.packageName)
+                TvRow(
+                    onClick = { onToggle(app.packageName, !checked) },
+                    modifier = Modifier.fillMaxWidth().toggleState(Role.Checkbox, checked),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TvCheckbox(checked = checked)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            TvText(app.label, style = type.titleSmall)
+                            TvText(app.packageName, style = type.labelSmall, color = colors.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A row that is a switch or a check box for TalkBack: its role and its state. */
+private fun Modifier.toggleState(role: Role, on: Boolean): Modifier = semantics {
+    this.role = role
+    toggleableState = ToggleableState(on)
+}
+
+/** One of the two modes: filled and checked when chosen; for TalkBack one of a set. */
+@Composable
+private fun TvSegment(selected: Boolean, label: String, shape: Shape, modifier: Modifier, onClick: () -> Unit) {
+    TvSurface(
+        selected = selected,
+        onClick = onClick,
+        modifier = modifier.semantics { role = Role.RadioButton },
+        shape = SelectableSurfaceDefaults.shape(shape),
+        colors = tvSegmentColors(),
+        scale = SelectableSurfaceDefaults.scale(focusedScale = 1.05f),
+        border = tvSegmentBorder(shape),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (selected) {
+                TvIcon(Icons.Default.Check, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+            }
+            TvText(label, style = TvMaterialTheme.typography.labelMedium)
         }
     }
 }

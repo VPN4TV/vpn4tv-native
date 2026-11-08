@@ -39,6 +39,9 @@ import com.vpn4tv.app.ktx.hasPermission
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -46,6 +49,20 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 class BoxService(private val service: Service, private val platformInterface: PlatformInterface) : CommandServerHandler {
+    /**
+     * This VPN is Android's always-on VPN (Android 10+ can tell; read by
+     * VPNService at every start command): the system, not the user, turns
+     * it on and off. [lockdown]: connections without the VPN are blocked.
+     */
+    data class AlwaysOnVpn(val lockdown: Boolean)
+
+    /**
+     * How a start ended, as it happens: the phone's haptic feedback, the one
+     * question the app may ask after a connect (ConnectFeedback), and the days
+     * of use counted for it (UsageMilestones).
+     */
+    enum class StartOutcome { Connected, Failed }
+
     companion object {
         private const val PROFILE_UPDATE_INTERVAL = 15L * 60 * 1000 // 15 minutes in milliseconds
         private const val TAG = "BoxService"
@@ -59,7 +76,31 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         // How long a start waits for the one-time upgrade of the saved configs.
         private const val CONFIG_UPGRADE_WAIT_MS = 10_000L
         val globalStatus = MutableLiveData(Status.Stopped)
-        val lastError = MutableLiveData<String?>(null)
+
+        /** Why the last start failed or the VPN stopped by itself: the line under the status on Home. */
+        val lastError = MutableLiveData<ServiceError?>(null)
+
+        /** Null when the VPN is not always-on, not running, or Android cannot tell. */
+        val alwaysOn = MutableLiveData<AlwaysOnVpn?>(null)
+
+        private val outcomes = MutableSharedFlow<StartOutcome>(extraBufferCapacity = 4)
+
+        /** Not replayed: an outcome nobody collects (the app in the background) is dropped. */
+        val startOutcomes: SharedFlow<StartOutcome> = outcomes.asSharedFlow()
+
+        /**
+         * Counted first (the days of use the app's offers and the rating
+         * request wait for, from any start: the app, the tile, the widget),
+         * then told to whoever listens: the counts are current by then.
+         */
+        private fun report(outcome: StartOutcome) {
+            try {
+                UsageMilestones.record(outcome)
+            } catch (e: Exception) {
+                Log.w(TAG, "usage not counted: ${e.message}")
+            }
+            outcomes.tryEmit(outcome)
+        }
 
         // Connect attempts, for the watchdog. Static: a watchdog armed by an earlier
         // BoxService instance must see the newer attempts too.
@@ -80,7 +121,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         var fakeDnsAutoDisabled = false
 
 
-        fun start() {
+        /** False when Android refused the start (the tile and the widget open the app then). */
+        fun start(): Boolean {
             val intent =
                 runBlocking {
                     withContext(Dispatchers.IO) {
@@ -90,11 +132,13 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // From the background (the per-app screen restarts the service after the
             // stop has ended, the user may have left the app) Android 12+ refuses
             // a foreground start in proxy mode: VPN consent exempts only VPNService.
-            try {
+            return try {
                 ContextCompat.startForegroundService(Application.application, intent)
+                true
             } catch (e: IllegalStateException) {
                 Log.e(TAG, "start refused: ${e.message}")
-                lastError.postValue("StartService: ${e.message}")
+                lastError.postValue(ServiceError.of(Alert.StartService, e.message))
+                false
             }
         }
 
@@ -184,7 +228,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         Log.d(TAG, "startService() begin")
         try {
             withContext(Dispatchers.Main) {
-                notification.show(lastProfileName, R.string.status_starting)
+                notification.show(lastProfileName, R.string.status_connecting)
             }
 
             // The saved configs are upgraded once after an update, off the
@@ -232,7 +276,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     stopAndAlert(Alert.EmptyConfiguration)
                     return
                 }
-                Log.i(TAG, "Config empty, fetching subscription inline: $remoteUrl")
+                Log.i(TAG, "Config empty, fetching subscription inline: ${com.vpn4tv.app.utils.LogPrivacy.link(remoteUrl)}")
                 try {
                     val sub = com.vpn4tv.app.converter.HwidService.fetchSubscription(
                         service.applicationContext, remoteUrl,
@@ -251,8 +295,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     ProfileManager.update(profile)
                     Log.i(TAG, "Inline recovery OK: ${proxies.size} proxies written to ${profile.typed.path}")
                 } catch (e: Exception) {
-                    Log.e(TAG, "Inline subscription fetch failed: ${e.message}", e)
-                    stopAndAlert(Alert.CreateService, "subscription fetch failed: ${e.message}")
+                    Log.e(TAG, "Inline subscription fetch failed: ${e.javaClass.simpleName}: ${com.vpn4tv.app.utils.LogPrivacy.redactLinks(e.message)}")
+                    stopAndAlert(Alert.CreateService, "subscription fetch failed: ${e.message}", ServiceError.Reason.KeyDownloadFailed)
                     return
                 }
             }
@@ -280,7 +324,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             val base = try {
                 applyConfigTransforms(content)
             } catch (e: Exception) {
-                Log.e(TAG, "config transform (proxy-mode) failed: ${e.message}", e)
+                Log.e(TAG, "config transform (proxy-mode) failed: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
                 stopAndAlert(Alert.CreateService, "proxy-mode rewrite: ${e.message}")
                 return
             }
@@ -288,7 +332,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
             lastProfileName = profile.name
             withContext(Dispatchers.Main) {
-                notification.show(lastProfileName, R.string.status_starting)
+                notification.show(lastProfileName, R.string.status_connecting)
             }
 
             DefaultNetworkMonitor.start()
@@ -347,16 +391,20 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
             markStage("core")
             Log.d(TAG, "Starting sing-box with config ${content.length} bytes...")
-            BridgeAuth.redact(content).chunked(3000).forEachIndexed { idx, chunk ->
-                Log.d(TAG, "singbox config[$idx]: $chunk")
+            // The whole config, servers and keys included: debug builds only
+            // (release builds strip Log.d as well, see proguard-rules.pro).
+            if (com.vpn4tv.app.BuildConfig.DEBUG) {
+                BridgeAuth.redact(content).chunked(3000).forEachIndexed { idx, chunk ->
+                    Log.d(TAG, "singbox config[$idx]: $chunk")
+                }
             }
             try {
                 Log.d(TAG, "Calling commandServer.startOrReloadService()")
                 commandServer.startOrReloadService(content, overrideOptions())
                 Log.d(TAG, "startOrReloadService completed successfully")
             } catch (e: Exception) {
-                Log.e(TAG, "startOrReloadService FAILED: ${e.message}", e)
-                lastError.postValue("startService: ${e.message}")
+                Log.e(TAG, "startOrReloadService FAILED: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
+                lastError.postValue(ServiceError.of(Alert.CreateService, e.message))
                 // Self-heal: external-storage cache-file EACCES on multi-user TV.
                 // Set flag so next launch uses internal filesDir, then kill the
                 // process — Android restarts it on the next user tap.
@@ -366,7 +414,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     Application.application
                         .getSharedPreferences("storage", android.content.Context.MODE_PRIVATE)
                         .edit().putBoolean("use_internal", true).commit()
-                    stopAndAlert(Alert.CreateService, "${e.message}\n\nПерезапускаю с внутренним хранилищем...")
+                    stopAndAlert(Alert.CreateService, "${e.message} (restarting with internal storage)", ServiceError.Reason.Restarting)
                     kotlinx.coroutines.delay(2000)
                     android.os.Process.killProcess(android.os.Process.myPid())
                     return
@@ -385,7 +433,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     commandServer.startOrReloadService(fallback, overrideOptions())
                 } catch (e2: Exception) {
                     Log.e(TAG, "start without Russia direct failed too: ${e2.message}", e2)
-                    lastError.postValue("startService: ${e2.message}")
+                    lastError.postValue(ServiceError.of(Alert.CreateService, e2.message))
                     stopAndAlert(Alert.CreateService, e2.message)
                     return
                 }
@@ -415,6 +463,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
             lastError.postValue(null)
             status.postValue(Status.Started)
+            report(StartOutcome.Connected)
 
             // Run URLTest immediately so delays are available in UI
             Thread {
@@ -429,7 +478,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 }
             }.start()
             withContext(Dispatchers.Main) {
-                notification.show(lastProfileName, R.string.status_started)
+                notification.show(lastProfileName, R.string.status_connected)
             }
             notification.start()
 
@@ -848,17 +897,21 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         val line = prepared.line
         if (prepared.warn) Log.w(TAG, line) else Log.i(TAG, line)
         try {
-            // libbox log levels: 3 warn, 4 info.
-            commandServer.writeMessage(if (prepared.warn) 3 else 4, (if (prepared.warn) "WARN " else "INFO ") + line)
+            // Level 3 (warn) either way: a release build's Logs screen keeps the
+            // core's lines from warn up (CommandClient), and this one is for
+            // support. The text says INFO or WARN, which the screen goes by.
+            commandServer.writeMessage(3, (if (prepared.warn) "WARN " else "INFO ") + line)
         } catch (t: Throwable) {
             Log.w(TAG, "russia-direct line not written to the core log: ${t.message}")
         }
     }
 
-    private suspend fun stopAndAlert(type: Alert, message: String? = null) {
+    /** [reason]: what the user is told, when the caller knows it; otherwise read from [type] and [message]. */
+    private suspend fun stopAndAlert(type: Alert, message: String? = null, reason: ServiceError.Reason? = null) {
         closing = true
-        Log.e(TAG, "stopAndAlert: ${type.name} — $message")
-        lastError.postValue("${type.name}: ${message ?: "unknown"}")
+        Log.e(TAG, "stopAndAlert: ${type.name} — ${com.vpn4tv.app.utils.LogPrivacy.redactLinks(message)}")
+        lastError.postValue(ServiceError.of(type, message, reason))
+        report(StartOutcome.Failed)
         Settings.startedByUser = false
         val pfd = fileDescriptor
         if (pfd != null) {
@@ -950,7 +1003,10 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             } catch (t: Throwable) {
                 Log.w(TAG, "goroutine dump failed: ${t.message}")
             }
-            lastError.postValue("Не удалось подключиться (таймаут). Повторите.")
+            lastError.postValue(
+                ServiceError(ServiceError.Reason.Restarting, "connect watchdog: still starting after 45 s, stage $startStage"),
+            )
+            report(StartOutcome.Failed)
             status.postValue(Status.Stopped)
             // Give the UI + the upload thread a moment, then hard-reset the
             // wedged Go runtime.
@@ -990,7 +1046,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // the app down if the service ends without entering the foreground.
             // The stop closes this notification when it ends.
             if (status.value == Status.Stopping) {
-                notification.show(lastProfileName, R.string.status_stopping)
+                notification.show(lastProfileName, R.string.status_disconnecting)
                 // The status is shared by both service classes: a start of the
                 // other one (the mode changed meanwhile) has no stop to close it.
                 if (!closing) {
@@ -1018,8 +1074,11 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         // cleanly: an unpromoted service gets killed anyway, and crashing
         // tells the user nothing. Do NOT route through stopAndAlert — it
         // clears startedByUser and would disable boot auto-connect forever.
-        if (!notification.show("", R.string.status_starting)) {
-            lastError.postValue("StartService: foreground start rejected by system")
+        if (!notification.show("", R.string.status_connecting)) {
+            lastError.value = ServiceError.of(
+                Alert.StartService, "foreground start rejected by system", ServiceError.Reason.SystemRefused,
+            )
+            report(StartOutcome.Failed)
             status.value = Status.Stopped
             service.stopSelf()
             return Service.START_NOT_STICKY
@@ -1070,8 +1129,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 // HomeScreen guides reinstall, and stop cleanly instead.
                 if (com.vpn4tv.app.utils.NativeLib.isLoadFailure(t)) {
                     com.vpn4tv.app.utils.NativeLib.markBroken(Application.application)
-                    stopAndAlert(Alert.StartCommandServer,
-                        Application.application.getString(R.string.error_install_broken))
+                    stopAndAlert(Alert.StartCommandServer, t.message ?: t.javaClass.simpleName,
+                        ServiceError.Reason.InstallBroken)
                 } else {
                     stopAndAlert(Alert.StartCommandServer, t.message)
                 }
@@ -1090,6 +1149,10 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     }
 
     internal fun onRevoke() {
+        // Android took the VPN away: another VPN app was turned on, or the VPN
+        // was turned off in Android's settings. Without a word the screen just
+        // says "Disconnected", and that looks like the app failed.
+        if (status.value == Status.Started) lastError.value = ServiceError(ServiceError.Reason.Revoked)
         stopService()
     }
 
@@ -1097,7 +1160,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         val builder =
             NotificationCompat.Builder(service, notification.identifier).setShowWhen(false)
                 .setContentTitle(notification.title).setContentText(notification.body)
-                .setOnlyAlertOnce(true).setSmallIcon(R.drawable.ic_menu)
+                .setOnlyAlertOnce(true).setSmallIcon(R.drawable.ic_stat_vpn4tv)
+                .setColor(ContextCompat.getColor(service, R.color.brand))
                 .setCategory(NotificationCompat.CATEGORY_EVENT)
                 .setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true)
         if (!notification.subtitle.isNullOrBlank()) {
@@ -1230,7 +1294,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                     if (started != null) runningBridgeSidecars[kind] = started else runningBridgeSidecars.remove(kind)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "$kind bridge failed to start: ${e.message}", e)
+                Log.e(TAG, "$kind bridge failed to start: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
                 stopAllBridgesLocked()
                 return "$kind: ${e.message}"
             }
@@ -1319,7 +1383,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         try {
             content = injectProbedDns(content)
         } catch (e: Exception) {
-            Log.w(TAG, "DNS injection failed, using config defaults: ${e.message}")
+            Log.w(TAG, "DNS injection failed, using config defaults: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
         }
         // Pre-resolved hosts: resolve every outbound hostname through the
         // app-level DoH fallback chain (Quad9→AdGuard→Google→CF) and pin the
@@ -1330,7 +1394,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         try {
             content = injectResolvedHosts(content)
         } catch (e: Exception) {
-            Log.w(TAG, "Hosts pre-resolution failed, keeping config as-is: ${e.message}")
+            Log.w(TAG, "Hosts pre-resolution failed, keeping config as-is: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
         }
         // FakeDNS off-switch: user toggle off, proxy mode (no TUN to map fake
         // IPs back), or the post-connect health check auto-disabled it because
@@ -1339,7 +1403,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             try {
                 content = stripFakeDns(content)
             } catch (e: Exception) {
-                Log.w(TAG, "FakeDNS strip failed, keeping config as-is: ${e.message}")
+                Log.w(TAG, "FakeDNS strip failed, keeping config as-is: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
             }
         }
         if (Settings.isProxyMode) {
@@ -1350,7 +1414,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 try {
                     content = injectBypassLanRule(content)
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to inject bypass-lan rule: ${e.message}")
+                    Log.w(TAG, "Failed to inject bypass-lan rule: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
                 }
             }
             // Apps outside the VPN must not get in through the tun; the rule
@@ -1360,6 +1424,13 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         // Bridge inbounds want a password now (see BridgeAuth). Both the start
         // and the reload path come through here, with the same per-process pair.
         content = BridgeAuth.applyToSingbox(content)
+        // The core's log level of this build (warn in release: no line per
+        // connection naming the site). Saved configs keep the generator's info.
+        try {
+            content = com.vpn4tv.app.utils.LogPrivacy.applyCoreLevel(content, com.vpn4tv.app.BuildConfig.DEBUG)
+        } catch (e: Exception) {
+            Log.w(TAG, "log level not set: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
+        }
         return content
     }
 

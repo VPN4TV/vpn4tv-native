@@ -111,8 +111,39 @@ object Settings {
         false
     }
 
+    /** "Current server in the notification" (phones; it used to mean the speed). */
     var dynamicNotification by dataStore.boolean(SettingsKey.DYNAMIC_NOTIFICATION) { true }
+
+    /** The question before the notification permission was shown once, after a connect: never again. */
+    var notificationPromptShown by dataStore.boolean(SettingsKey.NOTIFICATION_PROMPT_SHOWN) { false }
+
+    /**
+     * The system's permission dialog was asked for at least once. Asked
+     * before and no rationale due: Android shows it no more, the button
+     * leads to the app's notification settings instead.
+     */
+    var notificationPermissionRequested by dataStore.boolean(SettingsKey.NOTIFICATION_PERMISSION_REQUESTED) { false }
     var disableDeprecatedWarnings by dataStore.boolean(SettingsKey.DISABLE_DEPRECATED_WARNINGS) { false }
+
+    // Days of use (UsageMilestones): local calendar days since 1970, -1 none yet.
+    var usageConnectDays by dataStore.int(SettingsKey.USAGE_CONNECT_DAYS) { 0 }
+    var usageLastConnectDay by dataStore.long(SettingsKey.USAGE_LAST_CONNECT_DAY) { -1L }
+    var usageCleanDays by dataStore.int(SettingsKey.USAGE_CLEAN_DAYS) { 0 }
+    var usageLastCleanDay by dataStore.long(SettingsKey.USAGE_LAST_CLEAN_DAY) { -1L }
+
+    /** When the Play rating was last asked for (ms), 0 never. */
+    var reviewAskedAt by dataStore.long(SettingsKey.REVIEW_ASKED_AT) { 0L }
+
+    /** Android 13+ asked once whether to add the Quick Settings tile. */
+    var tileOffered by dataStore.boolean(SettingsKey.TILE_OFFERED) { false }
+
+    /** The tile is in the user's Quick Settings (its service's added/removed calls). */
+    var tileAdded by dataStore.boolean(SettingsKey.TILE_ADDED) { false }
+
+    /** The home-screen widget was offered once. */
+    var widgetOffered by dataStore.boolean(SettingsKey.WIDGET_OFFERED) { false }
+
+    var quickActionToken by dataStore.string(SettingsKey.QUICK_ACTION_TOKEN) { "" }
 
     const val PER_APP_PROXY_DISABLED = 0
     const val PER_APP_PROXY_EXCLUDE = 1

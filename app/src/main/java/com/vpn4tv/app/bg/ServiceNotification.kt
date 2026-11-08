@@ -14,11 +14,10 @@ import android.util.Log
 import androidx.annotation.StringRes
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.MutableLiveData
-import io.nekohasekai.libbox.Libbox
-import io.nekohasekai.libbox.StatusMessage
+import io.nekohasekai.libbox.OutboundGroup
 import com.vpn4tv.app.Application
-import com.vpn4tv.app.ktx.unwrap
 import com.vpn4tv.app.R
 import com.vpn4tv.app.ui.MainActivity
 import com.vpn4tv.app.constant.Action
@@ -37,7 +36,6 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
     companion object {
         private const val notificationId = 1
         private const val notificationChannel = "service"
-        private const val STATUS_UPDATE_MS = 3_000L
         val flags =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
 
@@ -47,17 +45,69 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
             }
             return Application.notification.areNotificationsEnabled()
         }
+
+        /** The notification of the running service, for changes made outside it. */
+        @Volatile
+        private var running: ServiceNotification? = null
+
+        /**
+         * The server the notification names, null without one: the Quick
+         * Settings tile shows it too, under the same setting.
+         */
+        val currentServer = MutableLiveData<String?>(null)
+
+        /**
+         * The "current server" setting changed, notifications were just
+         * allowed, or always-on VPN changed: the notification shows it now,
+         * not from the next connect.
+         */
+        fun refresh() {
+            running?.restartServerUpdates()
+        }
+
+        /**
+         * The server traffic goes through: the selector's pick, or the auto
+         * group's when the selector is on auto. Home shows the same one.
+         */
+        fun activeServer(selectorPick: String, autoPick: String?): String =
+            if (selectorPick == "auto" && !autoPick.isNullOrEmpty()) autoPick else selectorPick
     }
 
+    // Server changes come in with the groups, which the core sends when a
+    // pick changes; no longer the speed every second.
     @OptIn(DelicateCoroutinesApi::class)
     private val commandClient =
-        CommandClient(GlobalScope, CommandClient.ConnectionType.Status, this)
+        CommandClient(GlobalScope, CommandClient.ConnectionType.Groups, this)
     private var receiverRegistered = false
+
+    // The builder, the text and the closed flag change on the main thread, the
+    // core's thread (groups) and IO; one lock keeps a late update from posting
+    // the notification again after close() has removed it.
+    private val lock = Any()
+    private var closed = false
+    private var title = "VPN4TV"
+    @StringRes private var state = R.string.status_connecting
+    private var server: String? = null
+
+    private val stopAction by lazy {
+        NotificationCompat.Action.Builder(
+            0,
+            service.getText(R.string.action_disconnect),
+            PendingIntent.getBroadcast(
+                service,
+                0,
+                Intent(Action.SERVICE_CLOSE).setPackage(service.packageName),
+                flags,
+            ),
+        ).build()
+    }
 
     private val notificationBuilder by lazy {
         NotificationCompat.Builder(service, notificationChannel).setShowWhen(false).setOngoing(true)
             .setContentTitle("VPN4TV").setOnlyAlertOnce(true)
-            .setSmallIcon(R.drawable.ic_menu)
+            .setSmallIcon(R.drawable.ic_stat_vpn4tv)
+            // The icon's purple: Android 12+ draws the icon and the action in it.
+            .setColor(ContextCompat.getColor(service, R.color.brand))
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setContentIntent(
                 PendingIntent.getActivity(
@@ -70,20 +120,27 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
                     flags,
                 ),
             )
-            .setPriority(NotificationCompat.PRIORITY_LOW).apply {
-                addAction(
-                    NotificationCompat.Action.Builder(
-                        0,
-                        service.getText(R.string.stop),
-                        PendingIntent.getBroadcast(
-                            service,
-                            0,
-                            Intent(Action.SERVICE_CLOSE).setPackage(service.packageName),
-                            flags,
-                        ),
-                    ).build(),
-                )
-            }
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+    }
+
+    /** The notification as it stands. Call with [lock] held. */
+    private fun build(): android.app.Notification {
+        // "Подключено к серверу FR10T": the server's own tag often has a "·"
+        // in it, so not "Подключено · FR10T".
+        val shownServer = server?.takeIf {
+            it.isNotBlank() && state == R.string.status_connected && Settings.dynamicNotification
+        }
+        notificationBuilder
+            .setContentTitle(title)
+            .setContentText(
+                if (shownServer != null) service.getString(R.string.notification_connected_server, shownServer)
+                else service.getString(state),
+            )
+            .clearActions()
+        // Always-on VPN: Android starts and stops it, so no Disconnect here
+        // (Google's VPN guide); the app's screen leads to Android's VPN settings.
+        if ((service as? VPNService)?.alwaysOnState() == null) notificationBuilder.addAction(stopAction)
+        return notificationBuilder.build()
     }
 
     /**
@@ -105,12 +162,14 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
      */
     fun show(lastProfileName: String, @StringRes contentTextId: Int): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // The name and description of an existing channel can change, so
+            // installs that have "Service Notifications" get the new ones too.
             Application.notification.createNotificationChannel(
                 NotificationChannel(
                     notificationChannel,
-                    "Service Notifications",
+                    service.getString(R.string.notification_channel_vpn),
                     NotificationManager.IMPORTANCE_LOW,
-                ),
+                ).apply { description = service.getString(R.string.notification_channel_vpn_desc) },
             )
         }
         // Android 14+ requires startForeground() to carry the same
@@ -126,14 +185,14 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
             }
         } else 0
         return try {
-            ServiceCompat.startForeground(
-                service,
-                notificationId,
-                notificationBuilder
-                    .setContentTitle(lastProfileName.takeIf { it.isNotBlank() } ?: "VPN4TV")
-                    .setContentText(service.getString(contentTextId)).build(),
-                fgsType,
-            )
+            val notification = synchronized(lock) {
+                closed = false
+                title = lastProfileName.takeIf { it.isNotBlank() } ?: "VPN4TV"
+                state = contentTextId
+                if (contentTextId != R.string.status_connected) server = null
+                build()
+            }
+            ServiceCompat.startForeground(service, notificationId, notification, fgsType)
             true
         } catch (e: Exception) {
             // ForegroundServiceStartNotAllowedException extends
@@ -144,19 +203,49 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
         }
     }
 
+    /** Connected: follow the server, when the setting asks for it. */
     suspend fun start() {
-        // No live speed on TV: nobody sees the notification there, and the
-        // update every second was a steady load on weak TV boxes (seen in
-        // the system log of a TCL set, 2026-11-07).
-        if (Settings.dynamicNotification && checkPermission() && !com.vpn4tv.app.ui.Device.isTv) {
-            commandClient.connect()
-            withContext(Dispatchers.Main) {
-                registerReceiver()
+        running = this
+        startServerUpdates()
+    }
+
+    // No live updates on TV: nobody sees the notification there, and a steady
+    // update was a load on weak TV boxes (seen in the system log of a TCL set,
+    // 2026-11-07). Nor without the permission: nothing would show.
+    private fun serverWanted() =
+        Settings.dynamicNotification && checkPermission() && !com.vpn4tv.app.ui.Device.isTv
+
+    private suspend fun startServerUpdates() {
+        if (!serverWanted() || synchronized(lock) { closed }) return
+        commandClient.connect()
+        withContext(Dispatchers.Main) {
+            // A stop may have come meanwhile (a refresh racing it).
+            if (synchronized(lock) { closed }) commandClient.disconnect() else registerReceiver()
+        }
+    }
+
+    @OptIn(DelicateCoroutinesApi::class)
+    private fun restartServerUpdates() {
+        GlobalScope.launch(Dispatchers.IO) {
+            commandClient.disconnect()
+            withContext(Dispatchers.Main) { unregisterReceiver() }
+            // Posted again at once: after the permission is granted the
+            // notification shows only once it is posted anew, and with the
+            // setting off the server goes from the text.
+            synchronized(lock) {
+                if (closed) return@launch
+                if (!Settings.dynamicNotification) {
+                    server = null
+                    currentServer.postValue(null)
+                }
+                Application.notificationManager.notify(notificationId, build())
             }
+            startServerUpdates()
         }
     }
 
     private fun registerReceiver() {
+        if (receiverRegistered) return
         service.registerReceiver(
             this,
             IntentFilter().apply {
@@ -167,19 +256,22 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
         receiverRegistered = true
     }
 
-    private var lastStatusUpdate = 0L
+    private fun unregisterReceiver() {
+        if (!receiverRegistered) return
+        service.unregisterReceiver(this)
+        receiverRegistered = false
+    }
 
-    override fun updateStatus(status: StatusMessage) {
-        // Status arrives every second; the notification follows every few.
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastStatusUpdate < STATUS_UPDATE_MS) return
-        lastStatusUpdate = now
-        val content =
-            Libbox.formatBytes(status.uplink).unwrap + "/s ↑\t" + Libbox.formatBytes(status.downlink).unwrap + "/s ↓"
-        Application.notificationManager.notify(
-            notificationId,
-            notificationBuilder.setContentText(content).build(),
-        )
+    override fun updateGroups(newGroups: MutableList<OutboundGroup>) {
+        val selector = newGroups.firstOrNull { it.type == "selector" } ?: return
+        val pick = activeServer(selector.selected, newGroups.firstOrNull { it.type == "urltest" }?.selected)
+        synchronized(lock) {
+            if (closed || pick == server) return
+            server = pick
+            currentServer.postValue(pick)
+            if (state != R.string.status_connected) return
+            Application.notificationManager.notify(notificationId, build())
+        }
     }
 
     @OptIn(DelicateCoroutinesApi::class)
@@ -200,11 +292,14 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
     }
 
     fun close() {
+        if (running === this) running = null
         commandClient.disconnect()
-        ServiceCompat.stopForeground(service, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        if (receiverRegistered) {
-            service.unregisterReceiver(this)
-            receiverRegistered = false
+        synchronized(lock) {
+            closed = true
+            server = null
+            currentServer.postValue(null)
+            ServiceCompat.stopForeground(service, ServiceCompat.STOP_FOREGROUND_REMOVE)
         }
+        unregisterReceiver()
     }
 }

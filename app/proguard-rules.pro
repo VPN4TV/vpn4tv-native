@@ -26,3 +26,13 @@
 # its LoggerFactory falls back to a no-op logger.
 -dontwarn com.akuleshov7.ktoml.**
 -dontwarn org.slf4j.impl.**
+
+# Release builds keep no debug or verbose lines in the system log: the calls
+# to Log.d and Log.v are removed. Those lines carried configs, server details
+# and the sites of single connections (Google's core app quality,
+# Sensitive_Data_Logging); what is logged at info and above names none of them
+# (LogPrivacy). Debug builds keep everything.
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+}

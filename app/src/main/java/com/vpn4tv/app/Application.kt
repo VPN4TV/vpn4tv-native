@@ -4,8 +4,6 @@ import android.app.Application
 import android.app.NotificationManager
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.util.Log
 import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
@@ -14,7 +12,6 @@ import android.os.PowerManager
 import androidx.core.content.getSystemService
 import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.SetupOptions
-import com.vpn4tv.app.bg.AppChangeReceiver
 import com.vpn4tv.app.bg.UpdateProfileWork
 import com.vpn4tv.app.constant.Bugs
 import com.vpn4tv.app.database.Settings
@@ -67,6 +64,14 @@ class Application : Application() {
         } catch (e: Throwable) {
             Log.e("Application", "migrateLegacySelectedServer failed: ${e.message}", e)
         }
+        try {
+            // Data restored from a backup or the old phone: forget what was
+            // true of the old device (connected, permissions asked) before
+            // BootReceiver or a screen reads it.
+            com.vpn4tv.app.bg.RestoredData.resetDeviceSettings(this)
+        } catch (e: Throwable) {
+            Log.e("Application", "RestoredData.resetDeviceSettings failed: ${e.message}", e)
+        }
 
         // First launch of a new version code: bring the saved configs on disk
         // to the current generator's shape (5.4.0: bridge UDP and DNS stay in
@@ -75,7 +80,16 @@ class Application : Application() {
         // it reads a profile. It never throws and always opens that gate.
         @Suppress("OPT_IN_USAGE")
         GlobalScope.launch(Dispatchers.IO) {
+            // After a restore, first the profiles' paths (the upgrade reads them).
+            com.vpn4tv.app.bg.RestoredData.repointProfiles(this@Application)
             com.vpn4tv.app.bg.SavedConfigUpgrade.runIfVersionChanged()
+        }
+
+        // Why the previous process ended (Android 11+): logcat, and the system
+        // ending it while it mattered goes to the crash host (ExitReasons).
+        @Suppress("OPT_IN_USAGE")
+        GlobalScope.launch(Dispatchers.IO) {
+            com.vpn4tv.app.utils.ExitReasons.record(this@Application, sessionBridges())
         }
 
         // Probe DNS servers on a background thread so by the time the
@@ -172,21 +186,12 @@ class Application : Application() {
             }
         }
 
-        // Off main thread: registerReceiver is a synchronous binder call into
-        // system_server; at boot/wake AMS can be overloaded for seconds and
-        // this transact showed up as the blocking frame in vc50326 onCreate
-        // ANRs (cluster #23). Registration from a background thread is legal —
-        // the 2-arg overload still dispatches onReceive on the main looper.
-        @Suppress("OPT_IN_USAGE")
-        GlobalScope.launch(Dispatchers.IO) {
-            registerReceiver(
-                AppChangeReceiver(),
-                IntentFilter().apply {
-                    addAction(Intent.ACTION_PACKAGE_ADDED)
-                    addAction(Intent.ACTION_PACKAGE_REPLACED)
-                    addDataScheme("package")
-                },
-            )
+        // Phones: the Quick Settings tile, the widget and the Connect shortcut
+        // follow the VPN (their work runs off the main thread).
+        try {
+            com.vpn4tv.app.bg.QuickControls.init(this)
+        } catch (e: Throwable) {
+            Log.e("Application", "QuickControls.init failed: ${e.message}", e)
         }
     }
 
@@ -230,22 +235,28 @@ class Application : Application() {
         runCatching { crashFile.renameTo(File(tempDir, "go_crash_consumed.log")) }
         runCatching { stderrFile.renameTo(File(tempDir, "go_crash_consumed.log.stderr")) }
 
-        // Bridge subset that was active when sing-box ran (BoxService writes it),
-        // plus whether the FakeDNS health check had auto-disabled — context for
-        // the upcoming server upload and useful in logcat now.
-        val sessionPrefs = getSharedPreferences("session", Context.MODE_PRIVATE)
-        val bridges = buildString {
-            append("xray=").append(if (sessionPrefs.getBoolean("xray", false)) "Y" else "N")
-            append(" outline=").append(if (sessionPrefs.getBoolean("outline", false)) "Y" else "N")
-            append(" wireproxy=").append(if (sessionPrefs.getBoolean("wireproxy", false)) "Y" else "N")
-            append(" fakeDnsAutoDisabled=").append(sessionPrefs.getBoolean("fakeDns_auto_disabled", false))
-        }
+        val bridges = sessionBridges()
         Log.e("Application", "Previous Go crash dump (${content.length} bytes, $bridges):\n$content")
         // Upload the full untruncated dump off-device — Play strips/truncates
         // the synthetic frames so the native tombstones are dead ends; the
         // SetCrashOutput dump (all goroutines + the real throw) is the only way
         // to root-cause the residual heap corruption. Best-effort, off-thread.
         com.vpn4tv.app.utils.CrashUpload.upload(content, bridges, "crash")
+    }
+
+    /**
+     * Bridge subset that was active when sing-box last ran (BoxService writes
+     * it), plus whether the FakeDNS health check had auto-disabled: the
+     * X-Bridges context of a Go crash dump and of an exit report.
+     */
+    private fun sessionBridges(): String {
+        val sessionPrefs = getSharedPreferences("session", Context.MODE_PRIVATE)
+        return buildString {
+            append("xray=").append(if (sessionPrefs.getBoolean("xray", false)) "Y" else "N")
+            append(" outline=").append(if (sessionPrefs.getBoolean("outline", false)) "Y" else "N")
+            append(" wireproxy=").append(if (sessionPrefs.getBoolean("wireproxy", false)) "Y" else "N")
+            append(" fakeDnsAutoDisabled=").append(sessionPrefs.getBoolean("fakeDns_auto_disabled", false))
+        }
     }
 
     private fun setupLibbox(baseDir: File, workingDir: File, tempDir: File) {
@@ -438,7 +449,8 @@ class Application : Application() {
         val packageManager by lazy { application.packageManager }
         val powerManager by lazy { application.getSystemService<PowerManager>()!! }
         val notificationManager by lazy { application.getSystemService<NotificationManager>()!! }
-        val wifiManager by lazy { application.getSystemService<WifiManager>()!! }
+        /** Null on a device without Wi-Fi (TV boxes with Ethernet only: Wi-Fi is optional in the manifest). */
+        val wifiManager: WifiManager? by lazy { application.getSystemService<WifiManager>() }
         val clipboard by lazy { application.getSystemService<ClipboardManager>()!! }
 
         /**

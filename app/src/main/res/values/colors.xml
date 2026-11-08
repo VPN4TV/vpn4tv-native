@@ -1,6 +1,21 @@
 <resources>
     <color name="seed">#d81b60</color>
+    <!-- The purple of the app icon's background (mipmap ic_launcher_background, the TV banner). -->
+    <color name="brand">#6A3DE8</color>
+    <!-- The TV's window before the first frame (values-television): TvTheme's background. -->
+    <color name="tv_window_background">#0E0E0E</color>
     <color name="surface_80">#CC1C1B1F</color>
+
+    <!-- Launcher shortcut icons: Google's light circle behind a glyph in the brand purple. -->
+    <color name="shortcut_icon_background">#FFF5F5F5</color>
+
+    <!-- The widget's preview in the widget picker (Android 12+ only, see values-v31):
+         the colours Glance's default theme gives the widget itself. -->
+    <color name="widget_preview_background">#FFE0F3FF</color>
+    <color name="widget_preview_on_surface">#FF1C1B1F</color>
+    <color name="widget_preview_on_surface_variant">#FF49454F</color>
+    <color name="widget_preview_button">#FFE8DEF8</color>
+    <color name="widget_preview_on_button">#FF1D192B</color>
 
     <color name="blue_grey_600">#546e7a</color>
 

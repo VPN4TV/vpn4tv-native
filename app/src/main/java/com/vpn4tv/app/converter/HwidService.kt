@@ -127,12 +127,12 @@ object HwidService {
                     return fetchSubscriptionOnce(context, endpoint, timeoutMs, hardDeadline = quick)
                 } catch (e: java.net.SocketTimeoutException) {
                     lastError = e
-                    android.util.Log.w("HwidService", "fetchSubscription timeout ${attempt}/${attempts} @ $endpoint")
+                    android.util.Log.w("HwidService", "fetchSubscription timeout ${attempt}/${attempts} @ ${com.vpn4tv.app.utils.LogPrivacy.link(endpoint)}")
                     if (attempt < attempts) Thread.sleep(1000L)
                 } catch (e: java.io.IOException) {
                     // Non-timeout IO (reset, 5xx) — jump to mirror without retries
                     lastError = e
-                    android.util.Log.w("HwidService", "fetchSubscription IO error at $endpoint: ${e.message}")
+                    android.util.Log.w("HwidService", "fetchSubscription IO error at ${com.vpn4tv.app.utils.LogPrivacy.link(endpoint)}: ${com.vpn4tv.app.utils.LogPrivacy.redactLinks(e.message)}")
                     break
                 }
             }
@@ -153,7 +153,7 @@ object HwidService {
         } catch (e: java.io.IOException) {
             // disconnect() surfaces as "socket closed"/"canceled": still a timeout to the retry loop.
             if (expired.get() && e !is java.net.SocketTimeoutException) {
-                throw java.net.SocketTimeoutException("no answer from $url in $timeoutMs ms").apply { initCause(e) }
+                throw java.net.SocketTimeoutException("no answer from ${com.vpn4tv.app.utils.LogPrivacy.link(url)} in $timeoutMs ms").apply { initCause(e) }
             }
             throw e
         } finally {
@@ -182,6 +182,11 @@ object HwidService {
         // the heap with OutOfMemoryError inside ProxyParser.parseSubscription
         // (Vitals: 50103, 1 user).
         val maxBytes = 2 * 1024 * 1024
+        // An error status before the body: HttpURLConnection's own exception
+        // for it names the whole link, the key's token included, and that text
+        // reaches the log and the error the user sees. Same IOException as before.
+        val code = conn.responseCode
+        if (code >= 400) throw java.io.IOException("HTTP $code from ${conn.url.host}")
         val input = conn.inputStream
         val buf = ByteArray(maxBytes + 1)
         var read = 0

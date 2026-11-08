@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The VPN4TV widget: 2x1 by default (Android 12+ cells; minWidth and
+     minHeight before), down to 1x1 (the button alone), wider for long key
+     names; taller only adds empty space, so the height stops at two rows.
+     No periodic updates: the app redraws it whenever the VPN changes.
+     The Android 12+ attributes (cells, previewLayout, max sizes) are ignored before. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="40dp"
+    android:minResizeHeight="40dp"
+    android:maxResizeWidth="320dp"
+    android:maxResizeHeight="120dp"
+    android:previewImage="@drawable/vpn_widget_preview_image"
+    android:previewLayout="@layout/vpn_widget_preview"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen"
+    tools:ignore="UnusedAttribute" />

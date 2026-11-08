@@ -5,7 +5,26 @@ object SettingsKey {
     const val XRAY_PORT_BASE = "xray_port_base"
     const val SERVICE_MODE = "service_mode"
     const val DYNAMIC_NOTIFICATION = "dynamic_notification"
+    // Android 13+: the app's own question before the system's (once), and
+    // whether the system's has been asked at least once.
+    const val NOTIFICATION_PROMPT_SHOWN = "notification_prompt_shown"
+    const val NOTIFICATION_PERMISSION_REQUESTED = "notification_permission_requested"
     const val DISABLE_DEPRECATED_WARNINGS = "disable_deprecated_warnings"
+
+    // Days of use (UsageMilestones) and what waits for them: the offers of
+    // the Quick Settings tile and the widget (once each), the Play rating.
+    const val USAGE_CONNECT_DAYS = "usage_connect_days"
+    const val USAGE_LAST_CONNECT_DAY = "usage_last_connect_day"
+    const val USAGE_CLEAN_DAYS = "usage_clean_days"
+    const val USAGE_LAST_CLEAN_DAY = "usage_last_clean_day"
+    const val REVIEW_ASKED_AT = "review_asked_at"
+    const val TILE_OFFERED = "tile_offered"
+    const val TILE_ADDED = "tile_added"
+    const val WIDGET_OFFERED = "widget_offered"
+
+    // Proves that a connect or disconnect intent came from the app's own
+    // shortcut or tile: MainActivity is exported, its actions must not be.
+    const val QUICK_ACTION_TOKEN = "quick_action_token"
 
     const val AUTO_REDIRECT = "auto_redirect"
     const val PER_APP_PROXY_ENABLED = "per_app_proxy_enabled"

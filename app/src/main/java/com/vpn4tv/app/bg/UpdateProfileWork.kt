@@ -78,7 +78,17 @@ class UpdateProfileWork {
     }
 
     class UpdateTask(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
-        override suspend fun doWork(): Result {
+        // Android 16 puts a job that runs beside a foreground service (the VPN)
+        // under the job quota, and a key update can take minutes (retries,
+        // the mirror): when the system stops one, its reason is logged and goes
+        // with the next exit report (Google: log WorkInfo.getStopReason()).
+        override suspend fun doWork(): Result = try {
+            update()
+        } finally {
+            if (isStopped) com.vpn4tv.app.utils.ExitReasons.recordWorkStop(applicationContext, stopReason)
+        }
+
+        private suspend fun update(): Result {
             val remoteProfiles =
                 ProfileManager.list()
                     .filter { it.typed.type == TypedProfile.Type.Remote && it.typed.autoUpdate }
@@ -98,8 +108,13 @@ class UpdateProfileWork {
                     Log.i(TAG, "updated ${profile.name}: config=${outcome.configChanged} bridges=${outcome.bridgesChanged}")
                     // The reload re-syncs the bridges, so a changed link applies too.
                     SubscriptionUpdater.applyToRunningService(profile, outcome)
+                    // TV: the home screen's channel lists the key's servers.
+                    if (outcome.configChanged) com.vpn4tv.app.tv.QuickConnectChannel.requestSync(applicationContext)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // Stopped: not a failed update, and no more of them.
+                    throw e
                 } catch (e: Exception) {
-                    Log.e(TAG, "update profile ${profile.name}", e)
+                    Log.e(TAG, "update profile ${profile.name}: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
                     success = false
                 }
             }
