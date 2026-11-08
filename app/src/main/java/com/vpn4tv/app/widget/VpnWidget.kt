@@ -52,6 +52,7 @@ import androidx.glance.unit.ColorProvider
 import com.vpn4tv.app.R
 import com.vpn4tv.app.bg.BoxService
 import com.vpn4tv.app.bg.QuickToggle
+import com.vpn4tv.app.bg.ServiceNotification
 import com.vpn4tv.app.constant.Status
 import com.vpn4tv.app.database.ProfileManager
 import com.vpn4tv.app.database.Settings
@@ -170,10 +171,12 @@ class VpnWidget : GlanceAppWidget() {
                     context.getString(stateText(m)), maxLines = 1,
                     style = TextStyle(color = stateColor(m), fontSize = type.state, fontWeight = FontWeight.Bold),
                 )
-                // The key it connects with (no key: the state line says so already).
-                if (size.height >= NARROW_TALL.height && m.keyName != null) {
+                // Connected: the server, as the tile and the notification show it;
+                // otherwise the key it connects with (no key: the state line says so).
+                val detail = m.server ?: m.keyName
+                if (size.height >= NARROW_TALL.height && detail != null) {
                     Text(
-                        m.keyName, maxLines = 1,
+                        detail, maxLines = 1,
                         style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = type.small),
                     )
                 }
@@ -211,6 +214,8 @@ data class WidgetModel(
     val alwaysOn: Boolean,
     /** A tap on Connect starts the VPN without the app (the permission is there, the key is fresh). */
     val directConnect: Boolean,
+    /** The server while connected, when the app follows it (the same source as the tile). */
+    val server: String? = null,
 ) {
     companion object {
         suspend fun load(context: Context): WidgetModel = withContext(Dispatchers.IO) {
@@ -227,6 +232,8 @@ data class WidgetModel(
                 directConnect = QuickToggle.decide(
                     QuickToggle.Offer.Connect, facts.copy(status = Status.Stopped),
                 ) == QuickToggle.Step.Start,
+                server = ServiceNotification.currentServer.value
+                    ?.takeIf { facts.status == Status.Started && it.isNotBlank() },
             )
         }
     }
