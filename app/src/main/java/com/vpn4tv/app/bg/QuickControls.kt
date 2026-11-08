@@ -29,6 +29,7 @@ object QuickControls {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
     private val passes = Channel<Unit>(Channel.CONFLATED)
+    private var lastTrafficPass = 0L
 
     /** From Application.onCreate, on the main thread (LiveData observers). */
     fun init(context: Context) {
@@ -46,6 +47,14 @@ object QuickControls {
         BoxService.globalStatus.observeForever { changed() }
         BoxService.alwaysOn.observeForever { changed() }
         ServiceNotification.currentServer.observeForever { changed() }
+        // The tall widget's traffic: once a minute at most, not every second.
+        ServiceNotification.currentTraffic.observeForever { traffic ->
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (traffic == null || now - lastTrafficPass >= 60_000L) {
+                lastTrafficPass = now
+                changed()
+            }
+        }
         // A key added, renamed or deleted: the widget names the key it connects with.
         ProfileManager.registerCallback { changed() }
     }

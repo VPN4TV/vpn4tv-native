@@ -90,6 +90,11 @@ class VpnWidget : GlanceAppWidget() {
         private val WIDER = DpSize(200.dp, 48.dp)
         private val WIDER_TALL = DpSize(200.dp, 72.dp)
 
+        // Two rows and more: the server, the key and the session's traffic.
+        private val NARROW_ROWS = DpSize(110.dp, 110.dp)
+        private val WIDE_ROWS = DpSize(160.dp, 110.dp)
+        private val WIDER_ROWS = DpSize(200.dp, 110.dp)
+
         /** Read in the composition, so a widget whose session still runs follows it at once. */
         private val model = MutableStateFlow<WidgetModel?>(null)
 
@@ -108,7 +113,7 @@ class VpnWidget : GlanceAppWidget() {
     }
 
     override val sizeMode = SizeMode.Responsive(
-        setOf(SMALL, SMALL_TALL, NARROW, NARROW_TALL, WIDE, WIDE_TALL, WIDER, WIDER_TALL),
+        setOf(SMALL, SMALL_TALL, NARROW, NARROW_TALL, WIDE, WIDE_TALL, WIDER, WIDER_TALL, NARROW_ROWS, WIDE_ROWS, WIDER_ROWS),
     )
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -171,14 +176,15 @@ class VpnWidget : GlanceAppWidget() {
                     context.getString(stateText(m)), maxLines = 1,
                     style = TextStyle(color = stateColor(m), fontSize = type.state, fontWeight = FontWeight.Bold),
                 )
-                // Connected: the server, as the tile and the notification show it;
-                // otherwise the key it connects with (no key: the state line says so).
-                val detail = m.server ?: m.keyName
-                if (size.height >= NARROW_TALL.height && detail != null) {
-                    Text(
-                        detail, maxLines = 1,
-                        style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = type.small),
-                    )
+                val small = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = type.small)
+                if (size.height >= NARROW_ROWS.height) {
+                    // Two rows and more: the server, the key and the session's traffic.
+                    listOfNotNull(m.server, m.keyName, m.traffic).forEach { Text(it, maxLines = 1, style = small) }
+                } else {
+                    // Connected: the server, as the tile and the notification show it;
+                    // otherwise the key it connects with (no key: the state line says so).
+                    val detail = m.server ?: m.keyName
+                    if (size.height >= NARROW_TALL.height && detail != null) Text(detail, maxLines = 1, style = small)
                 }
             }
             Spacer(GlanceModifier.width(6.dp))
@@ -216,6 +222,8 @@ data class WidgetModel(
     val directConnect: Boolean,
     /** The server while connected, when the app follows it (the same source as the tile). */
     val server: String? = null,
+    /** The session's traffic while connected, "↑ … · ↓ …", under the same setting as [server]. */
+    val traffic: String? = null,
 ) {
     companion object {
         suspend fun load(context: Context): WidgetModel = withContext(Dispatchers.IO) {
@@ -234,7 +242,23 @@ data class WidgetModel(
                 ) == QuickToggle.Step.Start,
                 server = ServiceNotification.currentServer.value
                     ?.takeIf { facts.status == Status.Started && it.isNotBlank() },
+                traffic = ServiceNotification.currentTraffic.value
+                    ?.takeIf { facts.status == Status.Started && it.size == 2 }
+                    ?.let { "↑ ${bytes(context, it[0])} · ↓ ${bytes(context, it[1])}" },
             )
+        }
+
+        /** Bytes for people in the app's units (Б / КБ / МБ / ГБ in Russian). */
+        private fun bytes(context: Context, count: Long): String {
+            val units = listOf(R.string.unit_bytes, R.string.unit_kb, R.string.unit_mb, R.string.unit_gb)
+            var value = count.toDouble()
+            var unit = 0
+            while (value >= 1024 && unit < units.lastIndex) {
+                value /= 1024
+                unit++
+            }
+            val number = if (unit == 0 || value >= 100) "%.0f".format(value) else "%.1f".format(value)
+            return "$number ${context.getString(units[unit])}"
         }
     }
 }

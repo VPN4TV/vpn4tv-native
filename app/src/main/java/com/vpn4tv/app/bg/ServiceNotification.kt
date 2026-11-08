@@ -57,6 +57,13 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
         val currentServer = MutableLiveData<String?>(null)
 
         /**
+         * The session's uplink and downlink totals in bytes, under the same
+         * setting as [currentServer] (the core's status, once a second while
+         * the screen is on): the tall widget's traffic line.
+         */
+        val currentTraffic = MutableLiveData<LongArray?>(null)
+
+        /**
          * The "current server" setting changed, notifications were just
          * allowed, or always-on VPN changed: the notification shows it now,
          * not from the next connect.
@@ -74,10 +81,11 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
     }
 
     // Server changes come in with the groups, which the core sends when a
-    // pick changes; no longer the speed every second.
+    // pick changes; the status (once a second) only feeds the widget's
+    // traffic line, the notification no longer shows the speed.
     @OptIn(DelicateCoroutinesApi::class)
     private val commandClient =
-        CommandClient(GlobalScope, CommandClient.ConnectionType.Groups, this)
+        CommandClient(GlobalScope, listOf(CommandClient.ConnectionType.Groups, CommandClient.ConnectionType.Status), this)
     private var receiverRegistered = false
 
     // The builder, the text and the closed flag change on the main thread, the
@@ -237,6 +245,7 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
                 if (!Settings.dynamicNotification) {
                     server = null
                     currentServer.postValue(null)
+                    currentTraffic.postValue(null)
                 }
                 Application.notificationManager.notify(notificationId, build())
             }
@@ -274,6 +283,13 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
         }
     }
 
+    override fun updateStatus(status: io.nekohasekai.libbox.StatusMessage) {
+        synchronized(lock) {
+            if (closed) return
+            currentTraffic.postValue(longArrayOf(status.uplinkTotal, status.downlinkTotal))
+        }
+    }
+
     @OptIn(DelicateCoroutinesApi::class)
     override fun onReceive(context: Context, intent: Intent) {
         // CommandClient.connect() opens a socket to libbox's command server
@@ -298,6 +314,7 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
             closed = true
             server = null
             currentServer.postValue(null)
+            currentTraffic.postValue(null)
             ServiceCompat.stopForeground(service, ServiceCompat.STOP_FOREGROUND_REMOVE)
         }
         unregisterReceiver()
