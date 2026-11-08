@@ -9,6 +9,7 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.lifecycle.Observer
 import com.vpn4tv.app.R
 import com.vpn4tv.app.constant.Status
 import com.vpn4tv.app.database.Settings
@@ -20,9 +21,15 @@ import com.vpn4tv.app.ui.AppShortcuts
  * server (the same one, and under the same setting, as the notification).
  * Active mode: the app asks for a redraw when the VPN changes
  * ([QuickControls]) instead of being bound each time the panel opens.
+ * Android drops that request while the tile already listens, and since
+ * Android 15 a tap keeps the tile listening until the panel closes (before,
+ * the tile's own update ended it), so a listening tile follows the VPN
+ * itself: otherwise its own tap would leave it showing the old state.
  */
 @RequiresApi(Build.VERSION_CODES.N)
 class VpnTileService : TileService() {
+    private val redraw = Observer<Any?> { draw() }
+
     companion object {
         private const val TAG = "VpnTileService"
 
@@ -51,7 +58,15 @@ class VpnTileService : TileService() {
 
     override fun onStartListening() {
         super.onStartListening()
-        draw()
+        // Each draws at once with the current state, then on every change.
+        BoxService.globalStatus.observeForever(redraw)
+        ServiceNotification.currentServer.observeForever(redraw)
+    }
+
+    override fun onStopListening() {
+        BoxService.globalStatus.removeObserver(redraw)
+        ServiceNotification.currentServer.removeObserver(redraw)
+        super.onStopListening()
     }
 
     override fun onClick() {
