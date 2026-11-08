@@ -56,6 +56,28 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit, onLanImport
     var userName by remember { mutableStateOf<String?>(null) }
     var isAdding by remember { mutableStateOf(false) }
     var isDone by remember { mutableStateOf(false) }
+    // One import per screen: the server gives a key again for 3 minutes
+    // (redeliver=1), and the resume poll and the loop's poll may both get it —
+    // it must not be added twice. Cleared when an import fails, so the key
+    // given again is tried again.
+    val importStarted = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    // A key whose import failed comes again from the server for 3 minutes: it
+    // is tried twice more, then only a different key from the bot is taken
+    // (as on the iPhone; no flicker of error and adding for 3 minutes).
+    val failedConfigs = remember { java.util.concurrent.atomic.AtomicReference<List<String>?>(null) }
+    val failedRepeats = remember { java.util.concurrent.atomic.AtomicInteger(0) }
+    fun mayImport(configs: List<String>): Boolean {
+        if (isDone || !importStarted.compareAndSet(false, true)) return false
+        if (configs == failedConfigs.get() && failedRepeats.getAndIncrement() >= 2) {
+            importStarted.set(false)
+            return false
+        }
+        return true
+    }
+    fun importFailed(configs: List<String>) {
+        if (failedConfigs.getAndSet(configs) != configs) failedRepeats.set(0)
+        importStarted.set(false)
+    }
     // Retry progress shown in red while subscription fetch is timing out —
     // user sees "Попытка N/10 (через резервный сервер)" instead of a frozen UI.
     var retryInfo by remember { mutableStateOf<com.vpn4tv.app.converter.HwidService.RetryProgress?>(null) }
@@ -81,13 +103,15 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit, onLanImport
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && !isDone) {
+            // Not while an import runs: the server's copy would only be dropped.
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && !isDone && !importStarted.get()) {
                 scope.launch(Dispatchers.IO) {
                     val outcome = pollServer(uuid)
                     if (outcome is PollOutcome.Data) {
                         handlePollResponse(outcome.json, context, scope,
                             onUserInfo = { name -> userName = name; status = name },
-                            onConfig = { configs ->
+                            onConfig = onConfig@{ configs ->
+                                if (!mayImport(configs)) return@onConfig
                                 isAdding = true; status = "adding"
                                 scope.launch(Dispatchers.IO) {
                                     var errorMsg = ""
@@ -99,7 +123,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit, onLanImport
                                     withContext(Dispatchers.Main) {
                                         retryInfo = null
                                         if (added) { isDone = true; status = "done"; delay(1000); onProfileAdded() }
-                                        else { isAdding = false; status = if (errorMsg.isNotEmpty()) "error:$errorMsg" else "failed" }
+                                        else { importFailed(configs); isAdding = false; status = if (errorMsg.isNotEmpty()) "error:$errorMsg" else "failed" }
                                     }
                                 }
                             }
@@ -115,7 +139,8 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit, onLanImport
     // Polling both UUID and code
     DisposableEffect(Unit) {
         val job = scope.launch {
-            val onConfigArrived: (List<String>) -> Unit = { configs ->
+            val onConfigArrived: (List<String>) -> Unit = onConfigArrived@{ configs ->
+                if (!mayImport(configs)) return@onConfigArrived
                 isAdding = true
                 status = "adding"
                 scope.launch(Dispatchers.IO) {
@@ -133,6 +158,7 @@ fun AddProfileScreen(onBack: () -> Unit, onProfileAdded: () -> Unit, onLanImport
                             delay(1000)
                             onProfileAdded()
                         } else {
+                            importFailed(configs)
                             isAdding = false
                             status = if (errorMsg.isNotEmpty()) "error:$errorMsg" else "failed"
                         }
@@ -344,7 +370,10 @@ private sealed class PollOutcome {
 
 private suspend fun pollServer(id: String): PollOutcome {
     return withContext(Dispatchers.IO) {
-        val primaryUrl = "https://api.vpn4tv.com/poll?uuid=$id"
+        // redeliver=1: the server keeps a key it handed out for 3 minutes and
+        // gives it again to this id's next poll (an answer can be lost on the
+        // way, as on a frozen iPhone app, 2026-11-08); safe with importStarted.
+        val primaryUrl = "https://api.vpn4tv.com/poll?uuid=$id&redeliver=1"
         val endpoints = com.vpn4tv.app.converter.HwidService.endpointsWithMirror(primaryUrl)
         var reachedAny = false
         for (url in endpoints) {
@@ -489,7 +518,10 @@ private suspend fun processConfigs(
         // who add a second subscription expect the TV to start using it
         // immediately — leaving the old profile selected made the "add
         // another key" flow look broken ("it says done but nothing changed").
-        Settings.selectedProfile = profile.id
+        // The profile row exists now: a failed selection must not report the
+        // import as failed, or the server's copy of the key would add it again.
+        runCatching { Settings.selectedProfile = profile.id }
+            .onFailure { Log.e("AddProfile", "Select the added profile failed", it) }
 
         Log.d("AddProfile", "Added ${profile.name}: ${proxies.size} proxies (selected)")
         true
