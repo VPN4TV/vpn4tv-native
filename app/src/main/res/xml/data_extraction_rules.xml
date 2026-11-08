@@ -1,16 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Auto Backup and device-to-device transfer on Android 12 and newer
-  (android:dataExtractionRules). The same list as backup_rules.xml, which
-  says what goes and what stays on the device, and why.
+  (android:dataExtractionRules). The same list as xml-v28/backup_rules.xml,
+  which says what goes and what stays on the device, and why. The cloud copy
+  takes it only when the backup is encrypted on the device (a screen lock is
+  set): a key link is a credential (owner, 2026-11-08). A transfer to a new
+  device takes it always.
 -->
 <data-extraction-rules>
-    <cloud-backup>
-        <include domain="database" path="profiles.db" />
-        <include domain="database" path="settings.db" />
-        <include domain="file" path="profiles" />
-        <include domain="sharedpref" path="server_selection.xml" />
-        <include domain="sharedpref" path="sub_userinfo.xml" />
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <include domain="database" path="profiles.db" requireFlags="clientSideEncryption" />
+        <include domain="database" path="settings.db" requireFlags="clientSideEncryption" />
+        <include domain="file" path="profiles" requireFlags="clientSideEncryption" />
+        <include domain="sharedpref" path="server_selection.xml" requireFlags="clientSideEncryption" />
+        <include domain="sharedpref" path="sub_userinfo.xml" requireFlags="clientSideEncryption" />
     </cloud-backup>
     <device-transfer>
         <include domain="database" path="profiles.db" />

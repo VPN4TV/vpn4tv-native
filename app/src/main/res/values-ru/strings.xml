@@ -726,4 +726,9 @@
     <string name="channel_auto_desc">Самый быстрый сервер вашего ключа</string>
     <string name="channel_server">Сервер %1$s</string>
     <string name="channel_server_desc">Сервер вашего ключа</string>
+    <string name="tailscale_ping">Проверка связи</string>
+    <string name="tailscale_ping_start">Начать</string>
+    <string name="tailscale_ping_stop">Остановить</string>
+    <string name="tailscale_ping_direct">Прямое соединение</string>
+    <string name="tailscale_ping_derp">Соединение через ретранслятор DERP</string>
 </resources>

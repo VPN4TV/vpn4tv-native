@@ -7,33 +7,57 @@ import org.junit.Test
 import java.io.File
 
 /**
- * What Auto Backup takes (res/xml): the keys and settings, never the
- * installation ID or the core's cache, the same on every Android version.
+ * What Auto Backup takes (res/xml, res/xml-v28): the keys and settings, never
+ * the installation ID or the core's cache; into the cloud only when the
+ * backup is encrypted on the device (owner, 2026-11-08: a key link is a
+ * credential), and nothing on Android 6 to 8, which cannot encrypt it.
  */
 class BackupRulesTest {
     // Unit tests run in the module's folder.
-    private val xml = File("src/main/res/xml")
-    private val include = Regex("""<include\s+domain="([^"]+)"\s+path="([^"]+)"\s*/>""")
+    private val res = File("src/main/res")
+    private val include = Regex("""<include\s+domain="([^"]+)"\s+path="([^"]+)"([^>]*)/>""")
 
     private fun includes(text: String) = include.findAll(text).map { it.groupValues[1] + ":" + it.groupValues[2] }.toList()
+    private fun encryptedOnly(text: String) =
+        include.findAll(text).all { "requireFlags=\"clientSideEncryption\"" in it.groupValues[3] }
+
+    private val androidNine get() = File(res, "xml-v28/backup_rules.xml").readText()
 
     @Test
     fun theKeysGoTheDeviceIdStays() {
-        val old = includes(File(xml, "backup_rules.xml").readText())
-        assertTrue(old.containsAll(listOf("database:profiles.db", "database:settings.db", "file:profiles")))
+        val list = includes(androidNine)
+        assertTrue(list.containsAll(listOf("database:profiles.db", "database:settings.db", "file:profiles")))
         // Everything not included stays: no whole domains, nothing with the ID or the core's cache.
-        assertFalse(old.any { it.startsWith("external:") || it.startsWith("root:") || it == "sharedpref:." || it == "file:." })
-        assertFalse(old.any { "hwid" in it || "cache.db" in it || "configuration.json" in it })
+        assertFalse(list.any { it.startsWith("external:") || it.startsWith("root:") || it == "sharedpref:." || it == "file:." })
+        assertFalse(list.any { "hwid" in it || "cache.db" in it || "configuration.json" in it })
+    }
+
+    @Test
+    fun onlyIntoABackupEncryptedOnTheDevice() {
+        assertTrue(encryptedOnly(androidNine))
+        val text = File(res, "xml/data_extraction_rules.xml").readText()
+        val cloud = text.substringAfter("<cloud-backup").substringBefore("</cloud-backup>")
+        assertTrue(cloud.startsWith(" disableIfNoEncryptionCapabilities=\"true\">"))
+        assertTrue(encryptedOnly(cloud))
+    }
+
+    @Test
+    fun nothingOnAndroidSixToEight() {
+        val text = File(res, "xml/backup_rules.xml").readText()
+        assertTrue(includes(text).isEmpty())
+        for (domain in listOf("root", "file", "database", "sharedpref", "external")) {
+            assertTrue(text.contains("<exclude domain=\"$domain\" path=\".\" />"))
+        }
     }
 
     @Test
     fun androidTwelveRulesAreTheSame() {
-        val old = includes(File(xml, "backup_rules.xml").readText())
-        val text = File(xml, "data_extraction_rules.xml").readText()
-        val cloud = includes(text.substringAfter("<cloud-backup>").substringBefore("</cloud-backup>"))
+        val list = includes(androidNine)
+        val text = File(res, "xml/data_extraction_rules.xml").readText()
+        val cloud = includes(text.substringAfter("<cloud-backup").substringBefore("</cloud-backup>"))
         val transfer = includes(text.substringAfter("<device-transfer>").substringBefore("</device-transfer>"))
-        assertEquals(old, cloud)
-        assertEquals(old, transfer)
+        assertEquals(list, cloud)
+        assertEquals(list, transfer)
     }
 
     @Test

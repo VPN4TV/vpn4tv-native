@@ -41,7 +41,7 @@ android {
     // along in dozens of languages the app is not translated into.
     androidResources {
         generateLocaleConfig = true
-        localeFilters += listOf("en", "ru", "fa", "zh-rCN", "zh-rTW")
+        localeFilters += listOf("en", "ru", "fa", "zh-rCN", "zh-rTW", "es")
     }
 
     defaultConfig {
