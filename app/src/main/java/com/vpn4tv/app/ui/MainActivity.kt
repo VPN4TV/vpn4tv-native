@@ -16,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.*
 import android.net.Uri
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.lifecycleScope
 import com.vpn4tv.app.bg.BoxService
 import com.vpn4tv.app.converter.ConfigGenerator
 import com.vpn4tv.app.converter.ProxyParser
@@ -127,11 +128,17 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
+            val nav = androidx.navigation.compose.rememberNavController()
+            androidx.compose.runtime.DisposableEffect(nav) {
+                navController = nav
+                onDispose { if (navController === nav) navController = null }
+            }
             com.vpn4tv.app.ui.theme.VPN4TVTheme {
                 AppNavigation(
                     // The launcher ranks the shortcuts by what the user does in the app too.
                     onConnect = { reportShortcutUse(AppShortcuts.ID_CONNECT); connect() },
                     onDisconnect = { reportShortcutUse(AppShortcuts.ID_DISCONNECT); BoxService.stop() },
+                    navController = nav,
                 )
             }
         }
@@ -262,7 +269,43 @@ class MainActivity : ComponentActivity() {
     // on any device without predictive back), [tvBackGuard] on a TV with
     // Android 13+, where the app's predictive back (the manifest) takes BACK
     // away from key events.
+    //
+    // The debounce alone left the crash (group 92b6a62972, 5.4.2, three TVs):
+    // the gesture coroutine runs a tick after the dispatch and takes the top
+    // entry from NavHost's copy of the stack, which follows the real one a
+    // tick later still. Whatever changes the stack in between (Home after a
+    // key import, the on-screen Back, a transition still running) leaves it
+    // an entry that is gone. So BACK goes on to the screens' handlers only
+    // after the UI work already queued, and only when the top screen has
+    // settled ([handBackOn]).
     private var lastBackEventTime = 0L
+
+    /** The app's screens, set from the composition; null before it. */
+    private var navController: androidx.navigation.NavHostController? = null
+
+    /**
+     * Runs [dispatch] (BACK to the screens' handlers and NavHost's) after the
+     * Compose work already queued on the main thread, so NavHost's copy of the
+     * stack has caught up, and only if the top screen is RESUMED then:
+     * navigation-compose keeps it STARTED while a screen change runs, the same
+     * check as [navigateSafe] and [popBackStackSafe] in AppNavigation. A BACK
+     * during a screen change is dropped.
+     */
+    private fun handBackOn(dispatch: () -> Unit) {
+        lifecycleScope.launch(androidx.compose.ui.platform.AndroidUiDispatcher.Main) {
+            val top = navController?.currentBackStackEntry
+            if (top == null || top.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                dispatch()
+            }
+        }
+    }
+
+    /** Android 12 and older (and 13+ without the app's predictive back): BACK as a key, from onKeyUp. */
+    @Deprecated("Android 12 and older only; Android 13+ BACK goes through the OnBackInvokedDispatcher")
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        handBackOn { super.onBackPressed() }
+    }
 
     /** The double-BACK debounce: true when this BACK comes too soon after the last one. */
     private fun duplicateBack(): Boolean {
@@ -284,7 +327,7 @@ class MainActivity : ComponentActivity() {
      * and then BACK reaches no key event. This callback, above the app's own,
      * gets every BACK of the activity's window first and does what the key
      * path did before: drops a second one within 300 ms and hands the rest to
-     * the same dispatcher (the screens' handlers, NavHost's, else the system's
+     * the same dispatcher through [handBackOn] (the screens' handlers, NavHost's, else the system's
      * Back, which sends the app behind the launcher). Dialogs have windows and
      * callbacks of their own. The TV has no back gesture to preview.
      */
@@ -293,7 +336,7 @@ class MainActivity : ComponentActivity() {
     private fun installTvBackGuard() {
         if (!Device.isTv || android.os.Build.VERSION.SDK_INT < 33) return
         val guard = android.window.OnBackInvokedCallback {
-            if (!duplicateBack()) onBackPressedDispatcher.onBackPressed()
+            if (!duplicateBack()) handBackOn { onBackPressedDispatcher.onBackPressed() }
         }
         onBackInvokedDispatcher.registerOnBackInvokedCallback(
             android.window.OnBackInvokedDispatcher.PRIORITY_OVERLAY, guard,

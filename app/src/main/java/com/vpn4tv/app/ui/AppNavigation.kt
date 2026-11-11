@@ -112,8 +112,9 @@ private fun markAddProfileOpened() {
 fun AppNavigation(
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
+    // MainActivity holds it too: it hands BACK on only once the top screen has settled.
+    navController: androidx.navigation.NavHostController = rememberNavController(),
 ) {
-    val navController = rememberNavController()
     val ready by MainActivity.profileReady.observeAsState(false)
 
     // Auto-navigate to add profile on first launch, but only if there are
