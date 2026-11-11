@@ -465,12 +465,15 @@ class MainActivity : ComponentActivity() {
         if (intent != null) {
             try {
                 vpnPermissionLauncher.launch(intent)
-            } catch (e: android.content.ActivityNotFoundException) {
+            } catch (e: RuntimeException) {
                 // The consent activity (com.android.vpndialogs) is absent on
                 // this ROM — launching the intent crashes. Guide the user to
                 // Proxy mode instead of dying (Vitals: MainActivity.doConnect
-                // ActivityNotFoundException, TCL G08 / Android 12).
-                Log.w(TAG, "VPN consent dialog missing: ${e.message}")
+                // ActivityNotFoundException, TCL G08 / Android 12). Some ROMs
+                // fail inside the system process instead and the start throws
+                // its NullPointerException (crash group 18f02415f4: LG MYSTERY
+                // TV, Android 6).
+                Log.w(TAG, "VPN consent dialog missing: ${e.javaClass.simpleName}: ${e.message}")
                 onNoVpnDialog()
             }
         } else {
