@@ -140,7 +140,23 @@ interface PlatformInterfaceWrapper : PlatformInterface {
     override fun clearDNSCache() {
     }
 
+    /**
+     * The core asks on every change of the default network, the start included,
+     * whether or not a rule needs it (sing-box route/network.go,
+     * UpdateWIFIState). Only wifi_ssid and wifi_bssid rules do; the app's own
+     * configs have none. On some TVs WifiManager.getConnectionInfo hangs in
+     * binder (Wi-Fi off on a box on Ethernet, say), and the start hung with it
+     * until the watchdog (crash group a30f845aa5: Xiaomi MiTV, Haier, 5.4.2).
+     * So Android is asked only for a config with such a rule and only while
+     * the default network is Wi-Fi; null otherwise, which the core takes as
+     * no Wi-Fi.
+     */
     override fun readWIFIState(): WIFIState? {
+        if (!WifiRules.inConfig) return null
+        val network = DefaultNetworkMonitor.defaultNetwork ?: return null
+        val onWifi = Application.connectivity.getNetworkCapabilities(network)
+            ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        if (!onWifi) return null
         // No Wi-Fi hardware (an Ethernet-only TV box): no Wi-Fi state.
         @Suppress("DEPRECATION")
         val wifiInfo =
@@ -220,4 +236,14 @@ interface PlatformInterfaceWrapper : PlatformInterface {
             val getFlagsMethod = NetworkInterface::class.java.getDeclaredMethod("getFlags")
             return getFlagsMethod.invoke(this) as Int
         }
+}
+
+/** Whether the running config matches on the Wi-Fi network (see [PlatformInterfaceWrapper.readWIFIState]). */
+object WifiRules {
+    /** Set by BoxService before each start or reload, and once the core says a rule set of it has one. */
+    @Volatile
+    var inConfig = false
+
+    /** A route or DNS rule on the Wi-Fi network's name or BSSID. */
+    fun inText(config: String): Boolean = config.contains("\"wifi_ssid\"") || config.contains("\"wifi_bssid\"")
 }

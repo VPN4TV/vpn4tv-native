@@ -400,7 +400,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
             try {
                 Log.d(TAG, "Calling commandServer.startOrReloadService()")
-                commandServer.startOrReloadService(content, overrideOptions())
+                startCore(content)
                 Log.d(TAG, "startOrReloadService completed successfully")
             } catch (e: Exception) {
                 Log.e(TAG, "startOrReloadService FAILED: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}")
@@ -431,7 +431,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 }
                 Log.w(TAG, "start with Russia direct failed, retrying without it: ${e.message}")
                 try {
-                    commandServer.startOrReloadService(fallback, overrideOptions())
+                    startCore(fallback)
                 } catch (e2: Exception) {
                     Log.e(TAG, "start without Russia direct failed too: ${e2.message}", e2)
                     lastError.postValue(ServiceError.of(Alert.CreateService, e2.message))
@@ -446,6 +446,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             logRussiaDirect(routed)
 
             if (commandServer.needWIFIState()) {
+                WifiRules.inConfig = true // a rule set of the config has one
                 val wifiPermission =
                     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                         android.Manifest.permission.ACCESS_FINE_LOCATION
@@ -753,7 +754,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             return
         }
         try {
-            commandServer.startOrReloadService(routed.content, overrideOptions())
+            startCore(routed.content)
         } catch (e: Exception) {
             // As in startService: without "Russia direct" once more, unless the
             // block was not in or the service is going away.
@@ -765,7 +766,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
             Log.w(TAG, "reload with Russia direct failed, retrying without it: ${e.message}")
             try {
-                commandServer.startOrReloadService(fallback, overrideOptions())
+                startCore(fallback)
             } catch (e2: Exception) {
                 Log.e(TAG, "reload without Russia direct failed too: ${e2.message}", e2)
                 RussiaDirectRuntime.onStopped(Application.application)
@@ -780,6 +781,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         if (RussiaDirectRuntime.claimDnsCheck(routed)) Thread { runDnsRuHealthCheck() }.start()
 
         if (commandServer.needWIFIState()) {
+            WifiRules.inConfig = true // a rule set of the config has one
             val wifiPermission =
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                     android.Manifest.permission.ACCESS_FINE_LOCATION
@@ -872,6 +874,12 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         }.onFailure {
             commandServer.setError("android: close service: ${it.message}")
         }
+    }
+
+    /** The core started or reloaded with [config]; [WifiRules] follows it first. */
+    private fun startCore(config: String) {
+        WifiRules.inConfig = WifiRules.inText(config)
+        commandServer.startOrReloadService(config, overrideOptions())
     }
 
     /** Per-app routing for the tun, the same for a start, a reload and their retries. */
