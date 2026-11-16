@@ -114,12 +114,17 @@ object DnsProber {
             // Any HTTP response means the server is reachable and not
             // MITM'd. 400 is fine — it just means the JSON API path
             // differs (/resolve vs /dns-query), but sing-box uses
-            // wireformat which works on all of them.
-            val ok = code in 200..499
-            Log.d(TAG, "DoH $dohUrl → $code ${if (ok) "✓" else "✗"}")
+            // wireformat which works on all of them. 505 too: Quad9 serves
+            // DoH over HTTP/2 only and refuses this HTTP/1.1 request with
+            // "HTTP Version Not Supported" (2026-11), while the core asks it
+            // over HTTP/2 and gets answers. Any status is the real server
+            // answering over a verified TLS connection.
+            val ok = code in 100..599
+            if (ok) Log.d(TAG, "DoH $dohUrl → $code ✓") else Log.i(TAG, "DoH $dohUrl → HTTP $code ✗")
             ok
         } catch (e: Exception) {
-            Log.d(TAG, "DoH $dohUrl → ${e.javaClass.simpleName}: ${e.message}")
+            // Info, not debug: a DoH that does not answer decides dns-direct, and release builds drop Log.d.
+            Log.i(TAG, "DoH $dohUrl → ${e.javaClass.simpleName}: ${e.message}")
             false
         }
     }
