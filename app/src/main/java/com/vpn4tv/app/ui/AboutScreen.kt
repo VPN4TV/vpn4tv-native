@@ -222,7 +222,7 @@ fun AboutScreen(onBack: (() -> Unit)?) {
             // TalkBack says the label above before the button's text
             // ("Telegram channel. @VPN4TV"); it reads both.
             TextButton(
-                onClick = { openUrl(TELEGRAM_CHANNEL_URL) },
+                onClick = { openTelegram(context, "VPN4TV") },
                 modifier = Modifier.semantics { contentDescription = channelLabel.trimEnd(':', ' ') },
             ) {
                 Text("@VPN4TV", fontSize = 16.sp)

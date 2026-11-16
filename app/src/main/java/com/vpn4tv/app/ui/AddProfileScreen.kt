@@ -350,12 +350,7 @@ fun AddKeyContent(
             }
             Spacer(Modifier.height(8.dp))
             Button(
-                onClick = {
-                    runCatching {
-                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://telegram.me/VPN4TV_Bot?start=$uuid")))
-                    }
-                },
+                onClick = { openTelegram(context, "VPN4TV_Bot", uuid) },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) {
                 Text(stringResource(R.string.open_telegram_bot), fontSize = 16.sp)
