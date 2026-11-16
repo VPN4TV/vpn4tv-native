@@ -55,8 +55,8 @@ android {
         // checks our HTTPS (the own-infra connections by IP with a pinned SNI);
         // and a run on an Android 17 device (memory limiter, BAL, ECH).
         targetSdk = 36
-        versionCode = 56003
-        versionName = "5.6.0"
+        versionCode = 56100
+        versionName = "5.6.1"
         base.archivesName.set("VPN4TV-Native-${versionName}")
 
         // libbox.aar ships only armeabi-v7a + arm64-v8a; x86 variants would
