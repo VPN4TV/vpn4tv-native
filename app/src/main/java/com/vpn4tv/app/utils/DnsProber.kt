@@ -1,6 +1,8 @@
 package com.vpn4tv.app.utils
 
 import android.util.Log
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.URL
@@ -25,12 +27,41 @@ import java.net.URL
 object DnsProber {
     private const val TAG = "DnsProber"
     private const val PROBE_TIMEOUT_MS = 3000
+    private const val UDP_TIMEOUT_MS = 2000
 
     data class DnsResult(
         val dohUrl: String,
         val udpServer: String,
         val dohWorks: Boolean,
+        /** An IP whose DoH answered this probe, for dns-direct (see [dohCapableIp]); null: none did. */
+        val dohIp: String? = null,
     )
+
+    /** What the DoH probe settled on: the first endpoint that answered, and an IP-hosted one for dns-direct. */
+    data class DohChoice(val winner: String?, val ip: String?)
+
+    /**
+     * Walk [candidates] in order, asking [answers] about each. The first that answers wins (dns-remote).
+     * dns-direct needs an IP whose certificate covers it ([DnsProviders.dohCapableIps]); after a winner
+     * by name only such IPs are still asked, and only one that answered itself is taken. Before
+     * 2026-11 the IP was guessed instead: the UDP winner or the registry's first, i.e. 9.9.9.9 right
+     * after its own DoH had failed, and dns-direct stayed dead where a provider blocks 9.9.9.9:443
+     * (support chat 2026-11-16: «network is unreachable», nothing opened).
+     */
+    fun chooseDoh(candidates: List<String>, answers: (String) -> Boolean): DohChoice {
+        var winner: String? = null
+        for (url in candidates) {
+            val ip = ipHost(url)?.takeIf { it in DnsProviders.dohCapableIps }
+            if (winner != null && ip == null) continue
+            if (!answers(url)) continue
+            if (winner == null) winner = url
+            if (ip != null) return DohChoice(winner, ip)
+        }
+        return DohChoice(winner, null)
+    }
+
+    private fun ipHost(url: String): String? =
+        url.removePrefix("https://").substringBefore("/").takeIf { it.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$")) }
 
     /** Candidate lists live in [DnsProviders] — the single registry shared
      *  with HwidService's resolution chain. Add/reorder providers THERE. */
@@ -50,13 +81,8 @@ object DnsProber {
         val startMs = System.currentTimeMillis()
 
         // DoH probe: send a minimal query via HTTPS GET and check for 200
-        var bestDoh: String? = null
-        for (url in DOH_CANDIDATES) {
-            if (probeDoH(url)) {
-                bestDoh = url
-                break
-            }
-        }
+        val choice = chooseDoh(DOH_CANDIDATES) { probeDoH(it) }
+        val bestDoh = choice.winner
 
         // UDP probe: try to resolve a well-known domain via each server
         var bestUdp: String? = null
@@ -69,10 +95,10 @@ object DnsProber {
 
         val doh = bestDoh ?: "https://8.8.8.8/dns-query"
         val udp = bestUdp ?: "8.8.8.8"
-        result = DnsResult(dohUrl = doh, udpServer = udp, dohWorks = bestDoh != null)
+        result = DnsResult(dohUrl = doh, udpServer = udp, dohWorks = bestDoh != null, dohIp = choice.ip)
 
         val elapsed = System.currentTimeMillis() - startMs
-        Log.i(TAG, "probe done in ${elapsed}ms: doh=$doh (works=${bestDoh != null}) udp=$udp")
+        Log.i(TAG, "probe done in ${elapsed}ms: doh=$doh (works=${bestDoh != null}) doh-ip=${choice.ip} udp=$udp (answered=${bestUdp != null})")
     }
 
     private fun probeDoH(dohUrl: String): Boolean {
@@ -98,22 +124,47 @@ object DnsProber {
         }
     }
 
+    /**
+     * Ask [server] on UDP 53 for example.com's A record and wait for its answer. Until 2026-11 any
+     * IP counted (the check could not fail), so the first candidate, 9.9.9.9, was the UDP fallback
+     * even where it was unreachable.
+     */
     private fun probeUdp(server: String): Boolean {
         return try {
-            // Simple: can we resolve google.com using this server?
-            // Java doesn't let us pick a DNS server directly, so we
-            // just check if the server IP itself is reachable.
-            val addr = InetAddress.getByName(server)
-            val ok = addr.isReachable(PROBE_TIMEOUT_MS)
-            Log.d(TAG, "UDP $server → ${if (ok) "✓ reachable" else "✗ unreachable"}")
-            // Even if isReachable fails (ICMP blocked), the server may
-            // still work for DNS. Accept it as fallback anyway.
-            true
+            val query = dnsQuery(id = (System.nanoTime() and 0xffff).toInt(), name = "example.com")
+            val reply = ByteArray(512)
+            DatagramSocket().use { socket ->
+                socket.soTimeout = UDP_TIMEOUT_MS
+                socket.send(DatagramPacket(query, query.size, InetAddress.getByName(server), 53))
+                val packet = DatagramPacket(reply, reply.size)
+                socket.receive(packet)
+                val ok = isDnsAnswer(query, reply, packet.length)
+                Log.d(TAG, "UDP $server → ${if (ok) "✓ answered" else "✗ not an answer"}")
+                ok
+            }
         } catch (e: Exception) {
             Log.d(TAG, "UDP $server → ${e.javaClass.simpleName}: ${e.message}")
             false
         }
     }
+
+    /** A DNS query for [name]'s A record (RFC 1035): header with recursion desired, one question. */
+    fun dnsQuery(id: Int, name: String): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        out.write(byteArrayOf((id shr 8).toByte(), id.toByte(), 0x01, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+        for (label in name.split('.')) {
+            val bytes = label.toByteArray(Charsets.US_ASCII)
+            out.write(bytes.size)
+            out.write(bytes)
+        }
+        out.write(byteArrayOf(0, 0x00, 0x01, 0x00, 0x01))
+        return out.toByteArray()
+    }
+
+    /** [reply] (its first [length] bytes) answers [query]: same id, the response bit, no format or server error. */
+    fun isDnsAnswer(query: ByteArray, reply: ByteArray, length: Int): Boolean =
+        length >= 12 && reply[0] == query[0] && reply[1] == query[1] &&
+            (reply[2].toInt() and 0x80) != 0 && (reply[3].toInt() and 0x0f) !in setOf(1, 2)
 
     /** Extract the server host from a DoH URL for sing-box config. */
     fun dohServer(): String {
@@ -126,22 +177,11 @@ object DnsProber {
     fun dohWorks(): Boolean = result?.dohWorks == true
 
     /**
-     * IP that is known to serve DoH on /dns-query with a cert valid for
-     * the raw IP (no SNI / hostname verification shenanigans). Used by
-     * dns-direct, which cannot have a bootstrap resolver and therefore
-     * must be addressed by IP. Google and Cloudflare both ship DoH on
-     * their anycast IPs; Yandex does not (only dns.yandex.net).
+     * IP that serves DoH on /dns-query with a cert valid for the raw IP and
+     * that answered this probe ([chooseDoh]). Used by dns-direct, which
+     * cannot have a bootstrap resolver and therefore must be addressed by
+     * IP. Null when none answered: dns-direct then takes the UDP server
+     * that answered ([udpServer]).
      */
-    fun dohCapableIp(): String? {
-        val r = result ?: return null
-        if (!r.dohWorks) return null
-        val host = r.dohUrl.removePrefix("https://").substringBefore("/")
-        if (host.matches(Regex("^[0-9.]+$"))) return host
-        if (r.udpServer in DnsProviders.dohCapableIps) return r.udpServer
-        // Last resort comes from the registry's first IP-cert provider, NOT a
-        // hardcoded Google/CF IP: the old "1.1.1.1" fallback meant every
-        // non-IP DoH winner (AdGuard, Yandex) still pointed dns-direct at a
-        // dead Cloudflare IP during the 2026-07 purge.
-        return DnsProviders.preferredDohIp
-    }
+    fun dohCapableIp(): String? = result?.dohIp
 }

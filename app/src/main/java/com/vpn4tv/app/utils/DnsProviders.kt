@@ -107,10 +107,6 @@ object DnsProviders {
             .flatMap { p -> p.udpIps + p.dohUrls.mapNotNull { ipHostOrNull(it) } }
             .toSet()
 
-    /** Preferred IP for dns-direct when the probe winner isn't IP-hosted. */
-    val preferredDohIp: String =
-        PROVIDERS.first { it.ipCertSan }.dohUrls.firstNotNullOf { ipHostOrNull(it) }
-
     /** In-app resolution chain: wireformat on every non-last-resort DoH
      *  endpoint (universal), then the JSON APIs as extra fallbacks. */
     val resolutionEndpoints: List<Endpoint> =
