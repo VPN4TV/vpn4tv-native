@@ -31,6 +31,10 @@ object CrashUpload {
                     setRequestProperty("X-Android", Build.VERSION.SDK_INT.toString())
                     setRequestProperty("X-Device", "${Build.MANUFACTURER} ${Build.MODEL}".take(120))
                     setRequestProperty("X-Bridges", bridges.take(120))
+                    // The receiver's first line has these for every client (Apple sends them too); "?" without.
+                    setRequestProperty("X-Client", "android")
+                    setRequestProperty("X-App", BuildConfig.VERSION_NAME.take(40))
+                    setRequestProperty("X-OS", "android ${Build.VERSION.RELEASE}".take(40))
                     setFixedLengthStreamingMode(body.size)
                 }
                 conn.outputStream.use { it.write(body) }

@@ -546,6 +546,12 @@
     <string name="about_privacy_url">https://vpn4tv.com/privacy.html#en</string>
     <string name="setting_auto_connect">اتصال خودکار هنگام روشن شدن</string>
     <string name="setting_auto_connect_desc">بازگرداندن اتصال VPN هنگام روشن شدن دستگاه</string>
+    <string name="setting_restart_after_kill">راه‌اندازی دوباره VPN پس از بسته شدن برنامه</string>
+    <string name="setting_restart_after_kill_desc">اگر Android برای آزاد کردن حافظه برنامه را ببندد، VPN دوباره روشن می‌شود. سه بار راه‌اندازی دوباره در یک ساعت این گزینه را خاموش می‌کند</string>
+    <string name="vpn_ended_title">VPN خاموش شد</string>
+    <string name="vpn_ended_always_on_text">Android برای آزاد کردن حافظه VPN4TV را بست و VPN خاموش شد. برای اینکه Android خودش VPN را دوباره روشن کند، تنظیمات VPN را باز کنید و «VPN همیشه روشن» را برای VPN4TV فعال کنید.</string>
+    <string name="vpn_ended_restart_text">Android برای آزاد کردن حافظه VPN4TV را بست و VPN خاموش شد. راه‌اندازی دوباره VPN پس از آن فعال شود؟ در این صورت VPN4TV خودش VPN را دوباره روشن می‌کند. پس از سه بار راه‌اندازی دوباره در یک ساعت، این گزینه خودش خاموش می‌شود.</string>
+    <string name="action_turn_on">روشن کردن</string>
     <string name="setting_proxy_mode">حالت پروکسی</string>
     <string name="setting_proxy_mode_desc">برای دستگاه‌هایی که VPN اجرا نمی‌کنند: پروکسی SOCKS5 برای SmartTube</string>
     <string name="setting_bypass_lan">دور زدن شبکهٔ محلی</string>

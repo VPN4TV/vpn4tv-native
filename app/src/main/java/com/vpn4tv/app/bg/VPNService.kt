@@ -53,7 +53,8 @@ class VPNService :
         // Android's settings while this VPN runs starts it once more. A fresh
         // start learns it only once its tun is up (openTun).
         BoxService.alwaysOn.value = alwaysOnState()
-        return service.onStartCommand()
+        // No intent: Android started it again after the process ended (START_STICKY, StickyRestart).
+        return service.onStartCommand(restartedBySystem = intent == null)
     }
 
     override fun onBind(intent: Intent): IBinder {

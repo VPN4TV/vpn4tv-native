@@ -576,6 +576,12 @@
     <string name="about_privacy_qr">QR-код со ссылкой на политику конфиденциальности</string>
     <string name="setting_auto_connect">Автоподключение при загрузке</string>
     <string name="setting_auto_connect_desc">Восстанавливать VPN при включении устройства</string>
+    <string name="setting_restart_after_kill">Перезапуск VPN после выгрузки</string>
+    <string name="setting_restart_after_kill_desc">Если Android выгрузит приложение, чтобы освободить память, VPN включится снова. Три перезапуска за час выключают этот режим</string>
+    <string name="vpn_ended_title">VPN выключился</string>
+    <string name="vpn_ended_always_on_text">Android выгрузил VPN4TV, чтобы освободить память, и VPN выключился. Чтобы Android сам включал VPN снова, откройте настройки VPN и включите «Постоянная VPN» для VPN4TV.</string>
+    <string name="vpn_ended_restart_text">Android выгрузил VPN4TV, чтобы освободить память, и VPN выключился. Включить перезапуск VPN после выгрузки? Тогда VPN4TV будет сам включать VPN снова. Если перезапусков будет три за час, режим выключится сам.</string>
+    <string name="action_turn_on">Включить</string>
     <string name="setting_proxy_mode">Режим прокси</string>
     <string name="setting_proxy_mode_desc">Для устройств без разрешения на VPN: прокси SOCKS5 для SmartTube</string>
     <string name="setting_bypass_lan">Обход локальной сети</string>

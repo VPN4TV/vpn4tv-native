@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -166,6 +167,17 @@ fun AppNavigation(
                     if (Device.isTv) navController.popBackStack(Routes.HOME, inclusive = false)
                     else navController.openTab(Routes.HOME)
                 }
+            }
+        }
+    }
+
+    // Android ended the app while the VPN ran: the way back, while the app is in front (VpnEndedOffer).
+    val offerContext = androidx.compose.ui.platform.LocalContext.current
+    val offerLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    LaunchedEffect(offerLifecycle) {
+        offerLifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            com.vpn4tv.app.utils.ExitReasons.vpnEnded.collect { ended ->
+                if (ended) withContext(kotlinx.coroutines.Dispatchers.IO) { VpnEndedOffer.check(offerContext) }
             }
         }
     }

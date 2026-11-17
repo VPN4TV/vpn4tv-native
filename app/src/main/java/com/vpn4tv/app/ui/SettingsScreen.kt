@@ -59,6 +59,7 @@ fun SettingsScreen(
     onAbout: () -> Unit = {},
 ) {
     var autoConnect by remember { mutableStateOf(Settings.autoConnectOnBoot) }
+    var restartAfterKill by remember { mutableStateOf(Settings.restartAfterKill) }
     var proxyMode by remember { mutableStateOf(Settings.isProxyMode) }
     var bypassLan by remember { mutableStateOf(Settings.bypassLan) }
     var fakeDns by remember { mutableStateOf(Settings.fakeDns) }
@@ -69,6 +70,7 @@ fun SettingsScreen(
     var perApp by remember { mutableStateOf(PerAppState.read()) }
     LaunchedEffect(selected) { perApp = PerAppState.read() }
     val context = LocalContext.current
+    val vpnSettings = remember(context) { hasVpnSettings(context) }
     // Phone: whether notifications can show, read again on return from
     // Android's settings or its permission dialog.
     var notificationsOn by remember { mutableStateOf(notificationsAllowed(context)) }
@@ -77,6 +79,8 @@ fun SettingsScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 notificationsOn = notificationsAllowed(context)
+                // Three restarts within an hour switch it off (StickyRestart).
+                restartAfterKill = Settings.restartAfterKill
                 perApp = PerAppState.read()
             }
         }
@@ -125,6 +129,20 @@ fun SettingsScreen(
                 checked = autoConnect,
                 onCheckedChange = { autoConnect = it; Settings.autoConnectOnBoot = it },
             )
+            // Where Android has no VPN settings (most TVs), always-on VPN cannot be switched on: the app's
+            // restart after Android ends it stands in for it (StickyRestart, VpnEndedOffer).
+            if (!vpnSettings) {
+                SettingsToggle(
+                    title = stringResource(R.string.setting_restart_after_kill),
+                    subtitle = stringResource(R.string.setting_restart_after_kill_desc),
+                    checked = restartAfterKill,
+                    onCheckedChange = {
+                        restartAfterKill = it
+                        Settings.restartAfterKill = it
+                        com.vpn4tv.app.bg.BoxService.refreshRestartAfterKill()
+                    },
+                )
+            }
             // Phone: Android's own always-on VPN, which can also block the
             // internet without the VPN. A TV often has no such page, so the
             // app's switch above stays for it.

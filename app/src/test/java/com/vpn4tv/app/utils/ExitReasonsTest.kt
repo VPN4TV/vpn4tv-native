@@ -73,4 +73,30 @@ class ExitReasonsTest {
         assertEquals("QUOTA", ExitReasons.workStopName(WorkInfo.STOP_REASON_QUOTA))
         assertEquals("STOP_REASON_777", ExitReasons.workStopName(777))
     }
+
+    @Test
+    fun theVpnEndedByAndroidIsRecognised() {
+        // Group b9d6620551: the low-memory killer took the process that only the VPN kept.
+        assertTrue(ExitReasons.endedVpn(ApplicationExitInfo.REASON_LOW_MEMORY, fgs, null))
+        assertTrue(ExitReasons.endedVpn(ApplicationExitInfo.REASON_SIGNALED, fgs, null))
+        assertTrue(ExitReasons.endedVpn(ApplicationExitInfo.REASON_OTHER, fgs, "MemoryLimiter:AnonSwap"))
+    }
+
+    @Test
+    fun notTheUserACrashAnUpdateTheAppItselfOrAScreen() {
+        assertFalse(ExitReasons.endedVpn(ApplicationExitInfo.REASON_USER_REQUESTED, fgs, null))
+        assertFalse(ExitReasons.endedVpn(ApplicationExitInfo.REASON_CRASH_NATIVE, fgs, null))
+        assertFalse(ExitReasons.endedVpn(ApplicationExitInfo.REASON_SIGNALED, fgs, null, selfRestart = true))
+        // On screen: the user saw it go, and the VPN may not have run at all.
+        assertFalse(ExitReasons.endedVpn(ApplicationExitInfo.REASON_LOW_MEMORY, RunningAppProcessInfo.IMPORTANCE_FOREGROUND, null))
+        assertFalse(ExitReasons.endedVpn(ApplicationExitInfo.REASON_LOW_MEMORY, cached, null))
+    }
+
+    @Test
+    fun theDeviceLineHasMemoryInMegabytesAndTheAbi() {
+        val mb = 1024L * 1024L
+        assertEquals("device ram=1843MB avail=210MB threshold=216MB low=true abi=armeabi-v7a",
+            ExitReasons.deviceLine(1843 * mb, 210 * mb, 216 * mb, true, "armeabi-v7a"))
+        assertEquals("device ram=0MB avail=0MB threshold=0MB low=false abi=?", ExitReasons.deviceLine(0, 0, 0, false, null))
+    }
 }

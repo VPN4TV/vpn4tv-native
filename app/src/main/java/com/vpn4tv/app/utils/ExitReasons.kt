@@ -6,6 +6,8 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import androidx.work.WorkInfo
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -24,8 +26,10 @@ import java.util.TimeZone
  * while it was on screen or ran the VPN (out of memory, the memory limiter,
  * too much CPU, frozen…), an ANR, or the memory limiter at any time. Crashes
  * have their own reports; exits the user, an update or the app itself caused
- * are left out. The report holds the reasons, the process's memory and the
- * system's description, nothing of the user's.
+ * are left out. The report holds the reasons, the process's memory, the
+ * system's description and the device's memory and ABI, nothing of the user's.
+ * An end of the VPN by Android is kept for the screen ([vpnEnded]): it offers
+ * the way back (ui/VpnEndedOffer).
  */
 object ExitReasons {
     private const val TAG = "ExitReasons"
@@ -33,6 +37,15 @@ object ExitReasons {
     private const val KEY_SEEN = "exit_seen_at"
     private const val KEY_WORK_STOP = "key_update_stopped"
     private const val MAX_REPORTED = 5
+    private const val KEY_VPN_ENDED = "vpn_ended_at"
+
+    private val vpnEndedFlow = MutableStateFlow(false)
+
+    /**
+     * Android ended the app while the VPN ran since an earlier start, and the screen has not offered the way back
+     * yet (ui/VpnEndedOffer takes it with [takeVpnEnded]).
+     */
+    val vpnEnded: StateFlow<Boolean> = vpnEndedFlow
 
     /** One exit as the report and logcat show it; [reason], [importance] as ApplicationExitInfo has them. */
     internal data class Exit(
@@ -65,6 +78,8 @@ object ExitReasons {
         try {
             val am = context.getSystemService(ActivityManager::class.java) ?: return
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            // Found by an earlier process that never showed the screen.
+            if (prefs.contains(KEY_VPN_ENDED)) vpnEndedFlow.value = true
             val firstRun = !prefs.contains(KEY_SEEN)
             val seen = prefs.getLong(KEY_SEEN, 0L)
             // Newest first.
@@ -86,10 +101,14 @@ object ExitReasons {
             // The first start with this code finds the history of older
             // versions: logged, not sent.
             if (firstRun) return
+            if (exits.any { endedVpn(it.reason, it.importance, it.description, it.selfRestart) }) {
+                prefs.edit().putLong(KEY_VPN_ENDED, exits.first().timestamp).apply()
+                vpnEndedFlow.value = true
+            }
             val worth = exits.filter { worthReporting(it.reason, it.importance, it.description, it.selfRestart) }
                 .take(MAX_REPORTED)
             if (worth.isEmpty()) return
-            CrashUpload.upload(report(worth, prefs.getString(KEY_WORK_STOP, null)), bridges, "exit")
+            CrashUpload.upload(report(worth, prefs.getString(KEY_WORK_STOP, null), device(am)), bridges, "exit")
         } catch (t: Throwable) {
             Log.w(TAG, "exit reasons not read: ${t.javaClass.simpleName}: ${t.message}")
         }
@@ -106,6 +125,52 @@ object ExitReasons {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_WORK_STOP, text).apply()
         }
     }
+
+    /** Whether Android ended the VPN since the screen last asked ([vpnEnded]); clears it. */
+    fun takeVpnEnded(context: Context): Boolean {
+        val wasSet = vpnEndedFlow.value
+        vpnEndedFlow.value = false
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val saved = prefs.contains(KEY_VPN_ENDED)
+        if (saved) prefs.edit().remove(KEY_VPN_ENDED).apply()
+        return wasSet || saved
+    }
+
+    /**
+     * Android, not the user, an update, a crash or the app itself, ended the process while only the VPN kept it
+     * (a foreground service, no screen): to free memory (the low-memory killer, the memory limiter) or with a kill
+     * (a firmware task killer). The VPN then stays off until something starts it again: Android's always-on VPN or
+     * the app's restart after a kill (StickyRestart).
+     */
+    internal fun endedVpn(reason: Int, importance: Int, description: String?, selfRestart: Boolean = false): Boolean {
+        if (selfRestart) return false
+        if (importance != ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE) return false
+        if (description?.contains("MemoryLimiter") == true) return true
+        return when (reason) {
+            ApplicationExitInfo.REASON_LOW_MEMORY, ApplicationExitInfo.REASON_SIGNALED, ApplicationExitInfo.REASON_OTHER,
+            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE, REASON_FREEZER -> true
+            else -> false
+        }
+    }
+
+    /**
+     * The device for the report: its memory now (all, free, Android's low-memory line) and the app process's ABI;
+     * the exit record has the process's memory only. Null when unknown.
+     */
+    private fun device(am: ActivityManager): String? = runCatching {
+        val info = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        val abi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && android.os.Process.is64Bit()) {
+            Build.SUPPORTED_64_BIT_ABIS.firstOrNull()
+        } else {
+            Build.SUPPORTED_32_BIT_ABIS.firstOrNull()
+        }
+        deviceLine(info.totalMem, info.availMem, info.threshold, info.lowMemory, abi)
+    }.getOrNull()
+
+    internal fun deviceLine(total: Long, avail: Long, threshold: Long, low: Boolean, abi: String?): String =
+        "device ram=${total / MB}MB avail=${avail / MB}MB threshold=${threshold / MB}MB low=$low abi=${abi ?: "?"}"
+
+    private const val MB = 1024L * 1024L
 
     /**
      * Ended by the system while it mattered, or by the memory limiter. Crashes
@@ -132,12 +197,13 @@ object ExitReasons {
      * groups by the first line), then one line per exit, then the last key
      * update the system stopped, if any.
      */
-    internal fun report(exits: List<Exit>, workStop: String?): String = buildString {
+    internal fun report(exits: List<Exit>, workStop: String?, device: String? = null): String = buildString {
         val newest = exits.first()
         append("app-exit reason=").append(reasonName(newest.reason))
             .append(" importance=").append(importanceName(newest.importance)).append('\n')
         exits.forEach { append(line(it)).append('\n') }
         if (workStop != null) append("key-update-stop ").append(workStop).append('\n')
+        if (device != null) append(device).append('\n')
     }
 
     internal fun line(exit: Exit): String = buildString {
