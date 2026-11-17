@@ -98,6 +98,15 @@ object ProxyParser {
     )
 
     /** False for a proxy whose uTLS fingerprint the core does not know (see [KNOWN_FINGERPRINTS]). */
+    /**
+     * The flow for the core's VLESS, which takes "" and "xtls-rprx-vision" only. "xtls-rprx-vision-udp443" is Xray's
+     * client-side form of the same Vision: Xray sends the server plain "xtls-rprx-vision" (proxy/vless/outbound:
+     * Flow[:16]) and only stops rejecting UDP to port 443 (QUIC) inside the tunnel, which the core never rejects. Other
+     * services' keys carry it (support chat 2026-11-17, ZapretVPN: «unsupported flow: xtls-rprx-vision-udp443»).
+     * The xray bridge keeps the original: Xray knows it.
+     */
+    internal fun coreFlow(flow: String): String = if (flow == "xtls-rprx-vision-udp443") "xtls-rprx-vision" else flow
+
     internal fun knownFingerprint(proxy: ProxyConfig): Boolean {
         val fp = proxy.outbound.optJSONObject("tls")?.optJSONObject("utls")?.optString("fingerprint", "") ?: return true
         if (fp.lowercase() in KNOWN_FINGERPRINTS) return true
@@ -380,7 +389,7 @@ object ProxyParser {
             put("server", host)
             put("server_port", port)
             put("uuid", uuid)
-            if (flow.isNotEmpty()) put("flow", flow)
+            if (flow.isNotEmpty()) put("flow", coreFlow(flow))
             put("packet_encoding", "xudp")
 
             // TLS
@@ -1119,7 +1128,7 @@ object ProxyParser {
                         put("server_port", port)
                         if (protocol == "vless") {
                             put("uuid", uuid)
-                            if (flow.isNotEmpty()) put("flow", flow)
+                            if (flow.isNotEmpty()) put("flow", coreFlow(flow))
                             put("packet_encoding", "xudp")
                         } else {
                             put("uuid", uuid)

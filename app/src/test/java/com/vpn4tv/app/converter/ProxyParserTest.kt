@@ -171,4 +171,12 @@ class ProxyParserTest {
         val proxies = ProxyParser.parseSubscription("vless://uuid@host:443?security=reality#A\ntt://?$payload#DE11T")
         assertEquals(listOf("DE11T"), proxies.map { it.tag })
     }
+
+    @Test
+    fun xraysUdp443VisionIsPlainVisionForTheCore() {
+        // Support chat 2026-11-17: a ZapretVPN key failed with «unsupported flow: xtls-rprx-vision-udp443».
+        assertEquals("xtls-rprx-vision", ProxyParser.coreFlow("xtls-rprx-vision-udp443"))
+        assertEquals("xtls-rprx-vision", ProxyParser.coreFlow("xtls-rprx-vision"))
+        assertEquals("", ProxyParser.coreFlow(""))
+    }
 }
