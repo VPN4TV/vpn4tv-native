@@ -239,13 +239,13 @@ class MainActivity : ComponentActivity() {
             com.vpn4tv.app.tv.QuickConnectChannel.requestSync(this)
             return false
         }
+        // The pick so far: none saved means "auto", so a card's server is a change and open connections close.
+        val previous = getSavedServer(this)
         saveSelectedServer(this, server)
         if (BoxService.globalStatus.value == com.vpn4tv.app.constant.Status.Started) {
             GlobalScope.launch(Dispatchers.IO) {
                 try {
-                    val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
-                    client.selectOutbound("select", server)
-                    client.disconnect()
+                    selectServer("select", server, previous)
                 } catch (e: Exception) {
                     Log.w(TAG, "server from the channel not selected: ${e.message}")
                 }

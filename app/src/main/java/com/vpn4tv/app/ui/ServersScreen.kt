@@ -101,9 +101,7 @@ fun ServersScreen(onBack: (() -> Unit)?) {
     val select: (GroupData, ServerItem) -> Unit = { group, server ->
         scope.launch(Dispatchers.IO) {
             try {
-                val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
-                client.selectOutbound(group.tag, server.tag)
-                client.disconnect()
+                selectServer(group.tag, server.tag, previous = group.selected)
                 // Remember selection
                 saveSelectedServer(context, server.tag)
                 Log.d("Servers", "Selected ${server.tag} in ${group.tag}")
@@ -352,6 +350,30 @@ data class ServerItem(
     val type: String,
     val delay: Int,
 )
+
+/**
+ * Puts [server] into the selector [group] of the running core and, when that changes the pick ([previous]: the
+ * server picked before, null if unknown), closes the connections already open. The core leaves an open connection
+ * on the server it was opened through, so after a switch a browser went on through the old server (support chat
+ * 2026-11-17: Gemini kept answering with the old server's country while the client tried server after server).
+ * Apps reconnect at once, through the new server; a download or a stream breaks at the moment of the switch.
+ * Blocks: call it off the main thread.
+ */
+fun selectServer(group: String, server: String, previous: String?) {
+    val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
+    try {
+        client.selectOutbound(group, server)
+        if (previous != server) {
+            try {
+                client.closeConnections()
+            } catch (e: Exception) {
+                Log.w("Servers", "open connections not closed after the switch: ${e.message}")
+            }
+        }
+    } finally {
+        client.disconnect()
+    }
+}
 
 private const val PREFS_NAME = "server_selection"
 private const val LEGACY_KEY = "selected_server"
