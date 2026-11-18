@@ -54,11 +54,22 @@ enum class AppMessage(@StringRes val text: Int, @StringRes val action: Int? = nu
 
     /** The same where Android has no VPN settings (most TVs): the app's restart after a kill (VpnEndedOffer). */
     RestartOffer(R.string.vpn_ended_restart_text, R.string.action_turn_on),
+
+    /** TCL's own guard ended the VPN: the setting in TCL's security app, and the restart after a kill (VpnEndedOffer). */
+    TclGuardOffer(R.string.vpn_ended_tcl_text, R.string.action_turn_on),
+
+    /** The same with the restart on, which the guard kept from bringing the VPN back: the setting alone, one button. */
+    TclGuardNotice(R.string.vpn_ended_tcl_restart_on_text, R.string.ok),
 }
 
 /** The offers after Android ended the VPN: a dialog on the phone too (owner 2026-11-17: «модалкой»). */
 private val AppMessage.isVpnEndedOffer: Boolean
-    get() = this == AppMessage.AlwaysOnOffer || this == AppMessage.RestartOffer
+    get() = this == AppMessage.AlwaysOnOffer || this == AppMessage.RestartOffer ||
+        this == AppMessage.TclGuardOffer || this == AppMessage.TclGuardNotice
+
+/** A dialog with nothing to decide: one button, no "Not now". */
+private val AppMessage.onlyInforms: Boolean
+    get() = this == AppMessage.TclGuardNotice
 
 object AppMessages {
     // Buffered: a message posted before the screen collects (an import at
@@ -119,8 +130,8 @@ fun PhoneMessages(
                     Text(stringResource(message.action ?: R.string.action_continue))
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { dialog = null }) { Text(stringResource(R.string.action_not_now)) }
+            dismissButton = if (message.onlyInforms) null else {
+                { TextButton(onClick = { dialog = null }) { Text(stringResource(R.string.action_not_now)) } }
             },
         )
     }
@@ -139,7 +150,8 @@ fun TvMessages(onRetryConnect: () -> Unit, onProxyMode: () -> Unit) {
     LaunchedEffect(Unit) {
         AppMessages.flow.collect { message ->
             when (message) {
-                AppMessage.VpnDenied, AppMessage.NoVpnDialog, AppMessage.AlwaysOnOffer, AppMessage.RestartOffer -> dialog = message
+                AppMessage.VpnDenied, AppMessage.NoVpnDialog, AppMessage.AlwaysOnOffer, AppMessage.RestartOffer,
+                AppMessage.TclGuardOffer, AppMessage.TclGuardNotice -> dialog = message
                 else -> Toast.makeText(
                     context, message.text, if (message.long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT,
                 ).show()
@@ -161,13 +173,13 @@ fun TvMessages(onRetryConnect: () -> Unit, onProxyMode: () -> Unit) {
             onConfirm = { dialog = null; onProxyMode() },
             onDismiss = { dialog = null },
         )
-        AppMessage.AlwaysOnOffer, AppMessage.RestartOffer -> {
+        AppMessage.AlwaysOnOffer, AppMessage.RestartOffer, AppMessage.TclGuardOffer, AppMessage.TclGuardNotice -> {
             val message = dialog!!
             TvAlert(
                 title = R.string.vpn_ended_title,
                 text = message.text,
                 confirm = message.action ?: R.string.action_continue,
-                dismiss = R.string.action_not_now,
+                dismiss = if (message.onlyInforms) null else R.string.action_not_now,
                 onConfirm = { dialog = null; VpnEndedOffer.accept(context, message) },
                 onDismiss = { dialog = null },
             )
@@ -183,7 +195,8 @@ private fun TvAlert(
     @StringRes confirm: Int,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    @StringRes dismiss: Int = R.string.cancel,
+    /** Null: the confirm button alone (BACK still closes the dialog). */
+    @StringRes dismiss: Int? = R.string.cancel,
 ) {
     val confirmFocus = remember { FocusRequester() }
     // The fix in focus from the start; a request made while the dialog's
@@ -199,8 +212,10 @@ private fun TvAlert(
         title = stringResource(title),
         text = { androidx.tv.material3.Text(stringResource(text)) },
     ) {
-        TvTextButton(onClick = onDismiss) {
-            androidx.tv.material3.Text(stringResource(dismiss))
+        if (dismiss != null) {
+            TvTextButton(onClick = onDismiss) {
+                androidx.tv.material3.Text(stringResource(dismiss))
+            }
         }
         TvTextButton(onClick = onConfirm, modifier = Modifier.focusRequester(confirmFocus)) {
             androidx.tv.material3.Text(stringResource(confirm))

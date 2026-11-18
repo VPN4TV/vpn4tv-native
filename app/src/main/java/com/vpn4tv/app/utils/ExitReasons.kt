@@ -38,8 +38,18 @@ object ExitReasons {
     private const val KEY_WORK_STOP = "key_update_stopped"
     private const val MAX_REPORTED = 5
     private const val KEY_VPN_ENDED = "vpn_ended_at"
+    private const val KEY_VPN_ENDED_BY_GUARD = "vpn_ended_by_tcl_guard"
+    private const val KEY_GUARD_NOTICE = "tcl_guard_notice"
+    private const val KEY_GUARD_NOTICE_AT = "tcl_guard_notice_at"
+    internal const val GUARD_NOTICE_EVERY_MS = 7L * 24 * 60 * 60 * 1000
 
     private val vpnEndedFlow = MutableStateFlow(false)
+
+    /** What [takeVpnEnded] hands the screen. */
+    class VpnEnd(
+        /** TCL's own guard ended the process ([byTclGuard]): ui/VpnEndedOffer explains its setting. */
+        val byTclGuard: Boolean,
+    )
 
     /**
      * Android ended the app while the VPN ran since an earlier start, and the screen has not offered the way back
@@ -101,8 +111,18 @@ object ExitReasons {
             // The first start with this code finds the history of older
             // versions: logged, not sent.
             if (firstRun) return
-            if (exits.any { endedVpn(it.reason, it.importance, it.description, it.selfRestart) }) {
-                prefs.edit().putLong(KEY_VPN_ENDED, exits.first().timestamp).apply()
+            val ended = exits.filter { endedVpn(it.reason, it.importance, it.description, it.selfRestart) }
+            if (ended.isNotEmpty()) {
+                val edit = prefs.edit().putLong(KEY_VPN_ENDED, exits.first().timestamp)
+                ended.firstOrNull { byTclGuard(it.description) }?.let { guard ->
+                    edit.putBoolean(KEY_VPN_ENDED_BY_GUARD, true)
+                    val now = System.currentTimeMillis()
+                    if (guardNoticeDue(prefs.getLong(KEY_GUARD_NOTICE_AT, 0L), now)) {
+                        edit.putString(KEY_GUARD_NOTICE, guardNoticeValue(guard.timestamp))
+                            .putLong(KEY_GUARD_NOTICE_AT, now)
+                    }
+                }
+                edit.apply()
                 vpnEndedFlow.value = true
             }
             val worth = exits.filter { worthReporting(it.reason, it.importance, it.description, it.selfRestart) }
@@ -126,15 +146,51 @@ object ExitReasons {
         }
     }
 
-    /** Whether Android ended the VPN since the screen last asked ([vpnEnded]); clears it. */
-    fun takeVpnEnded(context: Context): Boolean {
+    /** Whether Android ended the VPN since the screen last asked ([vpnEnded]), and how; clears it. */
+    fun takeVpnEnded(context: Context): VpnEnd? {
         val wasSet = vpnEndedFlow.value
         vpnEndedFlow.value = false
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val saved = prefs.contains(KEY_VPN_ENDED)
-        if (saved) prefs.edit().remove(KEY_VPN_ENDED).apply()
-        return wasSet || saved
+        val byGuard = prefs.getBoolean(KEY_VPN_ENDED_BY_GUARD, false)
+        if (saved || byGuard) prefs.edit().remove(KEY_VPN_ENDED).remove(KEY_VPN_ENDED_BY_GUARD).apply()
+        return if (wasSet || saved) VpnEnd(byGuard) else null
     }
+
+    /**
+     * TCL's own guard, not Android, ended the process: "tguard-kill" in the exit's description (TCL Smart TV Pro,
+     * Android 11-12, crash group fafb5b4664; the VPN stayed off). The way out is a setting in TCL's security app
+     * (support's answer: VPN4TV set to start automatically there); by another analysis (PiPup, TCL Google TV) the
+     * guard also keeps a killed service from starting again without it.
+     */
+    internal fun byTclGuard(description: String?): Boolean = description?.contains("tguard", ignoreCase = true) == true
+
+    /**
+     * Owner 2026-11-18: a customer of our subscription also gets the way out from @VPN4TV_Bot. The next request to
+     * our key server (converter/HwidService, never another provider's) carries this note until the server answered,
+     * at most once a week ([GUARD_NOTICE_EVERY_MS]).
+     */
+    fun pendingGuardNotice(context: Context): String? = runCatching {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_GUARD_NOTICE, null)
+    }.getOrNull()
+
+    /** Our key server answered a request that carried [notice]: it is not sent again. */
+    fun guardNoticeDelivered(context: Context, notice: String) {
+        runCatching {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            if (prefs.getString(KEY_GUARD_NOTICE, null) == notice) prefs.edit().remove(KEY_GUARD_NOTICE).apply()
+        }
+    }
+
+    /** A new note at most once a week; a clock set back counts as due. */
+    internal fun guardNoticeDue(lastAt: Long, now: Long): Boolean =
+        lastAt <= 0L || now - lastAt !in 0 until GUARD_NOTICE_EVERY_MS
+
+    /**
+     * The note: always "tguard-kill" whatever the firmware wrote ([byTclGuard] matched it; the server takes this
+     * word exactly) and the kill's time, UTC.
+     */
+    internal fun guardNoticeValue(at: Long): String = "by=tguard-kill; at=${iso(at)}"
 
     /**
      * Android, not the user, an update, a crash or the app itself, ended the process while only the VPN kept it

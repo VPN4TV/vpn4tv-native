@@ -99,4 +99,32 @@ class ExitReasonsTest {
             ExitReasons.deviceLine(1843 * mb, 210 * mb, 216 * mb, true, "armeabi-v7a"))
         assertEquals("device ram=0MB avail=0MB threshold=0MB low=false abi=?", ExitReasons.deviceLine(0, 0, 0, false, null))
     }
+
+    @Test
+    fun tclsGuardIsKnownByItsDescription() {
+        // TCL Smart TV Pro, crash group fafb5b4664: reason=SIGNALED status=9 description=tguard-kill.
+        assertTrue(ExitReasons.byTclGuard("tguard-kill"))
+        assertTrue(ExitReasons.byTclGuard("TGUARD-KILL"))
+        assertFalse(ExitReasons.byTclGuard("OneKeyClean"))
+        assertFalse(ExitReasons.byTclGuard(null))
+        // The VPN it ended counts like any other kill.
+        assertTrue(ExitReasons.endedVpn(ApplicationExitInfo.REASON_SIGNALED, fgs, "tguard-kill"))
+    }
+
+    @Test
+    fun theNoteForOurServerNamesTheKillAndItsTime() {
+        // The group's latest kill, 2026-11-18T10:21:29Z. The server takes "tguard-kill" exactly.
+        assertEquals("by=tguard-kill; at=2026-11-18T10:21:29Z", ExitReasons.guardNoticeValue(1_794_997_289_000L))
+    }
+
+    @Test
+    fun theNoteGoesOutAtMostOnceAWeek() {
+        val week = ExitReasons.GUARD_NOTICE_EVERY_MS
+        val now = 1_795_000_000_000L
+        assertTrue(ExitReasons.guardNoticeDue(0L, now))
+        assertFalse(ExitReasons.guardNoticeDue(now - week + 1, now))
+        assertTrue(ExitReasons.guardNoticeDue(now - week, now))
+        // A clock set back.
+        assertTrue(ExitReasons.guardNoticeDue(now + 1, now))
+    }
 }

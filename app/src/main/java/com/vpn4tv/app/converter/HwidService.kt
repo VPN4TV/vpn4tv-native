@@ -142,14 +142,17 @@ object HwidService {
 
     private fun fetchSubscriptionOnce(context: Context, url: String, timeoutMs: Int, hardDeadline: Boolean): SubscriptionResponse {
         val conn = openConnectionWithDnsFallback(url)
-        if (!hardDeadline) return readSubscription(context, conn, timeoutMs)
+        // The connection may go to an address with the name in the Host header: ours by the link, not by conn.url.
+        val notice = if (ownServer(url)) com.vpn4tv.app.utils.ExitReasons.pendingGuardNotice(context) else null
+        notice?.let { conn.setRequestProperty(VPN_ENDED_HEADER, it) }
+        if (!hardDeadline) return readSubscription(context, conn, timeoutMs, notice)
         val expired = java.util.concurrent.atomic.AtomicBoolean(false)
         val deadline = quickDeadlines.schedule(
             { expired.set(true); conn.disconnect() },
             timeoutMs.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS,
         )
         try {
-            return readSubscription(context, conn, timeoutMs)
+            return readSubscription(context, conn, timeoutMs, notice)
         } catch (e: java.io.IOException) {
             // disconnect() surfaces as "socket closed"/"canceled": still a timeout to the retry loop.
             if (expired.get() && e !is java.net.SocketTimeoutException) {
@@ -161,7 +164,17 @@ object HwidService {
         }
     }
 
-    private fun readSubscription(context: Context, conn: HttpURLConnection, timeoutMs: Int): SubscriptionResponse {
+    /**
+     * TCL's guard ended the VPN (utils/ExitReasons.pendingGuardNotice): our key server, and only ours, hears it once,
+     * and its bot sends the customer the way out (owner 2026-11-18). Value "by=tguard-kill; at=<UTC time>".
+     */
+    internal const val VPN_ENDED_HEADER = "x-vpn4tv-vpn-ended"
+
+    /** A link to our own key server or its mirror, by the name in the link. */
+    internal fun ownServer(url: String): Boolean =
+        runCatching { URL(url).host?.lowercase() }.getOrNull() in INFRA_HOSTS
+
+    private fun readSubscription(context: Context, conn: HttpURLConnection, timeoutMs: Int, notice: String?): SubscriptionResponse {
         conn.setRequestProperty("x-hwid", getHwid(context))
         conn.setRequestProperty("x-device-os", "Android")
         conn.setRequestProperty("x-ver-os", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
@@ -187,6 +200,7 @@ object HwidService {
         // reaches the log and the error the user sees. Same IOException as before.
         val code = conn.responseCode
         if (code >= 400) throw java.io.IOException("HTTP $code from ${conn.url.host}")
+        notice?.let { com.vpn4tv.app.utils.ExitReasons.guardNoticeDelivered(context, it) }
         val input = conn.inputStream
         val buf = ByteArray(maxBytes + 1)
         var read = 0

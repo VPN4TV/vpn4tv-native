@@ -550,6 +550,8 @@
     <string name="vpn_ended_title">The VPN turned off</string>
     <string name="vpn_ended_always_on_text">Android closed VPN4TV to free memory, and the VPN turned off. To have Android turn the VPN back on by itself, open the VPN settings and turn on Always-on VPN for VPN4TV.</string>
     <string name="vpn_ended_restart_text">Android closed VPN4TV to free memory, and the VPN turned off. Restart the VPN after that? VPN4TV will then turn the VPN back on by itself. After three restarts within an hour this turns itself off.</string>
+    <string name="vpn_ended_tcl_text">The guard built into the TCL TV closed VPN4TV, and the VPN turned off. To stop this, open the TCL security app (TCL Guard, Security Guard or Smart Guard, green with a shield), find VPN4TV in its administration section and let it start automatically. Turn off energy saving in the TV settings, for VPN4TV too. Then turn on the restart here: VPN4TV will turn the VPN back on by itself.</string>
+    <string name="vpn_ended_tcl_restart_on_text">The guard built into the TCL TV closed VPN4TV, and the VPN turned off. The restart after Android closes the app is on, but the guard kept it from working. Open the TCL security app (TCL Guard, Security Guard or Smart Guard, green with a shield), find VPN4TV in its administration section and let it start automatically. Also turn off energy saving in the TV settings, for VPN4TV too.</string>
     <string name="action_turn_on">Turn on</string>
     <string name="setting_proxy_mode">Proxy mode</string>
     <string name="setting_proxy_mode_desc">For devices that can’t run a VPN: a SOCKS5 proxy for SmartTube</string>
