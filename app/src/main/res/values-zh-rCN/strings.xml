@@ -547,8 +547,8 @@
     <string name="vpn_ended_title">VPN 已断开</string>
     <string name="vpn_ended_always_on_text">Android 为释放内存关闭了 VPN4TV，VPN 已断开。如需让 Android 自动重新开启 VPN，请打开 VPN 设置，为 VPN4TV 开启“始终开启的 VPN”。</string>
     <string name="vpn_ended_restart_text">Android 为释放内存关闭了 VPN4TV，VPN 已断开。是否开启被关闭后自动重启 VPN？开启后 VPN4TV 会自行重新开启 VPN。一小时内重启三次后，此功能会自动关闭。</string>
-    <string name="vpn_ended_tcl_text">TCL 电视自带的守护程序关闭了 VPN4TV，VPN 已断开。为避免这种情况，请打开 TCL 安全应用（TCL Guard、Security Guard 或 Smart Guard，绿色盾牌图标），在管理部分找到 VPN4TV 并允许其自动启动。在电视设置中关闭节能，包括针对 VPN4TV 的节能。然后在这里开启被关闭后重启 VPN，VPN4TV 会自行重新开启 VPN。</string>
-    <string name="vpn_ended_tcl_restart_on_text">TCL 电视自带的守护程序关闭了 VPN4TV，VPN 已断开。被关闭后重启 VPN 已开启，但守护程序阻止了它。请打开 TCL 安全应用（TCL Guard、Security Guard 或 Smart Guard，绿色盾牌图标），在管理部分找到 VPN4TV 并允许其自动启动。同时在电视设置中关闭节能，包括针对 VPN4TV 的节能。</string>
+    <string name="vpn_ended_tcl_text">TCL 电视的安全应用关闭了 VPN4TV，VPN 已断开。请打开它（Safety Guard 或 TCL Guard），进入 Permission Shield → Auto Launch Permission，将 Auto manager 设为 Closed、VPN4TV 设为 Opened，然后在 Relevance Start Permission 中同样设置。再在这里开启被关闭后重启 VPN，VPN4TV 会自行重新开启 VPN。</string>
+    <string name="vpn_ended_tcl_restart_on_text">TCL 电视的安全应用关闭了 VPN4TV，VPN 已断开。被关闭后重启 VPN 已开启，但该应用阻止了它。请打开它（Safety Guard 或 TCL Guard），进入 Permission Shield → Auto Launch Permission，将 Auto manager 设为 Closed、VPN4TV 设为 Opened，然后在 Relevance Start Permission 中同样设置。</string>
     <string name="action_turn_on">开启</string>
     <string name="setting_proxy_mode">代理模式</string>
     <string name="setting_proxy_mode_desc">适用于无法运行 VPN 的设备：供 SmartTube 使用的 SOCKS5 代理</string>
