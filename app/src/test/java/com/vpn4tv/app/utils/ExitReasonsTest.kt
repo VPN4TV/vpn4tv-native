@@ -127,4 +127,164 @@ class ExitReasonsTest {
         // A clock set back.
         assertTrue(ExitReasons.guardNoticeDue(now + 1, now))
     }
+
+    /** ART's thread dump as Android keeps it for an ANR's exit record, cut to what matters here. */
+    private val anrDump = """
+        ----- pid 12345 at 2026-11-18 20:59:39.123456789+0300 -----
+        Cmd line: com.vpn4tv.hiddify
+        ABI: 'arm'
+        DALVIK THREADS (10):
+        "Signal Catcher" daemon prio=10 tid=6 Runnable
+          | group="system" sCount=0 ucsCount=0 flags=0 obj=0x12c401f8 self=0xe6b4ae00
+          native: #00 pc 0038d6d3  /apex/com.android.art/lib/libart.so (art::DumpNativeStack+198)
+          (no managed stack frames)
+
+        "main" prio=5 tid=1 Blocked
+          | group="main" sCount=1 ucsCount=0 flags=1 obj=0x72a3b3a8 self=0xe6b4a000
+          | sysTid=12345 nice=0 cgrp=default sched=0/0 handle=0xf7a8c4a8
+          | state=S schedstat=( 1 2 3 ) utm=1 stm=1 core=1 HZ=100
+          | held mutexes=
+          at zh3.b(r8-map-id-0123:12)
+          - waiting to lock <0x0b5a2a57> (a java.lang.Object) held by thread 18
+          at com.vpn4tv.app.bg.VPNService.onStartCommand(r8-map-id-0123:3)
+          at android.app.ActivityThread.handleServiceArgs(ActivityThread.java:4680)
+
+        "DefaultDispatcher-worker-1" daemon prio=5 tid=18 Native
+          | group="main" sCount=1 ucsCount=0 flags=1 obj=0x12c80a40 self=0xd0a1e000
+          native: #00 pc 0005f4ac  /apex/com.android.runtime/lib/bionic/libc.so (__ioctl+8)
+          at io.nekohasekai.libbox.Libbox.newService(Native method)
+          - locked <0x0b5a2a57> (a java.lang.Object)
+          at zh3.a(r8-map-id-0123:40)
+
+        "DefaultDispatcher-worker-2" daemon prio=5 tid=19 TimedWaiting
+          | group="main" sCount=1 ucsCount=0 flags=1 obj=0x12c80b00 self=0xd0a1f000
+          at jdk.internal.misc.Unsafe.park(Native method)
+          - waiting on an unknown object
+          at java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:376)
+
+        "DefaultDispatcher-worker-3" daemon prio=5 tid=20 TimedWaiting
+          at jdk.internal.misc.Unsafe.park(Native method)
+          - waiting on an unknown object
+          at java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:376)
+
+        "OkHttp provider.example.com" daemon prio=5 tid=21 Native
+          native: #00 pc 0005f4ac  /apex/com.android.runtime/lib/bionic/libc.so (recvfrom+8)
+          at java.net.SocketInputStream.socketRead0(Native method)
+
+        "binder:12345_1" prio=5 tid=13 Native
+          native: #00 pc 000b7698  /apex/com.android.runtime/lib/bionic/libc.so (__ioctl+8)
+          (no managed stack frames)
+
+        "FinalizerDaemon" daemon prio=5 tid=11 Waiting
+          at java.lang.Object.wait(Native method)
+
+        "DefaultDispatch" prio=5 (not attached)
+          | sysTid=25353 nice=0 cgrp=top-app
+          native: #00 pc 0255751c  /data/app/~~a==/com.vpn4tv.hiddify-b==/lib/arm/libbox.so (???)
+
+        ----- end 12345 -----
+    """.trimIndent()
+
+    @Test
+    fun anAnrsDumpKeepsTheMainThreadThenWhoHoldsItsLockThenTheOtherJavaStacks() {
+        assertEquals(
+            """
+            "main" prio=5 tid=1 Blocked
+              at zh3.b(r8-map-id-0123:12)
+              - waiting to lock <0x0b5a2a57> (a java.lang.Object) held by thread 18
+              at com.vpn4tv.app.bg.VPNService.onStartCommand(r8-map-id-0123:3)
+              at android.app.ActivityThread.handleServiceArgs(ActivityThread.java:4680)
+            "DefaultDispatcher-worker-1" daemon prio=5 tid=18 Native
+              native: #00 pc 0005f4ac  /apex/com.android.runtime/lib/bionic/libc.so (__ioctl+8)
+              at io.nekohasekai.libbox.Libbox.newService(Native method)
+              - locked <0x0b5a2a57> (a java.lang.Object)
+              at zh3.a(r8-map-id-0123:40)
+            "DefaultDispatcher-worker-2" daemon prio=5 tid=19 TimedWaiting (+1 with the same stack)
+              at jdk.internal.misc.Unsafe.park(Native method)
+              - waiting on an unknown object
+              at java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:376)
+            "thread" daemon prio=5 tid=21 Native
+              at java.net.SocketInputStream.socketRead0(Native method)
+            """.trimIndent(),
+            ExitReasons.anrStacks(anrDump.lineSequence()),
+        )
+    }
+
+    @Test
+    fun aDumpWithNoMainThreadSaysSoAndShowsNothingOfIt() {
+        val dump = "some other format\nwith a line\n\n\"worker\" prio=5 tid=2 Native\n  at a.b(c:1)"
+        assertEquals("(no main thread in the dump: 5 lines, 1 threads)", ExitReasons.anrStacks(dump.lineSequence()))
+    }
+
+    @Test
+    fun aDumpWithoutStacksCountsWhereTheThreadsWaitInTheKernel() {
+        // Android 14, the runtime did not answer the dump request in time (emulator, 2026-11-19).
+        val dump = """
+            Subject: Broadcast of Intent { act=android.intent.action.MY_PACKAGE_REPLACED flg=0x10400010 cmp=com.vpn4tv.hiddify/com.vpn4tv.app.bg.BootReceiver }
+            RssHwmKb: 166208
+
+            --- CriticalEventLog ---
+            capacity: 20
+            events <
+              anr <
+                process: "com.other.app"
+                subject: "No response to onStartJob"
+              >
+            >
+
+            ----- dumping pid: 26789 at 184812982
+            libdebuggerd_client: failed to read status response from tombstoned: timeout reached?
+
+            ----- Waiting Channels: pid 26789 at 2026-11-19 00:12:12.900312781+0000 -----
+            Cmd line: com.vpn4tv.hiddify
+
+            sysTid=26789     ptrace_stop
+            sysTid=26798     do_sigtimedwait
+            sysTid=26801     futex_wait
+            sysTid=26802     futex_wait
+            sysTid=26806     binder_ioctl_write_read
+            sysTid=26812     futex_wait
+
+            ----- end 26789 -----
+        """.trimIndent()
+        assertEquals(
+            "(no main thread in the dump: 26 lines, 0 threads)\n" +
+                "kernel wait channels: main=ptrace_stop, futex_wait x3, do_sigtimedwait x1, binder_ioctl_write_read x1",
+            ExitReasons.anrStacks(dump.lineSequence()),
+        )
+    }
+
+    @Test
+    fun aDumpOfVeryManyThreadsStopsAddingThem() {
+        val dump = buildString {
+            append("\"main\" prio=5 tid=1 Native\n  at android.os.MessageQueue.nativePollOnce(Native method)\n\n")
+            repeat(2000) { append("\"worker-$it\" prio=5 tid=${it + 2} Waiting\n  at pool.Worker$it.run(Worker.java:$it)\n\n") }
+        }
+        val kept = ExitReasons.anrStacks(dump.lineSequence())
+        assertTrue(kept.startsWith("\"main\" prio=5 tid=1 Native\n  at android.os.MessageQueue.nativePollOnce(Native method)\n"))
+        assertTrue(kept.length.toString(), kept.length < ExitReasons.ANR_TRACE_CHARS + 200)
+        val leftOut = Regex("""\((\d+) more threads left out\)$""").find(kept)!!.groupValues[1].toInt()
+        assertEquals(2000, leftOut + Regex("^\"worker-", RegexOption.MULTILINE).findAll(kept).count())
+    }
+
+    @Test
+    fun theAnrsStacksEndTheReport() {
+        val exits = listOf(ExitReasons.Exit(1_795_035_581_000, ApplicationExitInfo.REASON_ANR, 0, RunningAppProcessInfo.IMPORTANCE_PERCEPTIBLE, 67_374, 133_616, "bg anr"))
+        val section = "anr-trace time=2026-11-18T20:59:41Z\n\"main\" prio=5 tid=1 Native\n  at android.os.MessageQueue.nativePollOnce(Native method)"
+        val lines = ExitReasons.report(exits, null, "device ram=1843MB avail=210MB threshold=216MB low=false abi=armeabi-v7a", section).trimEnd().lines()
+        assertEquals("app-exit reason=ANR importance=perceptible(230)", lines[0])
+        assertEquals(
+            "exit time=2026-11-18T20:59:41Z reason=ANR status=0 importance=perceptible(230) pss=67374kB rss=133616kB description=bg anr",
+            lines[1],
+        )
+        assertEquals(
+            listOf(
+                "device ram=1843MB avail=210MB threshold=216MB low=false abi=armeabi-v7a",
+                "anr-trace time=2026-11-18T20:59:41Z",
+                "\"main\" prio=5 tid=1 Native",
+                "  at android.os.MessageQueue.nativePollOnce(Native method)",
+            ),
+            lines.drop(2),
+        )
+    }
 }
