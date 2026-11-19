@@ -579,7 +579,6 @@
     <string name="setting_restart_after_kill">Перезапуск VPN после выгрузки</string>
     <string name="setting_restart_after_kill_desc">Если Android выгрузит приложение, чтобы освободить память, VPN включится снова. Три перезапуска за час выключают этот режим</string>
     <string name="vpn_ended_title">VPN выключился</string>
-    <string name="vpn_ended_always_on_text">Android выгрузил VPN4TV, чтобы освободить память, и VPN выключился. Чтобы Android сам включал VPN снова, откройте настройки VPN и включите «Постоянная VPN» для VPN4TV.</string>
     <string name="vpn_ended_restart_text">Android выгрузил VPN4TV, чтобы освободить память, и VPN выключился. Включить перезапуск VPN после выгрузки? Тогда VPN4TV будет сам включать VPN снова. Если перезапусков будет три за час, режим выключится сам.</string>
     <string name="vpn_ended_tcl_text">Приложение безопасности телевизора TCL закрыло VPN4TV, и VPN выключился. Откройте его («Safety Guard», «TCL Guard», «Диспетчер ТВ» или «Средства обеспечения безопасности»), в «Фильтре разрешений» выключите автоматическое управление и разрешите запуск VPN4TV. В английском меню: Permission Shield → Auto Launch Permission, Auto manager — Closed, VPN4TV — Opened. А здесь включите перезапуск VPN после выгрузки.</string>
     <string name="vpn_ended_tcl_restart_on_text">Приложение безопасности телевизора TCL закрыло VPN4TV, и VPN выключился. Перезапуск VPN после выгрузки включён, но это приложение не дало ему сработать. Откройте его («Safety Guard», «TCL Guard», «Диспетчер ТВ» или «Средства обеспечения безопасности»), в «Фильтре разрешений» выключите автоматическое управление и разрешите запуск VPN4TV. В английском меню: Permission Shield → Auto Launch Permission, Auto manager — Closed, VPN4TV — Opened.</string>
@@ -665,7 +664,7 @@
     <string name="setting_notification_system">Настройки уведомлений</string>
     <string name="setting_notification_system_desc">Звук, вид и отключение — в настройках Android</string>
     <string name="setting_always_on">Постоянная VPN</string>
-    <string name="setting_always_on_desc">Настройка Android: VPN сам включается снова, а без него можно запретить интернет.</string>
+    <string name="setting_always_on_desc">Настройка Android: VPN сам включается при запуске устройства, а без него можно запретить интернет.</string>
     <string name="always_on_note">Включена «Постоянная VPN»: VPN включает и выключает Android.</string>
     <string name="always_on_note_lockdown">Включена «Постоянная VPN»: VPN включает и выключает Android, без него интернет заблокирован.</string>
     <string name="action_vpn_settings">Настройки VPN Android</string>

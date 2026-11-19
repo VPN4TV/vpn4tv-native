@@ -5,14 +5,14 @@ import android.util.Log
 import com.vpn4tv.app.database.Settings
 
 /**
- * "Restart the VPN after Android ends the app" (Settings.restartAfterKill): the service asks Android to start it
- * again when its process was ended while the VPN ran (START_STICKY; Android starts it with no intent). Offered
- * where Android's VPN settings have no always-on switch (most TVs; ui/VpnEndedOffer).
+ * "Restart the VPN after Android ends the app" (Settings.restartAfterKill): RestartService, which runs beside the
+ * VPN, asks Android to create it again when the process was ended (START_STICKY), and it starts the VPN then. Offered after such an end, on a phone and a TV (ui/VpnEndedOffer): Android's
+ * always-on VPN does not bring the VPN back then. This object counts the restarts.
  *
  * Owner, 2026-11-17: after three crashes in a row within 60 minutes it switches itself off, so a device short of
  * memory does not end and restart the app in a loop. Every restart by Android follows an end of the process (the
  * low-memory killer, a firmware task killer or a crash), so the restarts are what is counted. The third one still
- * brings the VPN up; the service is no longer sticky after it.
+ * brings the VPN up; RestartService stops after it.
  */
 object StickyRestart {
     private const val TAG = "StickyRestart"
@@ -31,8 +31,8 @@ object StickyRestart {
     internal fun parse(saved: String?): List<Long> = saved.orEmpty().split(',').mapNotNull { it.trim().toLongOrNull() }
 
     /**
-     * Every start command: whether the service should ask to be started again after its process ends. Counts a
-     * start Android made ([restartedBySystem]) and switches the setting off at the third within an hour.
+     * Whether the VPN should be brought back after the next end of the process too. Counts a start Android made
+     * ([restartedBySystem]) and switches the setting off at the third within an hour.
      */
     fun sticky(context: Context, restartedBySystem: Boolean): Boolean {
         if (!Settings.restartAfterKill) return false

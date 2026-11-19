@@ -202,14 +202,6 @@ fun openVpnSettings(context: Context) {
     )
 }
 
-/**
- * Whether Android has its VPN settings page, where always-on VPN is switched on. Many TVs have none (the Mi Box on
- * Android TV 9 has none): the app's restart after a kill stands in for it there (VpnEndedOffer, StickyRestart).
- */
-fun hasVpnSettings(context: Context): Boolean = runCatching {
-    Intent(android.provider.Settings.ACTION_VPN_SETTINGS).resolveActivity(context.packageManager) != null
-}.getOrDefault(false)
-
 /** Some firmware lacks a settings page: the next, broader one opens instead. */
 private fun startFirst(context: Context, intents: List<Intent>) {
     for (intent in intents) {

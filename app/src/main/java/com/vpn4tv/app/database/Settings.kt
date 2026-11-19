@@ -208,13 +208,12 @@ object Settings {
     var oomMemoryLimitMB by dataStore.int(SettingsKey.OOM_MEMORY_LIMIT_MB) { 50 }
 
     /**
-     * Restart the VPN after Android ends the app while it runs (START_STICKY, bg/StickyRestart). Off by default;
-     * offered where Android's VPN settings have no always-on switch (most TVs), and switched off by three
-     * restarts within an hour.
+     * Restart the VPN after Android ends the app while it runs (bg/RestartService, bg/StickyRestart). Off by default;
+     * offered after such an end (ui/VpnEndedOffer), and switched off by three restarts within an hour.
      */
     var restartAfterKill by dataStore.boolean(SettingsKey.RESTART_AFTER_KILL) { false }
 
-    /** When the app last offered always-on VPN or the restart after a kill (ui/VpnEndedOffer); 0: never. */
+    /** When the app last offered the restart after a kill or explained TCL's guard (ui/VpnEndedOffer); 0: never. */
     var vpnEndedOfferedAt by dataStore.long(SettingsKey.VPN_ENDED_OFFERED_AT) { 0L }
 
     var dashboardItemOrder by dataStore.string(SettingsKey.DASHBOARD_ITEM_ORDER) { "" }

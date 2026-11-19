@@ -143,17 +143,12 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         }
 
         /**
-         * The restart after a kill was switched on or off (StickyRestart): a start command to the running service
-         * changes only whether Android starts it again after its process ends. The app is on screen then.
+         * The restart after a kill was switched on or off: with the VPN running, the service that brings it back
+         * (RestartService) starts or stops with the setting. The app is on screen then.
          */
         fun refreshRestartAfterKill() {
-            if (globalStatus.value != Status.Started) return
-            try {
-                val intent = runBlocking { withContext(Dispatchers.IO) { Intent(Application.application, Settings.serviceClass()) } }
-                Application.application.startService(intent)
-            } catch (e: Exception) {
-                Log.w(TAG, "restart after a kill applies from the next connect: ${e.message}")
-            }
+            val now = globalStatus.value
+            if (now == Status.Started || now == Status.Starting) RestartService.sync(Application.application)
         }
 
         fun stop() {
@@ -1061,12 +1056,12 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     }
 
     /**
-     * [restartedBySystem]: Android started the service again after its process ended (no intent; only when the
-     * last start asked for it, StickyRestart).
+     * Never sticky: after its process ends, the VPN is brought back by RestartService (the reason is there), with
+     * the restart after a kill on.
      */
     @OptIn(DelicateCoroutinesApi::class)
-    internal fun onStartCommand(restartedBySystem: Boolean = false): Int {
-        Log.d(TAG, "onStartCommand, status=${status.value}, restartedBySystem=$restartedBySystem")
+    internal fun onStartCommand(): Int {
+        Log.d(TAG, "onStartCommand, status=${status.value}")
         if (status.value != Status.Stopped) {
             // A start asked for while a stop runs is dropped with the service,
             // but it came through startForegroundService, and the system takes
@@ -1082,9 +1077,10 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 }
                 return Service.START_NOT_STICKY
             }
-            // Running or starting: a second start command (always-on VPN, refreshRestartAfterKill) keeps the
-            // restart after a kill as the setting says.
-            return if (StickyRestart.sticky(service, restartedBySystem = false)) Service.START_STICKY else Service.START_NOT_STICKY
+            // Running or starting: a second start command (always-on VPN, RestartService while the user
+            // connects) changes nothing here.
+            RestartService.sync(service)
+            return Service.START_NOT_STICKY
         }
         status.value = Status.Starting
 
@@ -1169,15 +1165,19 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             markStage("profile")
             startService()
         }
-        // Sticky only with the restart after a kill on (StickyRestart counts Android's restarts and switches it
-        // off at the third within an hour); otherwise, as before, the VPN stays off after Android ends the app.
-        return if (StickyRestart.sticky(service, restartedBySystem)) Service.START_STICKY else Service.START_NOT_STICKY
+        // With the restart after a kill on, the service that brings the VPN back runs beside this one; the
+        // foreground start above lets Android start it.
+        RestartService.sync(service)
+        return Service.START_NOT_STICKY
     }
 
     internal fun onBind(): IBinder = binder
 
     internal fun onDestroy() {
         binder.close()
+        // The VPN is off, so there is nothing to bring back after the process ends. Not when the other service
+        // class has started meanwhile (the mode changed during a stop): its start has armed the restart.
+        if (status.value == Status.Stopped) RestartService.stop(service)
     }
 
     internal fun onRevoke() {

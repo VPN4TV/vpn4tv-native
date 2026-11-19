@@ -46,15 +46,6 @@
         android:name="com.android.providers.tv.permission.READ_EPG_DATA"
         tools:node="remove" />
 
-    <!-- Android 11+ shows an app only the activities it declares it looks for: whether Android has its VPN
-         settings page (always-on VPN) decides between offering it and the app's restart after a kill
-         (ui/ConnectFeedback.hasVpnSettings). -->
-    <queries>
-        <intent>
-            <action android:name="android.settings.VPN_SETTINGS" />
-        </intent>
-    </queries>
-
     <!-- enableOnBackInvokedCallback: predictive back on phones and tablets
          (Android 13+; Android 16 turns it on for targetSdk 36 anyway): the back
          gesture previews where it leads, and the opt-out Google calls temporary
@@ -162,6 +153,12 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="proxy" />
         </service>
+        <!-- Brings the VPN back after Android ends the app's process, with that setting on: Android starts
+             this service again, and it starts the VPN (the VPN's own service cannot rely on that, see the
+             class). Runs beside the VPN's foreground service, never alone. -->
+        <service
+            android:name=".bg.RestartService"
+            android:exported="false" />
 
         <!-- Quick Settings tile (phones and tablets, Android 7+): connect and
              disconnect from the shade. Active: redrawn when the VPN changes,

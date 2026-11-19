@@ -8,9 +8,15 @@ import com.vpn4tv.app.utils.ExitReasons
 
 /**
  * After Android ended the app while the VPN ran (ExitReasons.vpnEnded; support and crash group b9d6620551: the VPN
- * stayed off until the app was opened again), the way back, once a week at most (owner 2026-11-17): where Android
- * has its VPN settings, always-on VPN there; elsewhere (most TVs) the app's restart after a kill (StickyRestart).
- * Nothing when always-on runs the VPN or the restart is on already. Shown as a dialog on the phone and the TV.
+ * stayed off until the app was opened again), the way back, once a week at most (owner 2026-11-17): the app's
+ * restart after a kill (StickyRestart), on a phone and on a TV alike. Nothing when the restart is on already. Shown
+ * as a dialog on the phone and the TV.
+ *
+ * Android's always-on VPN is not a way back, whatever its name says: Android starts it when its switch is turned on,
+ * after the device starts and after the app is updated, and not after the app's process was ended (VpnManagerService
+ * in Android 14; checked there with always-on on: after kill -9 and after a force-stop the VPN stayed off). 5.6.2 and
+ * 5.6.3 offered it wherever Android has its VPN settings, so a phone got an offer that did nothing (owner
+ * 2026-11-18: «Переделай как надо»).
  *
  * When TCL's own guard ended it (crash group fafb5b4664; owner 2026-11-18: «на tcl можно пояснялово сделать в таком
  * случае»), the dialog explains the guard's setting, with the restart offered beside it, or, with the restart on and
@@ -19,9 +25,9 @@ import com.vpn4tv.app.utils.ExitReasons
 object VpnEndedOffer {
     internal const val WEEK_MS = 7L * 24 * 60 * 60 * 1000
 
-    /** Whether to offer at [now]: not when always-on runs the VPN, the restart is on, or an offer came this week. */
-    internal fun due(alwaysOn: Boolean, restartOn: Boolean, lastOfferedAt: Long, now: Long): Boolean =
-        !alwaysOn && !restartOn && weekPassed(lastOfferedAt, now)
+    /** Whether to offer at [now]: not when the restart is on or an offer came this week. */
+    internal fun due(restartOn: Boolean, lastOfferedAt: Long, now: Long): Boolean =
+        !restartOn && weekPassed(lastOfferedAt, now)
 
     /**
      * After TCL's guard: the way out is in TCL's own app, so the explanation comes with the restart on too, unless
@@ -44,15 +50,14 @@ object VpnEndedOffer {
             AppMessages.post(if (Settings.restartAfterKill) AppMessage.TclGuardNotice else AppMessage.TclGuardOffer)
             return
         }
-        if (!due(BoxService.alwaysOn.value != null, Settings.restartAfterKill, Settings.vpnEndedOfferedAt, now)) return
+        if (!due(Settings.restartAfterKill, Settings.vpnEndedOfferedAt, now)) return
         Settings.vpnEndedOfferedAt = now
-        AppMessages.post(if (hasVpnSettings(context)) AppMessage.AlwaysOnOffer else AppMessage.RestartOffer)
+        AppMessages.post(AppMessage.RestartOffer)
     }
 
     /** The dialog's button. */
-    fun accept(context: Context, message: AppMessage) {
+    fun accept(message: AppMessage) {
         when (message) {
-            AppMessage.AlwaysOnOffer -> openVpnSettings(context)
             AppMessage.RestartOffer, AppMessage.TclGuardOffer -> {
                 Settings.restartAfterKill = true
                 BoxService.refreshRestartAfterKill()

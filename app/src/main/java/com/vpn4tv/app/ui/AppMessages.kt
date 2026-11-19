@@ -49,10 +49,7 @@ enum class AppMessage(@StringRes val text: Int, @StringRes val action: Int? = nu
     /** Phone, once: the home-screen widget, with Add (QuickOffers). */
     WidgetOffer(R.string.widget_offer, R.string.action_add),
 
-    /** Android ended the app while the VPN ran; its VPN settings exist: always-on VPN there (VpnEndedOffer). */
-    AlwaysOnOffer(R.string.vpn_ended_always_on_text, R.string.action_open_settings),
-
-    /** The same where Android has no VPN settings (most TVs): the app's restart after a kill (VpnEndedOffer). */
+    /** Android ended the app while the VPN ran: the app's restart after a kill, on a phone and a TV (VpnEndedOffer). */
     RestartOffer(R.string.vpn_ended_restart_text, R.string.action_turn_on),
 
     /** TCL's own guard ended the VPN: the setting in TCL's security app, and the restart after a kill (VpnEndedOffer). */
@@ -64,8 +61,7 @@ enum class AppMessage(@StringRes val text: Int, @StringRes val action: Int? = nu
 
 /** The offers after Android ended the VPN: a dialog on the phone too (owner 2026-11-17: «модалкой»). */
 private val AppMessage.isVpnEndedOffer: Boolean
-    get() = this == AppMessage.AlwaysOnOffer || this == AppMessage.RestartOffer ||
-        this == AppMessage.TclGuardOffer || this == AppMessage.TclGuardNotice
+    get() = this == AppMessage.RestartOffer || this == AppMessage.TclGuardOffer || this == AppMessage.TclGuardNotice
 
 /** A dialog with nothing to decide: one button, no "Not now". */
 private val AppMessage.onlyInforms: Boolean
@@ -126,7 +122,7 @@ fun PhoneMessages(
             title = { Text(stringResource(R.string.vpn_ended_title)) },
             text = { Text(stringResource(message.text)) },
             confirmButton = {
-                TextButton(onClick = { dialog = null; VpnEndedOffer.accept(context, message) }) {
+                TextButton(onClick = { dialog = null; VpnEndedOffer.accept(message) }) {
                     Text(stringResource(message.action ?: R.string.action_continue))
                 }
             },
@@ -150,7 +146,7 @@ fun TvMessages(onRetryConnect: () -> Unit, onProxyMode: () -> Unit) {
     LaunchedEffect(Unit) {
         AppMessages.flow.collect { message ->
             when (message) {
-                AppMessage.VpnDenied, AppMessage.NoVpnDialog, AppMessage.AlwaysOnOffer, AppMessage.RestartOffer,
+                AppMessage.VpnDenied, AppMessage.NoVpnDialog, AppMessage.RestartOffer,
                 AppMessage.TclGuardOffer, AppMessage.TclGuardNotice -> dialog = message
                 else -> Toast.makeText(
                     context, message.text, if (message.long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT,
@@ -173,14 +169,14 @@ fun TvMessages(onRetryConnect: () -> Unit, onProxyMode: () -> Unit) {
             onConfirm = { dialog = null; onProxyMode() },
             onDismiss = { dialog = null },
         )
-        AppMessage.AlwaysOnOffer, AppMessage.RestartOffer, AppMessage.TclGuardOffer, AppMessage.TclGuardNotice -> {
+        AppMessage.RestartOffer, AppMessage.TclGuardOffer, AppMessage.TclGuardNotice -> {
             val message = dialog!!
             TvAlert(
                 title = R.string.vpn_ended_title,
                 text = message.text,
                 confirm = message.action ?: R.string.action_continue,
                 dismiss = if (message.onlyInforms) null else R.string.action_not_now,
-                onConfirm = { dialog = null; VpnEndedOffer.accept(context, message) },
+                onConfirm = { dialog = null; VpnEndedOffer.accept(message) },
                 onDismiss = { dialog = null },
             )
         }
