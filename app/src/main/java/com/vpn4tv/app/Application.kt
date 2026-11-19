@@ -105,7 +105,9 @@ class Application : Application() {
         // can block on slow / broken storage; ANR reports on MY_PACKAGE_REPLACED
         // and SystemJobService broadcasts trace back to a slow Application.onCreate.
         // Sony BRAVIA VH2 skips external entirely (that device's external path
-        // hangs File.mkdirs indefinitely — prior vc50303 boot-loop cluster).
+        // hangs File.mkdirs indefinitely — prior vc50303 boot-loop cluster);
+        // any other device whose external storage does not answer in 10 s is
+        // moved to internal storage for good (bg/CoreStorage).
         //
         // IMPORTANT: the FIRST Libbox.* call in the process triggers
         // go.Seq.<clinit> -> System.loadLibrary -> 70+ MB .so page-in plus
@@ -140,24 +142,23 @@ class Application : Application() {
             // external entirely. Spares us mass-migrating healthy users while
             // still recovering devices whose write_test passed but cache.db
             // open later EACCES'd (Haier multi-user firmware quirk).
+            //
+            // The same flag is set when external storage does not answer at
+            // all: it is asked off this thread, on a Context of its own, with
+            // a time limit (bg/CoreStorage) — getExternalFilesDir called here
+            // stayed in the storage for 40 s and more on two devices and held
+            // this Context's lock, behind which the home screen and the VPN's
+            // start waited.
             val storagePrefs = getSharedPreferences("storage", Context.MODE_PRIVATE)
             val forceInternal = storagePrefs.getBoolean("use_internal", false)
             val workingDir = if (Build.DEVICE == "BRAVIA_VH2" || forceInternal) {
                 if (forceInternal) Log.i("Application", "Using internal storage (use_internal flag)")
                 baseDir
             } else {
-                val external = getExternalFilesDir(null)
-                val writable = external?.let { dir ->
-                    try {
-                        dir.mkdirs()
-                        val test = File(dir, ".write_test_${System.currentTimeMillis()}")
-                        test.createNewFile() && test.delete()
-                    } catch (e: Exception) {
-                        Log.w("Application", "External storage not writable, using internal: ${e.message}")
-                        false
-                    }
-                } ?: false
-                if (writable) external!! else baseDir
+                com.vpn4tv.app.bg.CoreStorage.choose(
+                    internal = baseDir,
+                    onLate = { storagePrefs.edit().putBoolean("use_internal", true).commit() },
+                ) { com.vpn4tv.app.bg.CoreStorage.externalIfWritable(this@Application) }
             }
             val tempDir = cacheDir.apply { mkdirs() }
             workingDir.mkdirs()
