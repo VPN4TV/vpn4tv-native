@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -28,6 +29,7 @@ import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -48,9 +50,12 @@ import com.vpn4tv.app.constant.Status
 import com.vpn4tv.app.ui.theme.LocalStateColors
 import com.vpn4tv.app.utils.CommandClient
 import com.vpn4tv.app.utils.LogPrivacy
+import com.vpn4tv.app.utils.SupportNotes
+import com.vpn4tv.app.utils.SupportReport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.tv.material3.Icon as TvIcon
 import androidx.tv.material3.MaterialTheme as TvMaterialTheme
 import androidx.tv.material3.Text as TvText
@@ -195,6 +200,22 @@ fun LogsScreen(onBack: (() -> Unit)?) {
     val colors = MaterialTheme.colorScheme
     val state = LocalStateColors.current
     val context = LocalContext.current
+    // TV: "Send to support", the TV's stand-in for Share. Asked first (what
+    // goes and where), then sent off the main thread, then the code.
+    var support by remember { mutableStateOf<SupportStep?>(null) }
+    val sendToSupport = {
+        // All the lines that came, whatever the list shows, as Share sends.
+        val lines = feed.all
+        support = SupportStep.Sending
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { SupportReport.send(context.applicationContext, lines) }
+            support = SupportStep.Done(result)
+        }
+        Unit
+    }
+    support?.let { step ->
+        SendToSupportDialog(step, onSend = sendToSupport, onClose = { support = null })
+    }
     ScreenScaffold(
         title = stringResource(R.string.title_logs),
         onBack = onBack,
@@ -204,6 +225,15 @@ fun LogsScreen(onBack: (() -> Unit)?) {
                 IconButton(onClick = { if (searchOpen) closeSearch() else searchOpen = true }) {
                     if (searchOpen) Icon(Icons.Default.SearchOff, stringResource(R.string.close_search))
                     else Icon(Icons.Default.Search, stringResource(R.string.search))
+                }
+            }
+            // TV: named, not an icon: support tells the customer which button to press.
+            // Works without the VPN and with an empty log too: the app's notes go.
+            if (Device.isTv) {
+                TvOutlinedButton(onClick = { support = SupportStep.Ask }) {
+                    TvIcon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    TvText(stringResource(R.string.action_send_to_support))
                 }
             }
             // The same button in both states, so the TV focus stays on it.
@@ -372,6 +402,75 @@ private fun LogLine(line: String, query: String, mark: SpanStyle, fontSize: Text
     }
 }
 
+/** "Send to support" on a TV: the question, the wait, the answer. */
+private sealed interface SupportStep {
+    data object Ask : SupportStep
+    data object Sending : SupportStep
+    data class Done(val result: SupportReport.Result) : SupportStep
+}
+
+@Composable
+private fun SendToSupportDialog(step: SupportStep, onSend: () -> Unit, onClose: () -> Unit) {
+    // The button that goes on in focus, asked again for a moment: the dialog's window comes up after this.
+    val focus = remember(step) { FocusRequester() }
+    LaunchedEffect(step) {
+        if (step == SupportStep.Sending) return@LaunchedEffect
+        repeat(5) {
+            delay(100)
+            if (runCatching { focus.requestFocus(FocusDirection.Enter) }.getOrDefault(false)) return@LaunchedEffect
+        }
+    }
+    when (step) {
+        SupportStep.Ask -> TvDialog(
+            onDismissRequest = onClose,
+            title = stringResource(R.string.action_send_to_support),
+            text = { TvText(stringResource(R.string.send_to_support_text)) },
+        ) {
+            TvTextButton(onClick = onClose) { TvText(stringResource(R.string.cancel)) }
+            TvTextButton(onClick = onSend, modifier = Modifier.focusRequester(focus)) {
+                TvText(stringResource(R.string.action_send))
+            }
+        }
+        // No way out of it but its end: Back would lose the code of a report already on its way.
+        SupportStep.Sending -> TvDialog(
+            onDismissRequest = {},
+            title = stringResource(R.string.action_send_to_support),
+            text = { TvText(stringResource(R.string.send_to_support_sending)) },
+        ) {}
+        is SupportStep.Done -> {
+            val code = step.result.code
+            val (title, text) = when (step.result.outcome) {
+                SupportReport.Outcome.Sent ->
+                    stringResource(R.string.sent_to_support_title) to stringResource(R.string.support_code_text, code)
+                SupportReport.Outcome.Saved ->
+                    stringResource(R.string.support_report_saved_title) to stringResource(R.string.support_report_saved_text, code)
+                SupportReport.Outcome.Failed ->
+                    stringResource(R.string.support_report_failed_title) to stringResource(R.string.support_report_failed_text)
+            }
+            TvDialog(
+                onDismissRequest = onClose,
+                title = title,
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (step.result.outcome != SupportReport.Outcome.Failed) {
+                            // The code large and apart: read off the screen from across the room.
+                            TvText(
+                                code,
+                                style = TvMaterialTheme.typography.displaySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        TvText(text)
+                    }
+                },
+            ) {
+                TvTextButton(onClick = onClose, modifier = Modifier.focusRequester(focus)) { TvText(stringResource(R.string.ok)) }
+            }
+        }
+    }
+}
+
 private val ansi = Regex("\u001B\\[[;\\d]*m")
 
 /**
@@ -388,6 +487,10 @@ private fun shareLogs(context: android.content.Context, lines: List<String>) {
         out.write("VPN4TV ${com.vpn4tv.app.BuildConfig.VERSION_NAME} (${com.vpn4tv.app.BuildConfig.VERSION_CODE})\n")
         out.write("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, Android ${android.os.Build.VERSION.RELEASE}\n")
         out.write("ID ${com.vpn4tv.app.converter.HwidService.getHwid(context)}\n\n")
+        // The app's own notes first (which network, how the session began): the core's log keeps its newest lines only.
+        val notes = SupportNotes.snapshot()
+        notes.forEach { out.write(it); out.write("\n") }
+        if (notes.isNotEmpty()) out.write("\n")
         lines.forEach { out.write(ansi.replace(it, "")); out.write("\n") }
     }
     val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.cache", file)

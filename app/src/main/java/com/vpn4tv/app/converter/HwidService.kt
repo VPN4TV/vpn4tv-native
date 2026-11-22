@@ -128,11 +128,16 @@ object HwidService {
                 } catch (e: java.net.SocketTimeoutException) {
                     lastError = e
                     android.util.Log.w("HwidService", "fetchSubscription timeout ${attempt}/${attempts} @ ${com.vpn4tv.app.utils.LogPrivacy.link(endpoint)}")
+                    com.vpn4tv.app.utils.SupportNotes.add("key: no answer from ${com.vpn4tv.app.utils.LogPrivacy.link(endpoint)} (try $attempt of $attempts)")
                     if (attempt < attempts) Thread.sleep(1000L)
                 } catch (e: java.io.IOException) {
                     // Non-timeout IO (reset, 5xx) — jump to mirror without retries
                     lastError = e
                     android.util.Log.w("HwidService", "fetchSubscription IO error at ${com.vpn4tv.app.utils.LogPrivacy.link(endpoint)}: ${com.vpn4tv.app.utils.LogPrivacy.redactLinks(e.message)}")
+                    // Which of the two servers said what: the line under the status on Home has the last one's words only.
+                    com.vpn4tv.app.utils.SupportNotes.add(
+                        "key: ${com.vpn4tv.app.utils.LogPrivacy.link(endpoint)} failed: ${e.javaClass.simpleName}: ${com.vpn4tv.app.utils.LogPrivacy.redactLinks(e.message)}",
+                    )
                     break
                 }
             }

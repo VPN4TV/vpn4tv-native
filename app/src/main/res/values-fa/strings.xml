@@ -652,6 +652,16 @@
     <string name="server_selected">انتخاب‌شده</string>
     <string name="unit_ms">ms</string>
     <string name="action_share_logs">اشتراک‌گذاری گزارش</string>
+    <string name="action_send_to_support">ارسال به پشتیبانی</string>
+    <string name="action_send">ارسال</string>
+    <string name="send_to_support_text">گزارش و وضعیت شبکهٔ این دستگاه را بدون کلیدها و شناسه دستگاه برای پشتیبانی VPN4TV می‌فرستد و کدی نشان می‌دهد که باید آن را به @vpn4tv_support بدهید.</string>
+    <string name="send_to_support_sending">در حال ارسال…</string>
+    <string name="sent_to_support_title">به پشتیبانی فرستاده شد</string>
+    <string name="support_code_text">کد شما: %1$s. آن را در تلگرام به @vpn4tv_support بدهید.</string>
+    <string name="support_report_saved_title">ذخیره شد، هنوز فرستاده نشده</string>
+    <string name="support_report_saved_text">اکنون ارتباط با پشتیبانی برقرار نیست. گزارش به‌محض برقراری ارتباط خودکار فرستاده می‌شود: VPN را خاموش کنید یا صبر کنید. کد شما: %1$s. آن را در تلگرام به @vpn4tv_support بدهید.</string>
+    <string name="support_report_failed_title">ارسال ممکن نشد</string>
+    <string name="support_report_failed_text">اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.</string>
     <string name="notification_channel_vpn">وضعیت VPN</string>
     <string name="notification_channel_vpn_desc">تا وقتی VPN روشن است نمایش داده می‌شود: وضعیت، سرور و دکمهٔ قطع اتصال.</string>
     <string name="notification_connected_server">وصل به %1$s</string>

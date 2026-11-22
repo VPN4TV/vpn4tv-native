@@ -647,6 +647,16 @@
     <string name="server_selected">Выбран</string>
     <string name="unit_ms">мс</string>
     <string name="action_share_logs">Поделиться журналом</string>
+    <string name="action_send_to_support">Отправить в поддержку</string>
+    <string name="action_send">Отправить</string>
+    <string name="send_to_support_text">Отправляет в поддержку VPN4TV журнал и сведения о сети на этом устройстве, без ключей и ID установки, и показывает код, который нужно назвать в @vpn4tv_support.</string>
+    <string name="send_to_support_sending">Отправляем…</string>
+    <string name="sent_to_support_title">Отправлено в поддержку</string>
+    <string name="support_code_text">Ваш код: %1$s. Назовите его в @vpn4tv_support в Telegram.</string>
+    <string name="support_report_saved_title">Сохранено, пока не отправлено</string>
+    <string name="support_report_saved_text">Сейчас связи с поддержкой нет. Отчёт уйдёт сам, когда она появится: выключите VPN или подождите. Ваш код: %1$s. Назовите его в @vpn4tv_support в Telegram.</string>
+    <string name="support_report_failed_title">Не удалось отправить</string>
+    <string name="support_report_failed_text">Проверьте подключение к интернету и попробуйте снова.</string>
     <string name="profile_imported">Ключ добавлен</string>
     <!-- Уведомления, ошибки подключения и сообщения (2026-11, рекомендации Google для Android) -->
     <string name="notification_channel_vpn">Состояние VPN</string>

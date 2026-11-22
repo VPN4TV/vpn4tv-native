@@ -648,6 +648,16 @@
     <string name="server_selected">已选择</string>
     <string name="unit_ms">ms</string>
     <string name="action_share_logs">分享日志</string>
+    <string name="action_send_to_support">发送给客服</string>
+    <string name="action_send">发送</string>
+    <string name="send_to_support_text">将日志和本设备的网络状态发送给 VPN4TV 客服（不含密钥和设备 ID），并显示一个代码，请将其告知 @vpn4tv_support。</string>
+    <string name="send_to_support_sending">正在发送…</string>
+    <string name="sent_to_support_title">已发送给客服</string>
+    <string name="support_code_text">您的代码：%1$s。请在 Telegram 中告知 @vpn4tv_support。</string>
+    <string name="support_report_saved_title">已保存，尚未发送</string>
+    <string name="support_report_saved_text">目前无法连接客服。连接恢复后报告会自动发送：请关闭 VPN 或稍候。您的代码：%1$s。请在 Telegram 中告知 @vpn4tv_support。</string>
+    <string name="support_report_failed_title">无法发送</string>
+    <string name="support_report_failed_text">请检查网络连接后重试。</string>
     <string name="notification_channel_vpn">VPN 状态</string>
     <string name="notification_channel_vpn_desc">VPN 开启时显示：状态、服务器和“断开”按钮。</string>
     <string name="notification_connected_server">已连接到 %1$s</string>

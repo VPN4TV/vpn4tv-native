@@ -559,6 +559,16 @@
     <string name="server_selected">Seleccionado</string>
     <string name="unit_ms">ms</string>
     <string name="action_share_logs">Compartir registro</string>
+    <string name="action_send_to_support">Enviar al soporte</string>
+    <string name="action_send">Enviar</string>
+    <string name="send_to_support_text">Envía al soporte de VPN4TV el registro y el estado de la red de este dispositivo, sin claves ni el ID de instalación, y muestra un código que debes indicar a @vpn4tv_support.</string>
+    <string name="send_to_support_sending">Enviando…</string>
+    <string name="sent_to_support_title">Enviado al soporte</string>
+    <string name="support_code_text">Tu código: %1$s. Indícalo a @vpn4tv_support en Telegram.</string>
+    <string name="support_report_saved_title">Guardado, aún no enviado</string>
+    <string name="support_report_saved_text">Ahora no hay conexión con el soporte. El informe se enviará solo cuando la haya: apaga la VPN o espera. Tu código: %1$s. Indícalo a @vpn4tv_support en Telegram.</string>
+    <string name="support_report_failed_title">No se ha podido enviar</string>
+    <string name="support_report_failed_text">Comprueba la conexión a internet y vuelve a intentarlo.</string>
     <string name="notification_channel_vpn">Estado de la VPN</string>
     <string name="notification_channel_vpn_desc">Se muestra mientras la VPN está activa: su estado, el servidor y un botón Desconectar.</string>
     <string name="notification_connected_server">Conectado a %1$s</string>

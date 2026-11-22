@@ -36,6 +36,8 @@ class Application : Application() {
         // before the code that may crash again runs.
         com.vpn4tv.app.utils.JavaCrashReport.install(this)
         com.vpn4tv.app.utils.JavaCrashReport.uploadPrevious(this)
+        // A report "Send to support" kept for want of a network goes now, if there is one.
+        com.vpn4tv.app.utils.SupportReport.retryPendingLater(this)
         AppLifecycleObserver.register(this)
 
         // MUST run before any Room or Settings access: on first v5 boot we
@@ -260,7 +262,7 @@ class Application : Application() {
      * it), plus whether the FakeDNS health check had auto-disabled: the
      * X-Bridges context of a Go crash dump and of an exit report.
      */
-    private fun sessionBridges(): String {
+    internal fun sessionBridges(): String {
         val sessionPrefs = getSharedPreferences("session", Context.MODE_PRIVATE)
         return buildString {
             append("xray=").append(if (sessionPrefs.getBoolean("xray", false)) "Y" else "N")

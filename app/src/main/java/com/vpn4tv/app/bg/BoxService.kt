@@ -36,6 +36,7 @@ import com.vpn4tv.app.constant.Status
 import com.vpn4tv.app.database.ProfileManager
 import com.vpn4tv.app.database.Settings
 import com.vpn4tv.app.ktx.hasPermission
+import com.vpn4tv.app.utils.SupportNotes
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -226,8 +227,12 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         commandServer.start()
         this.commandServer = commandServer
         closing = false
+        // The lines about the device's networks, at every change: into the core's log as well.
+        NetworkWatch.journal = networkJournal
         Log.d(TAG, "commandServer started")
     }
+
+    private val networkJournal: (String, Boolean) -> Unit = { line, trouble -> writeToCoreLog(line, trouble) }
 
     private var lastProfileName = ""
 
@@ -235,6 +240,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
     private suspend fun startService0() {
         Log.d(TAG, "startService() begin")
+        SupportNotes.newSession()
+        // Before the tun comes up: what the device's networks are without the VPN goes down first.
+        NetworkWatch.start()
         try {
             withContext(Dispatchers.Main) {
                 notification.show(lastProfileName, R.string.status_connecting)
@@ -453,6 +461,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 lastError.postValue(null)
             }
             logRussiaDirect(routed)
+            logNetwork()
 
             if (commandServer.needWIFIState()) {
                 WifiRules.inConfig = true // a rule set of the config has one
@@ -475,6 +484,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             lastError.postValue(null)
             status.postValue(Status.Started)
             report(StartOutcome.Connected)
+            SupportNotes.add("started")
+            // A report "Send to support" could not send goes now, if this start gave it a way.
+            com.vpn4tv.app.utils.SupportReport.retryPendingLater(Application.application)
 
             // Run URLTest immediately so delays are available in UI
             Thread {
@@ -543,10 +555,14 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             // provably alive but domain resolution via fakeip is broken.
             if (!probeProxyAliveByIp()) {
                 Log.w(TAG, "FakeDNS health check: domain unreachable but proxy also down — not attributing to FakeDNS")
+                SupportNotes.add("check after the start: nothing answers through the tunnel, neither by name nor by address")
+                // What the device's networks and routes are at this moment (support case of 2026-11-21).
+                NetworkWatch.tunnelDead()
                 return
             }
 
             Log.w(TAG, "FakeDNS health check FAILED — proxy alive but fakeip path broken; auto-disabling FakeDNS and reloading")
+            SupportNotes.add("fakedns: off for the session (the proxy answers, names through FakeDNS do not)")
             fakeDnsAutoDisabled = true
             // Diagnostic breadcrumb (read by support / next-launch crash tag).
             Application.application
@@ -591,6 +607,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 if (!wanted()) return
                 if (probeProxyAliveByIp()) break
                 Log.w(TAG, "dns-ru health check: no answer, but the proxy is down too — not blaming dns-ru (round $round of 2)")
+                SupportNotes.add("check of the Russian DNS: nothing answers through the tunnel (round $round of 2)")
+                NetworkWatch.tunnelDead()
                 if (round == 2) return
                 Thread.sleep(60_000)
             }
@@ -786,6 +804,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             routed = RussiaDirectRuntime.Prepared(fallback, "off (session: the reload with it failed: ${e.message})", warn = true)
         }
         logRussiaDirect(routed)
+        logNetwork()
         RussiaDirectRuntime.onRunning(Application.application, routed)
         if (RussiaDirectRuntime.claimDnsCheck(routed)) Thread { runDnsRuHealthCheck() }.start()
 
@@ -861,6 +880,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                 fileDescriptor = null
             }
             DefaultNetworkMonitor.stop()
+            NetworkWatch.stop()
             closeService()
             commandServer.apply {
                 close()
@@ -868,12 +888,16 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             }
             RussiaDirectRuntime.onStopped(Application.application)
             stopAllBridges()
+            SupportNotes.add("stopped")
             withContext(Dispatchers.Main) {
                 // Again: a start that finished while this stop waited shows it.
                 notification.close()
                 status.value = Status.Stopped
                 service.stopSelf()
             }
+            // Without the VPN the app's own requests go out directly: a report
+            // "Send to support" could not send through a dead tunnel goes now.
+            com.vpn4tv.app.utils.SupportReport.retryPendingLater(Application.application)
         }
     }
 
@@ -911,16 +935,31 @@ class BoxService(private val service: Service, private val platformInterface: Pl
      * direct" is in and why not. Into the core's log too (the Logs screen),
      * after the start, since a start clears that log.
      */
-    private fun logRussiaDirect(prepared: RussiaDirectRuntime.Prepared) {
-        val line = prepared.line
-        if (prepared.warn) Log.w(TAG, line) else Log.i(TAG, line)
+    private fun logRussiaDirect(prepared: RussiaDirectRuntime.Prepared) = supportLine(prepared.line, prepared.warn)
+
+    /**
+     * After every start and reload, with the line above: the network the core
+     * goes out by, the device's other networks and interfaces, and whether
+     * the device gives the VPN's own connections a route (NetworkWatch).
+     */
+    private fun logNetwork() = NetworkWatch.afterStart()
+
+    /** A line of the app's own for support: the system log, SupportNotes and the core's log (the Logs screen). */
+    private fun supportLine(line: String, warn: Boolean) {
+        if (warn) Log.w(TAG, line) else Log.i(TAG, line)
+        SupportNotes.add(line)
+        writeToCoreLog(line, warn)
+    }
+
+    private fun writeToCoreLog(line: String, warn: Boolean) {
         try {
+            if (!::commandServer.isInitialized || closing) return
             // Level 3 (warn) either way: a release build's Logs screen keeps the
-            // core's lines from warn up (CommandClient), and this one is for
+            // core's lines from warn up (CommandClient), and these are for
             // support. The text says INFO or WARN, which the screen goes by.
-            commandServer.writeMessage(3, (if (prepared.warn) "WARN " else "INFO ") + line)
+            commandServer.writeMessage(3, (if (warn) "WARN " else "INFO ") + line)
         } catch (t: Throwable) {
-            Log.w(TAG, "russia-direct line not written to the core log: ${t.message}")
+            Log.w(TAG, "line not written to the core log: ${t.message}")
         }
     }
 
@@ -928,6 +967,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
     private suspend fun stopAndAlert(type: Alert, message: String? = null, reason: ServiceError.Reason? = null) {
         closing = true
         Log.e(TAG, "stopAndAlert: ${type.name} — ${com.vpn4tv.app.utils.LogPrivacy.redactLinks(message)}")
+        SupportNotes.add("stopped with an error: ${type.name}: ${com.vpn4tv.app.utils.LogPrivacy.redactLinks(message)}")
         lastError.postValue(ServiceError.of(type, message, reason))
         report(StartOutcome.Failed)
         Settings.startedByUser = false
@@ -937,6 +977,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             fileDescriptor = null
         }
         DefaultNetworkMonitor.stop()
+        NetworkWatch.stop()
         if (::commandServer.isInitialized) {
             closeService()
             commandServer.close()
@@ -955,6 +996,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             status.value = Status.Stopped
             service.stopSelf()
         }
+        // As after a stop: without the VPN a report "Send to support" kept on the device has its way out.
+        com.vpn4tv.app.utils.SupportReport.retryPendingLater(Application.application)
     }
 
     /**
@@ -1175,6 +1218,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
     internal fun onDestroy() {
         binder.close()
+        if (NetworkWatch.journal === networkJournal) NetworkWatch.journal = null
         // The VPN is off, so there is nothing to bring back after the process ends. Not when the other service
         // class has started meanwhile (the mode changed during a stop): its start has armed the restart.
         if (status.value == Status.Stopped) RestartService.stop(service)
@@ -1185,6 +1229,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         // was turned off in Android's settings. Without a word the screen just
         // says "Disconnected", and that looks like the app failed.
         if (status.value == Status.Started) lastError.value = ServiceError(ServiceError.Reason.Revoked)
+        SupportNotes.add("the system took the VPN away: another VPN app, or the VPN turned off in Android's settings")
         // The widget then opens the app to connect, until a tun comes up again.
         Settings.vpnPermissionSeen = false
         stopService()

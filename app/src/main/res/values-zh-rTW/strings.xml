@@ -651,6 +651,16 @@
     <string name="server_selected">已選取</string>
     <string name="unit_ms">ms</string>
     <string name="action_share_logs">分享日誌</string>
+    <string name="action_send_to_support">傳送給客服</string>
+    <string name="action_send">傳送</string>
+    <string name="send_to_support_text">將日誌和本裝置的網路狀態傳送給 VPN4TV 客服（不含金鑰和裝置 ID），並顯示一組代碼，請將其告知 @vpn4tv_support。</string>
+    <string name="send_to_support_sending">正在傳送…</string>
+    <string name="sent_to_support_title">已傳送給客服</string>
+    <string name="support_code_text">您的代碼：%1$s。請在 Telegram 中告知 @vpn4tv_support。</string>
+    <string name="support_report_saved_title">已儲存，尚未傳送</string>
+    <string name="support_report_saved_text">目前無法連線客服。連線恢復後報告會自動傳送：請關閉 VPN 或稍候。您的代碼：%1$s。請在 Telegram 中告知 @vpn4tv_support。</string>
+    <string name="support_report_failed_title">無法傳送</string>
+    <string name="support_report_failed_text">請檢查網路連線後再試一次。</string>
     <string name="notification_channel_vpn">VPN 狀態</string>
     <string name="notification_channel_vpn_desc">VPN 開啟時顯示：狀態、伺服器和「中斷連線」按鈕。</string>
     <string name="notification_connected_server">已連線到 %1$s</string>

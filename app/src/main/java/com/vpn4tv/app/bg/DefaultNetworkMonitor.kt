@@ -11,7 +11,18 @@ object DefaultNetworkMonitor {
     var defaultNetwork: Network? = null
     private var listener: InterfaceUpdateListener? = null
 
+    /**
+     * The default interface the core was last told, its name and index; null:
+     * none. Set before the core is told, since the core reads the device's
+     * interfaces while it takes the update, and the line about those
+     * (NetworkWatch.given) says whether this one is among them.
+     */
+    @Volatile
+    var told: Pair<String, Int>? = null
+        private set
+
     suspend fun start() {
+        told = null
         DefaultNetworkListener.start(this) {
             defaultNetwork = it
             checkDefaultInterfaceUpdate(it)
@@ -62,11 +73,21 @@ object DefaultNetworkMonitor {
                     Thread.sleep(100)
                     continue
                 }
+                told = (linkProperties.interfaceName ?: "?") to interfaceIndex
                 listener.updateDefaultInterface(linkProperties.interfaceName, interfaceIndex, false, false)
+                // What the core was just told, for support: one line when it differs from the last one.
+                NetworkWatch.told(newNetwork, null, linkProperties, interfaceIndex)
                 return
             }
+            // Nothing was told: the core keeps the interface it had.
+            NetworkWatch.told(null, "the new network's interface did not appear, the core was not told")
         } else {
+            told = null
             listener.updateDefaultInterface("", -1, false, false)
+            NetworkWatch.told(null, null)
         }
     }
+
+    /** The network the core goes out by, as it is now: the line after a start or a reload. */
+    fun lineNow(): Pair<String, Boolean> = NetworkReport.lineFor(defaultNetwork)
 }

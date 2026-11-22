@@ -39,6 +39,16 @@ class VPNService :
             BoxService.alwaysOn.postValue(now)
             ServiceNotification.refresh()
         }
+
+        /** The VPN service exists in this process (not the proxy mode's service). */
+        fun isRunning(): Boolean = running?.get() != null
+
+        /**
+         * [socket] taken out of the VPN the way the core's sockets are
+         * (autoDetectInterfaceControl); null without a running VPN service.
+         * For NetworkReport's route check.
+         */
+        fun protectSocket(socket: java.net.DatagramSocket): Boolean? = running?.get()?.protect(socket)
     }
 
     private val service = BoxService(this, this)
@@ -96,7 +106,8 @@ class VPNService :
     }
 
     override fun autoDetectInterfaceControl(fd: Int) {
-        protect(fd)
+        // A socket Android would not take out of the VPN goes into the tunnel it is meant to carry.
+        if (!protect(fd)) NetworkWatch.protectRefused()
     }
 
     var systemProxyAvailable = false

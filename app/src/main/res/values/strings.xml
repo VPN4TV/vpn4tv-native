@@ -654,6 +654,16 @@
     <string name="server_selected">Selected</string>
     <string name="unit_ms">ms</string>
     <string name="action_share_logs">Share log</string>
+    <string name="action_send_to_support">Send to support</string>
+    <string name="action_send">Send</string>
+    <string name="send_to_support_text">Sends the log and the state of the network on this device to VPN4TV support, without keys or the installation ID, and shows a code to give to @vpn4tv_support.</string>
+    <string name="send_to_support_sending">Sending…</string>
+    <string name="sent_to_support_title">Sent to support</string>
+    <string name="support_code_text">Your code: %1$s. Give it to @vpn4tv_support in Telegram.</string>
+    <string name="support_report_saved_title">Saved, not sent yet</string>
+    <string name="support_report_saved_text">There is no connection to support right now. The report will go by itself once there is one: turn the VPN off or wait. Your code: %1$s. Give it to @vpn4tv_support in Telegram.</string>
+    <string name="support_report_failed_title">Couldn\'t send</string>
+    <string name="support_report_failed_text">Check the internet connection and try again.</string>
     <!-- Notifications, connection errors and messages (2026-11, Google's Android guidance) -->
     <string name="notification_channel_vpn">VPN status</string>
     <string name="notification_channel_vpn_desc">Shown while the VPN is on: its state, the server and a Disconnect button.</string>

@@ -80,14 +80,26 @@ interface PlatformInterfaceWrapper : PlatformInterface {
         val networks = Application.connectivity.allNetworks
         val networkInterfaces = NetworkInterface.getNetworkInterfaces().toList()
         val interfaces = mutableListOf<LibboxNetworkInterface>()
+        // The same list in words, for support (NetworkWatch.given): what the core has to choose from.
+        val described = mutableListOf<String>()
         for (network in networks) {
             val boxInterface = LibboxNetworkInterface()
-            val linkProperties = Application.connectivity.getLinkProperties(network) ?: continue
-            val networkCapabilities =
-                Application.connectivity.getNetworkCapabilities(network) ?: continue
+            val linkProperties = Application.connectivity.getLinkProperties(network)
+            if (linkProperties == null) {
+                described.add("net $network left out: Android has no link properties for it")
+                continue
+            }
+            val networkCapabilities = Application.connectivity.getNetworkCapabilities(network)
+            if (networkCapabilities == null) {
+                described.add("net $network (${linkProperties.interfaceName}) left out: Android has no capabilities for it")
+                continue
+            }
             boxInterface.name = linkProperties.interfaceName
-            val networkInterface =
-                networkInterfaces.find { it.name == boxInterface.name } ?: continue
+            val networkInterface = networkInterfaces.find { it.name == boxInterface.name }
+            if (networkInterface == null) {
+                described.add("net $network left out: the kernel lists no interface ${linkProperties.interfaceName}")
+                continue
+            }
             boxInterface.dnsServer =
                 StringArray(linkProperties.dnsServers.mapNotNull { it.hostAddress }.iterator())
             boxInterface.type =
@@ -129,7 +141,20 @@ interface PlatformInterfaceWrapper : PlatformInterface {
             boxInterface.metered =
                 !networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
             interfaces.add(boxInterface)
+            described.add(
+                "${boxInterface.name} (${boxInterface.index}) " +
+                    when {
+                        networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "vpn"
+                        boxInterface.type == Libbox.InterfaceTypeWIFI -> "wifi"
+                        boxInterface.type == Libbox.InterfaceTypeCellular -> "cellular"
+                        boxInterface.type == Libbox.InterfaceTypeEthernet -> "ethernet"
+                        else -> "other"
+                    } +
+                    // The core chooses among the interfaces that are up, and up is what has the internet capability.
+                    if (dumpFlags and OsConstants.IFF_UP == 0) ", not up for the core" else "",
+            )
         }
+        NetworkWatch.given(described, interfaces.mapTo(HashSet()) { it.index }, DefaultNetworkMonitor.told)
         return InterfaceArray(interfaces.iterator())
     }
 
