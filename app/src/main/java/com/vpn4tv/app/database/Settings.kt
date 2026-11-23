@@ -129,8 +129,39 @@ object Settings {
      * tun came up; cleared when the system takes the VPN away. Only a hint
      * for what is drawn without a tap (the widget): prepare() itself makes
      * this app the VPN app and so ends another app's running VPN.
+     *
+     * Kept in memory and written to the database on a thread of its own: it
+     * is set on the main thread at a tap on Connect, at the consent window's
+     * answer and when Android takes the VPN away, and a write to the settings
+     * database took over five seconds on a Xiaomi MiTV (Google Play, 5.6.0:
+     * ANR 0862bc8555 in Settings.setVpnPermissionSeen from MainActivity.doConnect,
+     * and in the same hour a RemoteServiceException on that model, the
+     * service's start held up behind it). The app has one process, so the
+     * value in memory is the only one.
      */
-    var vpnPermissionSeen by dataStore.boolean(SettingsKey.VPN_PERMISSION_SEEN) { false }
+    var vpnPermissionSeen: Boolean
+        get() {
+            synchronized(vpnPermissionLock) { vpnPermissionCache }?.let { return it }
+            // The first read in a process: from the database and outside the lock, so that a
+            // setter on the main thread never waits for a disk. A value set meanwhile wins.
+            val stored = dataStore.getBoolean(SettingsKey.VPN_PERMISSION_SEEN, false)
+            return synchronized(vpnPermissionLock) {
+                vpnPermissionCache ?: stored.also { vpnPermissionCache = it }
+            }
+        }
+        set(value) = synchronized(vpnPermissionLock) {
+            if (vpnPermissionCache == value) return
+            vpnPermissionCache = value
+            // One thread, in the order set: the last value is the one written.
+            settingsWriter.execute {
+                runCatching { dataStore.putBoolean(SettingsKey.VPN_PERMISSION_SEEN, value) }
+            }
+        }
+    private val vpnPermissionLock = Any()
+    private var vpnPermissionCache: Boolean? = null
+    private val settingsWriter = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "settings-writer").apply { isDaemon = true }
+    }
     var disableDeprecatedWarnings by dataStore.boolean(SettingsKey.DISABLE_DEPRECATED_WARNINGS) { false }
 
     // Days of use (UsageMilestones): local calendar days since 1970, -1 none yet.

@@ -227,6 +227,8 @@ class Application : Application() {
         // (the reliable "a crash happened" signal), then prefer .stderr content.
         if (!crashFile.exists() || crashFile.length() == 0L) return
         val stderrFile = File(tempDir, "go_crash.log.stderr")
+        // Before anything moves or deletes it: the exit report must not send this crash again (ExitReasons).
+        com.vpn4tv.app.utils.ExitReasons.markGoDump(this, maxOf(crashFile.lastModified(), stderrFile.lastModified()))
         // One-shot, moved aside BEFORE the read: a dump that cannot be read
         // must not be read again at the next launch. A .stderr of about 64 MB,
         // read whole, ran a TV out of memory here at every launch, before

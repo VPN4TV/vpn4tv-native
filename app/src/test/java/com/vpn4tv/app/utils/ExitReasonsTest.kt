@@ -41,10 +41,63 @@ class ExitReasonsTest {
     @Test
     fun crashesTheUserAndUpdatesAreNot() {
         assertFalse(ExitReasons.worthReporting(ApplicationExitInfo.REASON_CRASH, fgs, null))
-        assertFalse(ExitReasons.worthReporting(ApplicationExitInfo.REASON_CRASH_NATIVE, fgs, null))
         assertFalse(ExitReasons.worthReporting(ApplicationExitInfo.REASON_USER_REQUESTED, fgs, null))
         assertFalse(ExitReasons.worthReporting(ApplicationExitInfo.REASON_EXIT_SELF, fgs, null))
         assertFalse(ExitReasons.worthReporting(16 /* PACKAGE_UPDATED */, fgs, null))
+    }
+
+    @Test
+    fun aCrashInNativeCodeIsReportedUnlessTheCoreLeftItsOwnDump() {
+        // A C or C++ library: nothing else tells of it.
+        assertTrue(ExitReasons.worthReporting(ApplicationExitInfo.REASON_CRASH_NATIVE, fgs, null))
+        assertTrue(ExitReasons.worthReporting(ApplicationExitInfo.REASON_CRASH_NATIVE, cached, null))
+        // The Go runtime: its dump is the report.
+        assertFalse(ExitReasons.worthReporting(ApplicationExitInfo.REASON_CRASH_NATIVE, fgs, null, goDump = true))
+    }
+
+    @Test
+    fun theCoresDumpIsThisExitsWhenWrittenAtThatTime() {
+        val dir = java.nio.file.Files.createTempDirectory("exit-reasons").toFile()
+        try {
+            val exitAt = 1_795_000_000_000L
+            assertFalse(ExitReasons.goDumpNear(dir, exitAt))
+            assertFalse(ExitReasons.goDumpNear(null, exitAt))
+            val dump = java.io.File(dir, "go_crash_consumed.log.stderr")
+            dump.writeText("fatal error: found bad pointer in Go heap")
+            dump.setLastModified(exitAt - 3_000)
+            assertTrue(ExitReasons.goDumpNear(dir, exitAt))
+            // A dump of an older crash is not this one's.
+            dump.setLastModified(exitAt - 3_600_000)
+            assertFalse(ExitReasons.goDumpNear(dir, exitAt))
+            // An empty file: the core opens it at every start.
+            val empty = java.io.File(dir, "go_crash.log")
+            empty.writeText("")
+            empty.setLastModified(exitAt)
+            assertFalse(ExitReasons.goDumpNear(dir, exitAt))
+            // A large dump is deleted once read: the mark set before that still tells.
+            dump.delete()
+            assertTrue(ExitReasons.goDumpNear(dir, exitAt) { exitAt - 2_000 })
+            assertFalse(ExitReasons.goDumpNear(dir, exitAt) { exitAt - 3_600_000 })
+            assertFalse(ExitReasons.goDumpNear(dir, exitAt) { 0L })
+            // The files are looked at first: the mark is read only when they tell nothing.
+            dump.writeText("fatal error")
+            dump.setLastModified(exitAt)
+            assertTrue(ExitReasons.goDumpNear(dir, exitAt) { throw AssertionError("the mark was read before the files") })
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun aNativeCrashsStackEndsTheReport() {
+        val exit = ExitReasons.Exit(1_795_000_000_000L, ApplicationExitInfo.REASON_CRASH_NATIVE, 11, fgs, 100, 200, null)
+        val section = ExitReasons.nativeCrashSection("native-crash time=x", ByteArray(3) { 0x7f })
+        assertEquals("native-crash time=x unreadable (3 bytes)", section)
+        val report = ExitReasons.report(listOf(exit), null, "device ram=1MB", null, "native-crash time=x\nsignal=SIGSEGV")
+        val lines = report.trimEnd().split('\n')
+        assertEquals("app-exit reason=CRASH_NATIVE importance=foreground-service(125)", lines.first())
+        assertTrue(lines[1].contains("reason=CRASH_NATIVE status=11"))
+        assertEquals(listOf("native-crash time=x", "signal=SIGSEGV"), lines.takeLast(2))
     }
 
     @Test

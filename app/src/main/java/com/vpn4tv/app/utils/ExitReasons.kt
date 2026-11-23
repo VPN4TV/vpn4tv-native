@@ -39,6 +39,7 @@ object ExitReasons {
     private const val PREFS = "diagnostics"
     private const val KEY_SEEN = "exit_seen_at"
     private const val KEY_WORK_STOP = "key_update_stopped"
+    private const val KEY_GO_DUMP_AT = "go_dump_at"
     private const val MAX_REPORTED = 5
     private const val KEY_VPN_ENDED = "vpn_ended_at"
     private const val KEY_VPN_ENDED_BY_GUARD = "vpn_ended_by_tcl_guard"
@@ -127,14 +128,32 @@ object ExitReasons {
                 edit.apply()
                 vpnEndedFlow.value = true
             }
-            val worth = exits.filter { worthReporting(it.reason, it.importance, it.description, it.selfRestart) }
-                .take(MAX_REPORTED)
+            val worth = exits.filter {
+                val goDump = it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE &&
+                    goDumpNear(context.cacheDir, it.timestamp) { prefs.getLong(KEY_GO_DUMP_AT, 0L) }
+                worthReporting(it.reason, it.importance, it.description, it.selfRestart, goDump)
+            }.take(MAX_REPORTED)
             if (worth.isEmpty()) return
             CrashUpload.upload(
-                report(worth, prefs.getString(KEY_WORK_STOP, null), device(am), anrTrace(infos, worth)), bridges, "exit",
+                report(
+                    worth, prefs.getString(KEY_WORK_STOP, null), device(am), anrTrace(infos, worth),
+                    nativeCrash(infos, worth),
+                ),
+                bridges, "exit",
             )
         } catch (t: Throwable) {
             Log.w(TAG, "exit reasons not read: ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
+    /**
+     * Application.consumeCrashLog found the core's crash dump, written at [writtenAt]: kept for [record], which runs
+     * at the same time on another thread. A dump over a megabyte is deleted once read (one in seven), and without
+     * this mark the same crash would go out a second time as a crash in native code.
+     */
+    fun markGoDump(context: Context, writtenAt: Long) {
+        runCatching {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(KEY_GO_DUMP_AT, writtenAt).apply()
         }
     }
 
@@ -233,15 +252,26 @@ object ExitReasons {
     private const val MB = 1024L * 1024L
 
     /**
-     * Ended by the system while it mattered, or by the memory limiter. Crashes
-     * report themselves; the app's own restarts ([selfRestart]) have their
-     * report already (the watchdog's hang dumps).
+     * Ended by the system while it mattered, or by the memory limiter; or by a
+     * crash in native code that nothing else reports. A Java crash and a crash
+     * of the core's Go runtime ([goDump]: its dump is on the device) report
+     * themselves; a crash inside a C or C++ library (TrustTunnel, the naive
+     * transport) leaves only this record and, since Android 12, a tombstone
+     * ([nativeCrash]). The app's own restarts ([selfRestart]) have their report
+     * already (the watchdog's hang dumps).
      */
-    internal fun worthReporting(reason: Int, importance: Int, description: String?, selfRestart: Boolean = false): Boolean {
+    internal fun worthReporting(
+        reason: Int,
+        importance: Int,
+        description: String?,
+        selfRestart: Boolean = false,
+        goDump: Boolean = false,
+    ): Boolean {
         if (selfRestart) return false
         if (description?.contains("MemoryLimiter") == true) return true
         return when (reason) {
-            ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE -> false
+            ApplicationExitInfo.REASON_CRASH -> false
+            ApplicationExitInfo.REASON_CRASH_NATIVE -> !goDump
             // The app itself, the user, an update.
             ApplicationExitInfo.REASON_EXIT_SELF, ApplicationExitInfo.REASON_USER_REQUESTED,
             ApplicationExitInfo.REASON_USER_STOPPED, ApplicationExitInfo.REASON_PERMISSION_CHANGE,
@@ -263,6 +293,7 @@ object ExitReasons {
         workStop: String?,
         device: String? = null,
         anrTrace: String? = null,
+        nativeCrash: String? = null,
     ): String = buildString {
         val newest = exits.first()
         append("app-exit reason=").append(reasonName(newest.reason))
@@ -271,6 +302,66 @@ object ExitReasons {
         if (workStop != null) append("key-update-stop ").append(workStop).append('\n')
         if (device != null) append(device).append('\n')
         if (anrTrace != null) append(anrTrace).append('\n')
+        if (nativeCrash != null) append(nativeCrash).append('\n')
+    }
+
+    /** The core's crash output and what the next start renames it to (Application.consumeCrashLog). */
+    private val GO_DUMPS = listOf("go_crash.log", "go_crash.log.stderr", "go_crash_consumed.log", "go_crash_consumed.log.stderr")
+
+    /** A dump is this exit's when it was written within this time of it. */
+    private const val GO_DUMP_WINDOW_MS = 120_000L
+
+    /**
+     * The Go runtime wrote its dump when the process ended at [exitAt]: that crash is reported from the dump, with
+     * every goroutine, so the exit record adds nothing. [dir] is the cache folder the core writes it to; [markedAt]
+     * is when the dump that Application.consumeCrashLog read was written ([markGoDump]). The files are looked at
+     * first and the mark after them: the mark is set before a large dump is deleted, so one of the two is there.
+     */
+    internal fun goDumpNear(dir: java.io.File?, exitAt: Long, markedAt: () -> Long = { 0L }): Boolean {
+        val inFiles = dir != null && GO_DUMPS.any { name ->
+            val file = java.io.File(dir, name)
+            file.length() > 0L && kotlin.math.abs(file.lastModified() - exitAt) <= GO_DUMP_WINDOW_MS
+        }
+        if (inFiles) return true
+        val marked = markedAt()
+        return marked > 0L && kotlin.math.abs(marked - exitAt) <= GO_DUMP_WINDOW_MS
+    }
+
+    /** No more of a tombstone is read; the crashed thread's stack is near its start, the memory map and the log at its end. */
+    private const val TOMBSTONE_BYTES = 8 * 1024 * 1024
+
+    /**
+     * The stack of the newest reported crash in native code, from the tombstone Android keeps for the exit record
+     * (ApplicationExitInfo.getTraceInputStream; Android 12 and newer, Android 11 keeps none). The report's last
+     * section: "native-crash time=…", then [NativeTombstone.text]; "none" when there is no tombstone, "unreadable"
+     * or "failed" when it could not be read.
+     */
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun nativeCrash(infos: List<ApplicationExitInfo>, reported: List<Exit>): String? {
+        val crash = reported.firstOrNull { it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE } ?: return null
+        val info = infos.firstOrNull { it.reason == crash.reason && it.timestamp == crash.timestamp } ?: return null
+        val head = "native-crash time=${iso(crash.timestamp)}"
+        return try {
+            val stream = info.traceInputStream ?: return "$head none"
+            val bytes = stream.use { input ->
+                val out = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(64 * 1024)
+                while (out.size() < TOMBSTONE_BYTES) {
+                    val n = input.read(buffer, 0, minOf(buffer.size, TOMBSTONE_BYTES - out.size()))
+                    if (n <= 0) break
+                    out.write(buffer, 0, n)
+                }
+                out.toByteArray()
+            }
+            nativeCrashSection(head, bytes)
+        } catch (t: Throwable) {
+            "$head failed: ${t.javaClass.simpleName}"
+        }
+    }
+
+    internal fun nativeCrashSection(head: String, tombstone: ByteArray): String {
+        val parsed = NativeTombstone.parse(tombstone) ?: return "$head unreadable (${tombstone.size} bytes)"
+        return head + "\n" + NativeTombstone.text(parsed)
     }
 
     /**
