@@ -692,6 +692,8 @@
     <string name="error_key_download_failed">Couldn’t download the key. Check the internet connection and try again.</string>
     <string name="error_key_update_failed">Couldn’t refresh the key. Check the internet connection and try again.</string>
     <string name="error_vpn_revoked">Android turned the VPN off: another VPN app was turned on, or the VPN was turned off in Android settings.</string>
+    <string name="error_outline_key_not_fetched">Couldn’t get the Outline key: the site that gives it out can’t be reached from your network or answered with an error. Ask the key’s provider for a regular key that starts with ss://.</string>
+    <string name="error_outline_key_pick_another">Couldn’t get the Outline key of the chosen server: the site that gives it out can’t be reached from your network or answered with an error. Connect again — the app will choose the server itself (Auto) and try to get the key through it.</string>
     <string name="action_details">Details</string>
     <string name="action_hide_details">Hide details</string>
     <string name="action_retry">Retry</string>

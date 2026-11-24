@@ -596,6 +596,8 @@
     <string name="error_key_download_failed">No se pudo descargar la clave. Revisa la conexión a internet y vuelve a intentarlo.</string>
     <string name="error_key_update_failed">No se pudo actualizar la clave. Revisa la conexión a internet y vuelve a intentarlo.</string>
     <string name="error_vpn_revoked">Android desactivó la VPN: se activó otra app de VPN o se desactivó la VPN en la configuración de Android.</string>
+    <string name="error_outline_key_not_fetched">No se pudo obtener la clave de Outline: el sitio que la entrega no es accesible desde tu red o respondió con un error. Pide a tu proveedor una clave normal que empiece por ss://.</string>
+    <string name="error_outline_key_pick_another">No se pudo obtener la clave de Outline del servidor elegido: el sitio que la entrega no es accesible desde tu red o respondió con un error. Vuelve a conectar: la app elegirá el servidor por sí misma («Automático») e intentará obtener la clave a través de él.</string>
     <string name="action_details">Detalles</string>
     <string name="action_hide_details">Ocultar detalles</string>
     <string name="action_retry">Reintentar</string>

@@ -686,6 +686,8 @@
     <string name="error_key_download_failed">Не удалось загрузить ключ. Проверьте интернет и попробуйте ещё раз.</string>
     <string name="error_key_update_failed">Ключ не обновился. Проверьте интернет и попробуйте ещё раз.</string>
     <string name="error_vpn_revoked">VPN отключён системой: включено другое VPN-приложение или VPN выключен в настройках Android.</string>
+    <string name="error_outline_key_not_fetched">Не удалось получить ключ Outline: сайт, который его выдаёт, недоступен из вашей сети или ответил ошибкой. Попросите у поставщика ключа обычный ключ, начинающийся с ss://.</string>
+    <string name="error_outline_key_pick_another">Не удалось получить ключ Outline выбранного сервера: сайт, который его выдаёт, недоступен из вашей сети или ответил ошибкой. Подключитесь ещё раз — приложение выберет сервер само («Авто») и попробует получить ключ через него.</string>
     <string name="action_details">Подробнее</string>
     <string name="action_hide_details">Скрыть подробности</string>
     <string name="action_retry">Повторить</string>

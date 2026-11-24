@@ -688,6 +688,8 @@
     <string name="error_key_download_failed">無法下載金鑰。請檢查網路連線後再試一次。</string>
     <string name="error_key_update_failed">無法更新金鑰。請檢查網路連線後再試一次。</string>
     <string name="error_vpn_revoked">Android 關閉了 VPN：可能開啟了其他 VPN 應用程式，或在 Android 設定中關閉了 VPN。</string>
+    <string name="error_outline_key_not_fetched">無法取得 Outline 金鑰：提供該金鑰的網站在您的網路中無法存取，或回傳了錯誤。請向金鑰提供者索取以 ss:// 開頭的一般金鑰。</string>
+    <string name="error_outline_key_pick_another">無法取得所選伺服器的 Outline 金鑰：提供該金鑰的網站在您的網路中無法存取，或回傳了錯誤。請再次連線，應用程式會自行選擇伺服器（「自動」），並嘗試透過它取得金鑰。</string>
     <string name="action_details">詳細資訊</string>
     <string name="action_hide_details">隱藏詳細資訊</string>
     <string name="action_retry">重試</string>

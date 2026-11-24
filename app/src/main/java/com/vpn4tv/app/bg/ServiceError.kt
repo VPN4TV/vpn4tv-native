@@ -41,6 +41,12 @@ data class ServiceError(val reason: Reason, val detail: String? = null) {
 
         /** The system took the VPN away (onRevoke): another VPN app, or the VPN turned off in Android's settings. */
         Revoked(R.string.error_vpn_revoked),
+
+        /** An Outline dynamic key did not come, none ever did, and the profile has no other server to go through. */
+        OutlineKeyNotFetched(R.string.error_outline_key_not_fetched),
+
+        /** The chosen server's Outline dynamic key did not come, none ever did; other servers are there, and the next start is on "Auto". */
+        OutlineKeyPickAnother(R.string.error_outline_key_pick_another),
     }
 
     companion object {

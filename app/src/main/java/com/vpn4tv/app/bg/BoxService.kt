@@ -37,6 +37,7 @@ import com.vpn4tv.app.database.ProfileManager
 import com.vpn4tv.app.database.Settings
 import com.vpn4tv.app.ktx.hasPermission
 import com.vpn4tv.app.utils.SupportNotes
+import com.vpn4tv.app.outline.OutlineDynamicKeys.State as OutlineKeyState
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -76,6 +77,10 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
         // How long a start waits for the one-time upgrade of the saved configs.
         private const val CONFIG_UPGRADE_WAIT_MS = 10_000L
+
+        // Outline keys that did not come before a start are fetched again after
+        // it: once when "auto" has tested its servers, once more a little later.
+        private val OUTLINE_AGAIN_PAUSES_MS = listOf(5_000L, 15_000L)
         val globalStatus = MutableLiveData(Status.Stopped)
 
         /** Why the last start failed or the VPN stopped by itself: the line under the status on Home. */
@@ -392,10 +397,20 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
             // A fresh start brings every bridge up from scratch, as before: the
             // record of what runs is cleared, so syncBridges starts them all.
-            synchronized(bridgeLock) { runningBridgeSidecars.clear() }
+            synchronized(bridgeLock) {
+                runningBridgeSidecars.clear()
+                outlineOutcomes = emptyList()
+                bridgeSession++
+            }
             markStage("bridges")
             syncBridges(profile.typed.path)?.let { error ->
                 stopAndAlert(Alert.CreateService, error)
+                return
+            }
+            // A server whose Outline key did not come has no bridge: "Connected"
+            // with it chosen, or with nothing else to go through, would be a lie.
+            outlineStartVerdict(base)?.let { (reason, detail) ->
+                stopAndAlert(Alert.CreateService, detail, reason)
                 return
             }
 
@@ -485,6 +500,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
             status.postValue(Status.Started)
             report(StartOutcome.Connected)
             SupportNotes.add("started")
+            fetchOutlineKeysAgain(profile.typed.path)
             // A report "Send to support" could not send goes now, if this start gave it a way.
             com.vpn4tv.app.utils.SupportReport.retryPendingLater(Application.application)
 
@@ -764,6 +780,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         lastProfileName = profile.name
         // Bridges first: the new config may aim at a bridge the old one did not
         // have, or at one whose link changed. Unchanged bridges keep running.
+        synchronized(bridgeLock) { outlineOutcomes = emptyList() }
         syncBridges(profile.typed.path)?.let { error ->
             failReload(Alert.CreateService, error)
             return
@@ -805,6 +822,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         }
         logRussiaDirect(routed)
         logNetwork()
+        // Keys the reload's Outline start could not fetch: again, through the tunnel.
+        fetchOutlineKeysAgain(profile.typed.path)
         RussiaDirectRuntime.onRunning(Application.application, routed)
         if (RussiaDirectRuntime.claimDnsCheck(routed)) Thread { runDnsRuHealthCheck() }.start()
 
@@ -1340,6 +1359,19 @@ class BoxService(private val service: Service, private val platformInterface: Pl
      */
     private val runningBridgeSidecars = mutableMapOf<String, String>()
 
+    /**
+     * What the last Outline start in syncBridges made of the dynamic keys (empty
+     * when it did not start the Outline bridge). Read by the start and the
+     * reload right after syncBridges.
+     */
+    private var outlineOutcomes: List<com.vpn4tv.app.outline.OutlineDynamicKeys.Outcome> = emptyList()
+
+    /**
+     * Bumped by every start and every stop of all the bridges: a key fetched
+     * again after a start is not used once the bridges it was meant for are gone.
+     */
+    @Volatile private var bridgeSession = 0
+
     private fun bridgeSidecars(profilePath: String) = listOf(
         "xray" to File(com.vpn4tv.app.converter.ConfigGenerator.xraySidecarPath(profilePath)),
         "outline" to File(com.vpn4tv.app.converter.ConfigGenerator.outlineSidecarPath(profilePath)),
@@ -1395,20 +1427,10 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         "outline" -> {
             // Dynamic keys (ssconf://) are fetched now, not at import: the
             // provider rotates servers behind them.
-            val resolved = com.vpn4tv.app.outline.OutlineDynamicKeys.resolveAndPersist(file)
-            // An endpoint with no key yet would be a direct dialer in the core.
-            val usable = com.vpn4tv.app.outline.OutlineDynamicKeys.dropUnresolved(resolved)
-            if (usable == null) {
-                Log.w(TAG, "No Outline key yet: the outline bridge is left out until one comes")
-                stopBridge("outline")
-                null
-            } else {
-                // Credentials in memory only — resolveAndPersist writes the sidecar
-                // back, and the pair must never land on disk. The DNS servers too:
-                // the bridge resolves its server by name with them, out of the tun.
-                com.vpn4tv.app.outline.OutlineBridge.start(BridgeDns.applyToEndpoints(BridgeAuth.applyToEndpoints(usable)))
-                resolved
-            }
+            val resolution = com.vpn4tv.app.outline.OutlineDynamicKeys.resolveAndPersist(file)
+            outlineOutcomes = resolution.outcomes
+            resolution.outcomes.forEach { supportLine(outlineKeyLine(it, again = false), it.state != OutlineKeyState.FETCHED) }
+            startOutline(resolution.sidecar)
         }
         "wireproxy" -> {
             com.vpn4tv.app.wireproxy.WgBridge.start(BridgeDns.applyToEndpoints(BridgeAuth.applyToEndpoints(text)))
@@ -1434,6 +1456,142 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         else -> throw IllegalArgumentException("unknown bridge $kind")
     }
 
+    /**
+     * The Outline bridge from a sidecar whose dynamic keys are resolved. Returns
+     * the sidecar to remember, or null when no endpoint has a key: an endpoint
+     * with no key yet would be a direct dialer in the core.
+     */
+    private fun startOutline(resolved: String): String? {
+        val usable = com.vpn4tv.app.outline.OutlineDynamicKeys.dropUnresolved(resolved)
+        if (usable == null) {
+            Log.w(TAG, "No Outline key yet: the outline bridge is left out until one comes")
+            stopBridge("outline")
+            return null
+        }
+        // Credentials in memory only — resolveAndPersist writes the sidecar
+        // back, and the pair must never land on disk. The DNS servers too:
+        // the bridge resolves its server by name with them, out of the tun.
+        com.vpn4tv.app.outline.OutlineBridge.start(BridgeDns.applyToEndpoints(BridgeAuth.applyToEndpoints(usable)))
+        return resolved
+    }
+
+    /**
+     * The line support reads about one dynamic key; the port is the one the
+     * core's errors name ("dial tcp 127.0.0.127:<port>: connection refused").
+     * [again]: the fetch after the start, which goes the way the app's own
+     * connections go then (through the tunnel, unless per-app settings leave
+     * the app out of it).
+     */
+    private fun outlineKeyLine(outcome: com.vpn4tv.app.outline.OutlineDynamicKeys.Outcome, again: Boolean): String {
+        val head = "outline key from ${outcome.host} (port ${outcome.port})" + if (again) ", again after the start" else ""
+        return when (outcome.state) {
+            OutlineKeyState.FETCHED -> "$head: fetched" + if (outcome.changed) ", a new one" else ""
+            OutlineKeyState.KEPT -> "$head: not fetched (${outcome.reason}), the last one that worked is used"
+            OutlineKeyState.NONE -> "$head: not fetched (${outcome.reason}), none ever was: this server is left out"
+        }
+    }
+
+    /**
+     * The verdict of OutlineKeyCheck on a start: null to go on, or what to stop
+     * with. [config] is the core's config without "Russia direct".
+     */
+    private fun outlineStartVerdict(config: String): Pair<ServiceError.Reason, String>? {
+        val none = synchronized(bridgeLock) { outlineOutcomes }.filter { it.state == OutlineKeyState.NONE }
+        if (none.isEmpty()) return null
+        val saved = com.vpn4tv.app.ui.getSavedServer(Application.application)
+        val verdict = OutlineKeyCheck.verdict(config, none.map { it.port }.toSet(), saved)
+        val detail = none.joinToString("; ") { "outline key from ${it.host} (port ${it.port}): not fetched (${it.reason})" }
+        return when (verdict) {
+            OutlineKeyCheck.Verdict.GO_ON -> null
+            OutlineKeyCheck.Verdict.NO_OTHER_SERVER -> ServiceError.Reason.OutlineKeyNotFetched to detail
+            OutlineKeyCheck.Verdict.PICK_ANOTHER -> {
+                // Servers are chosen only with the VPN on, and it cannot come up
+                // on this one: the next start goes on "Auto", as a start does
+                // when the chosen server fails its test (restoreSavedServer).
+                com.vpn4tv.app.ui.clearSavedServer(Application.application)
+                ServiceError.Reason.OutlineKeyPickAnother to detail
+            }
+        }
+    }
+
+    /**
+     * The keys that did not come before the start, fetched again once the VPN
+     * is up: the app's own connections go through the tunnel then, out through
+     * the server in use, and a key host blocked on the user's network is often
+     * reachable from there. A key that comes is written to the sidecar and the
+     * Outline bridge restarts with it; the core needs no reload, the socks
+     * outbound's port is the same. Not in proxy mode: there the app's
+     * connections go the same way as before the start.
+     */
+    private fun fetchOutlineKeysAgain(profilePath: String) {
+        if (service !is android.net.VpnService) return
+        val ports = synchronized(bridgeLock) { outlineOutcomes }
+            .filter { it.state != OutlineKeyState.FETCHED }
+            .map { it.port }
+            .toSet()
+        if (ports.isEmpty()) return
+        val session = bridgeSession
+        Thread({
+            var left = ports
+            for (pause in OUTLINE_AGAIN_PAUSES_MS) {
+                try {
+                    Thread.sleep(pause) // the first: "auto" has tested its servers
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
+                if (session != bridgeSession) return@Thread
+                val file = File(com.vpn4tv.app.converter.ConfigGenerator.outlineSidecarPath(profilePath))
+                val before = try {
+                    file.readText()
+                } catch (_: Exception) {
+                    return@Thread
+                }
+                val resolution = com.vpn4tv.app.outline.OutlineDynamicKeys.resolve(
+                    before, onlyPorts = left,
+                    waitWithEarlierMs = com.vpn4tv.app.outline.OutlineDynamicKeys.WAIT_WITHOUT_EARLIER_MS,
+                )
+                if (session != bridgeSession) return@Thread
+                resolution.outcomes.forEach { supportLine(outlineKeyLine(it, again = true), it.state != OutlineKeyState.FETCHED) }
+                if (resolution.sidecar != before) restartOutline(file, before, resolution.sidecar, session)
+                left = left - resolution.outcomes.filter { it.state == OutlineKeyState.FETCHED }.map { it.port }.toSet()
+                if (left.isEmpty()) return@Thread
+            }
+        }, "outline-key-again").apply { isDaemon = true }.start()
+    }
+
+    private fun restartOutline(file: File, before: String, resolved: String, session: Int) = synchronized(bridgeLock) {
+        // A stop, a new start, or a reload that rewrote the sidecar since the
+        // fetch began: these keys are not for the bridges running now.
+        if (session != bridgeSession || closing) return@synchronized
+        val now = try {
+            file.readText()
+        } catch (_: Exception) {
+            return@synchronized
+        }
+        if (now != before) return@synchronized
+        com.vpn4tv.app.outline.OutlineDynamicKeys.persist(file, resolved)
+        try {
+            val started = startOutline(resolved)
+            if (started != null) runningBridgeSidecars["outline"] = started else runningBridgeSidecars.remove("outline")
+            supportLine("outline bridge restarted with the keys fetched after the start", false)
+        } catch (e: Exception) {
+            // The bridge was stopped by the failed start: its servers are refused, as before the fetch.
+            runningBridgeSidecars.remove("outline")
+            supportLine("outline bridge did not restart: ${com.vpn4tv.app.utils.LogPrivacy.error(e)}", true)
+            return@synchronized
+        }
+        // The servers' delays on the list: the one that came back is tested now.
+        Thread {
+            try {
+                val client = io.nekohasekai.libbox.Libbox.newStandaloneCommandClient()
+                client.urlTest("auto")
+                client.disconnect()
+            } catch (e: Exception) {
+                Log.w(TAG, "URLTest after the Outline restart failed: ${e.message}")
+            }
+        }.start()
+    }
+
     private fun stopBridge(kind: String) {
         when (kind) {
             "xray" -> com.vpn4tv.app.xray.XrayBridge.stop()
@@ -1453,6 +1611,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         com.vpn4tv.app.olcrtc.OlcrtcBridge.stop()
         com.vpn4tv.app.trusttunnel.TrustTunnelBridge.stop()
         runningBridgeSidecars.clear()
+        bridgeSession++
     }
 
     private fun applyConfigTransforms(raw: String): String {

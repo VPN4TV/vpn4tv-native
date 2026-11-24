@@ -689,6 +689,8 @@
     <string name="error_key_download_failed">کلید دانلود نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.</string>
     <string name="error_key_update_failed">کلید به‌روزرسانی نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.</string>
     <string name="error_vpn_revoked">Android اتصال VPN را قطع کرد: برنامهٔ VPN دیگری روشن شد یا VPN در تنظیمات Android خاموش شد.</string>
+    <string name="error_outline_key_not_fetched">کلید Outline دریافت نشد: سایتی که آن را می‌دهد از شبکهٔ شما در دسترس نیست یا با خطا پاسخ داد. از ارائه‌دهندهٔ کلید یک کلید معمولی بخواهید که با ss:// شروع شود.</string>
+    <string name="error_outline_key_pick_another">کلید Outline سرور انتخاب‌شده دریافت نشد: سایتی که آن را می‌دهد از شبکهٔ شما در دسترس نیست یا با خطا پاسخ داد. دوباره وصل شوید؛ برنامه خودش سرور را انتخاب می‌کند («خودکار») و تلاش می‌کند کلید را از طریق آن دریافت کند.</string>
     <string name="action_details">جزئیات</string>
     <string name="action_hide_details">پنهان کردن جزئیات</string>
     <string name="action_retry">تلاش دوباره</string>

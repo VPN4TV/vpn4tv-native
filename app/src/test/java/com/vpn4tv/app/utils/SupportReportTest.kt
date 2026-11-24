@@ -99,6 +99,16 @@ class SupportReportTest {
         )
         assertEquals("UnknownHostException: Unable to resolve host \"bell.a4e.ar\"", SupportReport.withoutAddresses("UnknownHostException: Unable to resolve host \"bell.a4e.ar\""))
         assertEquals("HTTP 502", SupportReport.withoutAddresses("HTTP 502"))
+        // Go's words: the port after an address stays, an IPv6 address in brackets goes.
+        assertEquals(
+            "dial tcp <address>:443: connect: connection refused",
+            SupportReport.withoutAddresses("dial tcp 203.0.113.7:443: connect: connection refused"),
+        )
+        assertEquals(
+            "dial tcp [<address>]:443: connect: network is unreachable",
+            SupportReport.withoutAddresses("dial tcp [2001:db8::7]:443: connect: network is unreachable"),
+        )
+        assertEquals("link-local <address>", SupportReport.withoutAddresses("link-local fe80::1%wlan0"))
     }
 
     @Test

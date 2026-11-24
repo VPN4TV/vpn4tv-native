@@ -315,8 +315,14 @@ object SupportReport {
     private val address4 = Regex("""(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])""")
     private val address6 = Regex("""(?<![0-9a-fA-F:])(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}(?:%[0-9a-zA-Z]+)?(?![0-9a-fA-F:])""")
 
-    /** An error's words without the addresses in them: "failed to connect to bell.a4e.ar/<address> (port 443) from /<address>". */
-    internal fun withoutAddresses(text: String): String = address6.replace(address4.replace(text, "<address>"), "<address>")
+    /**
+     * An error's words without the addresses in them: "failed to connect to bell.a4e.ar/<address> (port 443) from /<address>".
+     * A port after an address stays: in "<address>:443: connection refused" the ":443:" is not an IPv6 address
+     * (one never ends in a single colon).
+     */
+    internal fun withoutAddresses(text: String): String = address6.replace(address4.replace(text, "<address>")) {
+        if (it.value.endsWith(":") && !it.value.endsWith("::")) it.value else "<address>"
+    }
 
     // A name that does not resolve can hold a connection well past its timeouts. An attempt that outlives
     // its time counts as failed; should it get through after all, the kept copy goes again under the same code.
