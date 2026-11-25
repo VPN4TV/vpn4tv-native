@@ -121,20 +121,34 @@ object ConfigGenerator {
 
     /**
      * True when [root] (a generated config) can send DNS through one of our
-     * bridges, i.e. has an outbound to the bridge host ([isBridgeOutbound]).
-     * Remote DNS then goes over TCP: olcRTC carries nothing else (a UDP query
-     * fails with "UDP is not supported by outbound"), and over Outline,
-     * AmneziaWG, TrustTunnel and xray the bridge's TCP path is the one known
-     * to work — UDP also needs the server's UDP relay (and, but for xray, a
-     * network that lets it through). BoxService checks it before it puts a
-     * UDP DNS server in.
+     * bridges, i.e. has an outbound to the bridge host ([isBridgeOutbound]),
+     * or through a proxy that carries no UDP at all ([carriesNoUdp]). Remote
+     * DNS then goes over TCP: olcRTC and naive carry nothing else (a UDP
+     * query through a chosen naive server is refused, and no name resolves
+     * when DoH is not reachable — 2026-11-25), and over Outline, AmneziaWG,
+     * TrustTunnel and xray the bridge's TCP path is the one known to work —
+     * UDP also needs the server's UDP relay (and, but for xray, a network
+     * that lets it through). The core keeps one TCP connection for all
+     * queries. BoxService checks it before it puts a UDP DNS server in.
      */
     fun dnsOverTcp(root: JSONObject): Boolean {
         val outbounds = root.optJSONArray("outbounds") ?: return false
         return (0 until outbounds.length()).any { i ->
-            outbounds.optJSONObject(i)?.let { isBridgeOutbound(it) } == true
+            outbounds.optJSONObject(i)?.let { isBridgeOutbound(it) || carriesNoUdp(it) } == true
         }
     }
+
+    private val notProxies = setOf("selector", "urltest", "direct", "block", "dns")
+
+    /**
+     * [outbound] is a proxy that sing-box cannot send UDP through
+     * ([carriesUdp]): naive without UDP over TCP (our naive servers are
+     * Caddy's forwardproxy, which does not speak it), http, the socks
+     * outbound to olcRTC. Chosen by hand, it leaves UDP nowhere to go: the
+     * core refuses it at once, apps go over TCP.
+     */
+    internal fun carriesNoUdp(outbound: JSONObject): Boolean =
+        outbound.optString("type") !in notProxies && !carriesUdp(outbound)
 
     /**
      * The TCP form of a DNS server type, for DNS that must not go over UDP:
@@ -421,9 +435,10 @@ object ConfigGenerator {
         // made only of bridges used to resolve without a detour, i.e. around
         // the tunnel with the real address, because no bridge carried UDP.
         // Where a bridge can be picked, the remote server is asked over TCP
-        // (the default DoH already is): see dnsOverTcp(root).
+        // (the default DoH already is), and so it is where a proxy that
+        // carries no UDP (naive) can be picked: see dnsOverTcp(root).
         val allBridged = proxies.all { it.isBridged() }
-        val dnsOverTcp = proxies.any { it.reachesBridge() }
+        val dnsOverTcp = proxies.any { it.reachesBridge() || carriesNoUdp(it.outbound) }
         val proxyTag = "select"
         val dns = ProxyParser.lastDns
 

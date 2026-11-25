@@ -1836,8 +1836,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
         val dns = root.optJSONObject("dns") ?: return jsonText
         val servers = dns.optJSONArray("servers") ?: return jsonText
         // dns-remote goes through the tunnel; where it can go through one of
-        // our bridges, the fallback asks the same server over TCP instead of
-        // UDP (ConfigGenerator.dnsOverTcp).
+        // our bridges or a server that carries no UDP (naive), the fallback
+        // asks the same server over TCP instead of UDP
+        // (ConfigGenerator.dnsOverTcp).
         val remoteOverTcp = com.vpn4tv.app.converter.ConfigGenerator.dnsOverTcp(root)
 
         for (i in 0 until servers.length()) {

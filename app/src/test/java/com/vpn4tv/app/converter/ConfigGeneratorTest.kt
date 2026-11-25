@@ -448,6 +448,33 @@ class ConfigGeneratorTest {
                 .put("uuid", "a3482e88-686a-4a58-8126-99c9df64b7bf").put("packet_encoding", "xudp"),
         )
         assertFalse(ConfigGenerator.dnsOverTcp(generate(vless)))
+        // naive carries no UDP (our naive servers are Caddy, without UDP over
+        // TCP): chosen by hand it leaves a UDP DNS server without an answer.
+        val naive = ProxyConfig(
+            tag = "AL11N", type = "naive", server = "n.example.net", serverPort = 443,
+            outbound = JSONObject().put("type", "naive").put("tag", "AL11N").put("server", "n.example.net").put("server_port", 443)
+                .put("username", "u").put("password", "p").put("tls", JSONObject().put("enabled", true).put("server_name", "n.example.net")),
+        )
+        assertTrue(ConfigGenerator.dnsOverTcp(generate(naive)))
+        assertTrue(ConfigGenerator.dnsOverTcp(generate(vless, naive)))
+        // A subscription that asks for UDP DNS gets it over TCP where naive can be picked.
+        ProxyParser.lastDns = SubscriptionDns(remoteDns = "udp://1.1.1.1", directDns = "9.9.9.9")
+        fun remoteType(config: JSONObject): String = config.getJSONObject("dns").getJSONArray("servers").let { servers ->
+            (0 until servers.length()).map { servers.getJSONObject(it) }.single { it.optString("tag") == "dns-remote" }
+        }.getString("type")
+        assertEquals("tcp", remoteType(generate(vless, naive)))
+        assertEquals("udp", remoteType(generate(vless)))
+    }
+
+    @Test
+    fun aProxyWithoutUdpIsOneThatCannotCarryItNotAGroup() {
+        fun ob(type: String) = JSONObject().put("type", type)
+        assertTrue(ConfigGenerator.carriesNoUdp(ob("naive")))
+        assertFalse(ConfigGenerator.carriesNoUdp(ob("naive").put("udp_over_tcp", JSONObject().put("enabled", true))))
+        assertTrue(ConfigGenerator.carriesNoUdp(ob("http")))
+        assertTrue(ConfigGenerator.carriesNoUdp(ob("socks").put("network", "tcp")))
+        for (type in listOf("vless", "hysteria2", "trojan", "shadowsocks", "socks")) assertFalse(type, ConfigGenerator.carriesNoUdp(ob(type)))
+        for (type in listOf("selector", "urltest", "direct", "block", "dns")) assertFalse(type, ConfigGenerator.carriesNoUdp(ob(type)))
     }
 
     @Test
